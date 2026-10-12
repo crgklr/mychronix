@@ -66,7 +66,7 @@ enum ChannelView {
 pub struct App {
     page: Page,
     path: Option<PathBuf>,
-    session: Option<Session>,
+    session: Option<std::sync::Arc<Session>>,
     error: Option<String>,
     /// Selected channels and the colour slot each keeps while selected.
     selected: BTreeMap<usize, usize>,
@@ -76,6 +76,11 @@ pub struct App {
     /// Shared cursor, in seconds from the start of the current window.
     cursor_s: Option<f64>,
     scroll_to_lap: bool,
+    /// Laps being compared (the first is the reference), and the compare tab.
+    compare: Vec<crate::compare::CompareLap>,
+    compare_tab: bool,
+    /// Shared cursor on the compare tab, metres along the reference lap.
+    compare_cursor_m: Option<f64>,
     /// Channel that colours the track map (None: RPM if present).
     map_channel: Option<usize>,
     pub screenshot_to: Option<PathBuf>,
@@ -139,30 +144,50 @@ impl App {
     pub fn load(&mut self, path: PathBuf) {
         match Session::open(&path) {
             Ok(mut session) => {
-                // The logger leaves driver and kart blank; use the names saved for it.
-                let logger = session.info.logger_id.map(|id| id.to_string());
-                let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-                if let Some(p) = logger.as_deref().and_then(|l| profiles.get(l)) {
-                    if session.info.driver.as_deref().unwrap_or("").is_empty() {
-                        session.info.driver = Some(p.driver.clone()).filter(|d| !d.is_empty());
-                    }
-                    if session.info.vehicle.as_deref().unwrap_or("").is_empty() {
-                        session.info.vehicle = Some(p.kart.clone()).filter(|k| !k.is_empty());
-                    }
-                }
+                self.fill_names(&mut session, &path);
                 self.selected.clear();
                 for i in default_channels(&session) {
                     self.select(i);
                 }
-                self.lap = None;
-                self.cursor_s = None;
+                // Open on the best lap with the cursor halfway round, as RaceStudio does.
+                self.lap = session.best_lap(MIN_LAP_MS).and_then(|b| session.laps.iter().position(|l| l == b));
+                self.cursor_s = self.lap.map(|i| session.laps[i].duration_ms() as f64 / 1000.0 * 0.5);
+                self.scroll_to_lap = self.lap.is_some();
                 self.map_channel = None;
                 self.error = None;
-                self.session = Some(session);
+                self.session = Some(std::sync::Arc::new(session));
                 self.path = Some(path);
                 self.page = Page::Analysis;
             }
             Err(e) => self.error = Some(format!("Couldn't open {}: {e}", file_name(&path))),
+        }
+    }
+
+    /// Fills in what the logger leaves blank: the details entered for this
+    /// session at download, else the names saved for its logger.
+    fn fill_names(&mut self, session: &mut Session, path: &std::path::Path) {
+        let blank = |v: &Option<String>| v.as_deref().unwrap_or("").is_empty();
+        let nonempty = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
+        if let Some(m) = crate::device::SessionMeta::load(path) {
+            if blank(&session.info.driver) {
+                session.info.driver = nonempty(&m.driver);
+            }
+            if blank(&session.info.vehicle) {
+                session.info.vehicle = nonempty(&m.kart);
+            }
+            if blank(&session.info.session) {
+                session.info.session = nonempty(&m.session_type);
+            }
+        }
+        let logger = session.info.logger_id.map(|id| id.to_string());
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+        if let Some(p) = logger.as_deref().and_then(|l| profiles.get(l)) {
+            if blank(&session.info.driver) {
+                session.info.driver = nonempty(&p.driver);
+            }
+            if blank(&session.info.vehicle) {
+                session.info.vehicle = nonempty(&p.kart);
+            }
         }
     }
 
@@ -173,6 +198,14 @@ impl App {
         self.lap = session.laps.iter().position(|l| *l == best);
         self.cursor_s = Some(best.duration_ms() as f64 / 1000.0 * 0.4);
         self.scroll_to_lap = true;
+    }
+
+    /// Compare tab with the best laps at this track, for screenshots.
+    pub fn demo_compare(&mut self) {
+        self.add_best_laps_here();
+        self.compare.truncate(3);
+        self.compare_tab = true;
+        self.compare_cursor_m = Some(120.0);
     }
 
     pub fn show_device_page(&mut self) {
@@ -244,7 +277,7 @@ impl eframe::App for App {
         let session = self.session.take();
         let window = session.as_ref().map(|s| self.window(s));
 
-        self.status_bar(ui, session.as_ref());
+        self.status_bar(ui, session.as_deref());
 
         egui::Panel::left("sidebar")
             .exact_size(304.0)
@@ -460,7 +493,7 @@ impl App {
                     }
                 });
                 ui.add_space(8.0);
-                search_field(ui, &mut self.session_search, "Search by session number, date or track");
+                search_field(ui, &mut self.session_search, "Search driver, kart, championship, track, comment…");
                 ui.add_space(10.0);
 
                 let needle = self.session_search.to_lowercase();
@@ -471,15 +504,24 @@ impl App {
                             && self.session_track.is_none_or(|t| s.track == Some(t))
                             && (needle.is_empty() || {
                                 let sum = &s.summary;
+                                let m = s.meta.clone().unwrap_or_default();
                                 let hay = format!(
-                                    "{} {} {} {}",
+                                    "{} {} {} {} {} {} {} {} {} {} {}",
                                     sum.number.unwrap_or(0),
                                     sum.date.map(|d| d.to_string()).unwrap_or_default(),
                                     sum.track.clone().unwrap_or_default(),
-                                    s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default()
+                                    s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default(),
+                                    if m.driver.is_empty() { driver_name(&s.logger, &profiles) } else { m.driver.clone() },
+                                    m.kart,
+                                    m.championship,
+                                    m.session_type,
+                                    m.comment,
+                                    s.logger,
+                                    sum.driver.clone().unwrap_or_default(),
                                 )
                                 .to_lowercase();
-                                hay.contains(&needle)
+                                // Every word must match somewhere, as RaceStudio's "ALL words".
+                                needle.split_whitespace().all(|w| hay.contains(w))
                             })
                     })
                     .collect();
@@ -2252,7 +2294,7 @@ fn model_from_ssid(ssid: &str) -> &'static str {
 // Sidebar: laps and channels
 
 impl App {
-    fn lap_list(&mut self, ui: &mut Ui, session: &Session) {
+    fn lap_list(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         section_header(ui, "Laps", &session.laps.len().to_string());
         let best = session.best_lap(MIN_LAP_MS).copied();
         let best_ms = best.map(|b| b.duration_ms()).unwrap_or(0);
@@ -2272,6 +2314,7 @@ impl App {
         let height = wanted.min((ui.available_height() * 0.42).max(ROW_HEIGHT * 4.0));
         let scroll_to = std::mem::take(&mut self.scroll_to_lap);
         let last = session.laps.len().saturating_sub(1);
+        let mut compare_toggle: Option<aim_xrk::Lap> = None;
 
         egui::ScrollArea::vertical().id_salt("laps").max_height(height).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
@@ -2294,6 +2337,23 @@ impl App {
                     let time_color = if is_best { theme::GOOD } else if slow[i] { DIM } else { TEXT };
                     ui.label(RichText::new(format_lap_time(lap.duration_ms())).font(medium(14.0)).color(time_color));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Add to / remove from the comparison.
+                        let in_compare = self.compare.iter().find(|c| c.lap == *lap && Some(&c.path) == self.path.as_ref()).map(|c| c.slot);
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
+                        match in_compare {
+                            Some(slot) => {
+                                ui.painter().circle_filled(rect.center(), 8.0, SERIES[slot]);
+                                Icon::Check.image(TEXT, 11.0).paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(11.0)));
+                            }
+                            None => {
+                                let tint = if resp.hovered() { TEXT } else { DIM };
+                                ui.painter().circle_stroke(rect.center(), 8.0, Stroke::new(1.2, tint));
+                                ui.painter().text(rect.center() - vec2(0.0, 1.0), egui::Align2::CENTER_CENTER, "+", medium(14.0), tint);
+                            }
+                        }
+                        if resp.on_hover_text(if in_compare.is_some() { "Remove from comparison" } else { "Add to comparison" }).clicked() {
+                            compare_toggle = Some(*lap);
+                        }
                         let delta = lap.duration_ms() - best_ms;
                         if is_best {
                             tag(ui, "Best", theme::GOOD);
@@ -2324,6 +2384,9 @@ impl App {
                 }
             }
         });
+        if let Some(lap) = compare_toggle {
+            self.toggle_compare(session, lap);
+        }
     }
 
     fn channel_list(&mut self, ui: &mut Ui, session: &Session, start_ms: i64) {
@@ -2381,12 +2444,365 @@ impl App {
 }
 
 // ---------------------------------------------------------------------------
+// Lap comparison
+
+impl App {
+    /// Adds a lap of `session` to the comparison, or removes it if it's there.
+    fn toggle_compare(&mut self, session: &std::sync::Arc<Session>, lap: aim_xrk::Lap) {
+        let Some(path) = self.path.clone() else { return };
+        if let Some(i) = self.compare.iter().position(|c| c.lap == lap && c.path == path) {
+            self.compare.remove(i);
+            return;
+        }
+        self.add_compare_lap(path, session.clone(), lap);
+    }
+
+    fn add_compare_lap(&mut self, path: PathBuf, session: std::sync::Arc<Session>, lap: aim_xrk::Lap) {
+        if self.compare.len() >= SERIES.len() || self.compare.iter().any(|c| c.lap == lap && c.path == path) {
+            return;
+        }
+        let used: Vec<usize> = self.compare.iter().map(|c| c.slot).collect();
+        let slot = (0..SERIES.len()).find(|s| !used.contains(s)).unwrap_or(0);
+        let number = path.file_stem().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+        let driver = session.info.driver.clone().filter(|d| !d.is_empty());
+        let label = [
+            Some(format!("S{} L{}", number.map(|n| n.to_string()).unwrap_or_else(|| "?".into()), lap.number)),
+            Some(format_lap_time(lap.duration_ms())),
+            driver,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("  ·  ");
+        self.compare.push(crate::compare::CompareLap::new(path, session, lap, label, slot));
+    }
+
+    /// The best lap of each downloaded session at the current session's track, fastest first.
+    fn add_best_laps_here(&mut self) {
+        let lib = self.library.take().unwrap_or_else(Library::load);
+        let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p)).and_then(|s| s.track);
+        if let Some(track) = here {
+            let mut sessions: Vec<&tracks::LocalSession> =
+                lib.sessions.iter().filter(|s| s.track == Some(track) && s.summary.best_lap_ms.is_some()).collect();
+            sessions.sort_by_key(|s| s.summary.best_lap_ms);
+            for s in sessions {
+                if self.compare.len() >= SERIES.len() {
+                    break;
+                }
+                let session = if self.path.as_ref() == Some(&s.path) {
+                    self.session.clone()
+                } else {
+                    let path = s.path.clone();
+                    Session::open(&path).ok().map(|mut x| {
+                        self.fill_names(&mut x, &path);
+                        std::sync::Arc::new(x)
+                    })
+                };
+                let Some(session) = session else { continue };
+                if let Some(best) = session.best_lap(MIN_LAP_MS).copied() {
+                    self.add_compare_lap(s.path.clone(), session, best);
+                }
+            }
+        }
+        self.library = Some(lib);
+    }
+
+    fn compare_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
+        // Lap chips: colour, label, reference marker; click to make reference, × to remove.
+        let mut make_ref = None;
+        let mut remove = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            for (k, c) in self.compare.iter().enumerate() {
+                Frame::new()
+                    .fill(if k == 0 { SURFACE_ACTIVE } else { SURFACE })
+                    .corner_radius(CornerRadius::same(255))
+                    .inner_margin(Margin { left: 12, right: 8, top: 6, bottom: 6 })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (sw, _) = ui.allocate_exact_size(vec2(16.0, 12.0), Sense::hover());
+                            ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(3.0, SERIES[c.slot]));
+                            let r = ui.add(egui::Label::new(RichText::new(&c.label).font(medium(13.5)).color(TEXT)).sense(Sense::click()));
+                            if k == 0 {
+                                ui.label(RichText::new("Reference").size(12.0).color(DIM));
+                            } else if r.on_hover_text("Make this the reference").clicked() {
+                                make_ref = Some(k);
+                            }
+                            if ui.add(Icon::X.image(DIM, 12.0).sense(Sense::click())).on_hover_text("Remove").clicked() {
+                                remove = Some(k);
+                            }
+                        });
+                    });
+            }
+            if button(ui, Some(Icon::Flag), "Add best laps at this track", false).clicked() {
+                self.add_best_laps_here();
+            }
+            if !self.compare.is_empty() && button(ui, None, "Clear", false).clicked() {
+                self.compare.clear();
+            }
+        });
+        if let Some(k) = make_ref {
+            let lap = self.compare.remove(k);
+            self.compare.insert(0, lap);
+        }
+        if let Some(k) = remove {
+            self.compare.remove(k);
+        }
+        ui.add_space(12.0);
+
+        if self.compare.len() < 2 {
+            card(ui, |ui| {
+                ui.set_min_height(160.0);
+                ui.label(RichText::new("Pick laps to compare").font(semibold(17.0)).color(TEXT));
+                ui.label(
+                    RichText::new("Use the + next to any lap in the sidebar (from this session or any other), or add your best laps at this track. The first lap is the reference the others are measured against.")
+                        .color(SECONDARY),
+                );
+            });
+            return;
+        }
+        if self.compare.iter().any(|c| c.profile.is_none()) {
+            card(ui, |ui| {
+                ui.label(RichText::new("Some of these laps have no GPS, so they can't be lined up by distance yet.").color(SECONDARY));
+            });
+            return;
+        }
+
+        let reference = self.compare[0].profile.clone().unwrap();
+        let ref_len = reference.length();
+        let channels: Vec<String> = self.selected.keys().filter_map(|&i| session.channels.get(i)).map(|c| c.name.clone()).collect();
+        let gap = 12.0;
+        let height = ui.available_height();
+        let map_w = (ui.available_width() * 0.36).clamp(280.0, 520.0);
+        let graphs_w = ui.available_width() - map_w - gap;
+        let mut hovered = None;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            let column = Layout::top_down(Align::Min);
+            ui.allocate_ui_with_layout(vec2(graphs_w, height), column, |ui| {
+                ui.set_width(graphs_w);
+                let n = (channels.len() + 1) as f32;
+                let card_h = ((ui.available_height() - 10.0 * (n - 1.0)) / n).max(150.0);
+                let link = ui.id().with("compare_x");
+                egui::ScrollArea::vertical().id_salt("compare_graphs").show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 10.0;
+                    // Time gap to the reference.
+                    let gaps: Vec<(usize, Vec<[f64; 2]>)> = self.compare[1..]
+                        .iter()
+                        .map(|c| (c.slot, crate::compare::time_gap(c.profile.as_ref().unwrap(), &reference, 600)))
+                        .collect();
+                    if let Some(h) = self.compare_graph(ui, "Time gap to reference", "s", card_h, link, false, &gaps, ref_len, true) {
+                        hovered = Some(h);
+                    }
+                    for (k, name) in channels.iter().enumerate() {
+                        let lines: Vec<(usize, Vec<[f64; 2]>)> = self
+                            .compare
+                            .iter()
+                            .filter_map(|c| {
+                                c.session.channels.iter().find(|ch| &ch.name == name).map(|ch| (c.slot, crate::compare::channel_on_distance(c, ch, ref_len)))
+                            })
+                            .collect();
+                        let units = session.channels.iter().find(|c| &c.name == name).map(|c| pretty_units(&c.units).to_string()).unwrap_or_default();
+                        if let Some(h) = self.compare_graph(ui, name, &units, card_h, link, k + 1 == channels.len(), &lines, ref_len, false) {
+                            hovered = Some(h);
+                        }
+                    }
+                });
+            });
+            ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
+                ui.set_width(map_w);
+                self.compare_map(ui, &reference);
+            });
+        });
+        if hovered.is_some() {
+            self.compare_cursor_m = hovered;
+        }
+    }
+
+    /// One graph card over distance: a line per lap, readouts at the cursor in the header.
+    #[allow(clippy::too_many_arguments)]
+    fn compare_graph(
+        &self,
+        ui: &mut Ui,
+        title: &str,
+        units: &str,
+        height: f32,
+        link: egui::Id,
+        x_axis: bool,
+        lines: &[(usize, Vec<[f64; 2]>)],
+        ref_len: f64,
+        zero_line: bool,
+    ) -> Option<f64> {
+        let mut hovered = None;
+        let cursor = self.compare_cursor_m;
+        graph_card(ui, height, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(title).font(medium(14.5)).color(TEXT));
+                if !units.is_empty() {
+                    ui.label(RichText::new(units).size(13.0).color(DIM));
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(x) = cursor {
+                        for (slot, pts) in lines.iter().rev() {
+                            let i = pts.partition_point(|p| p[0] < x).min(pts.len().saturating_sub(1));
+                            if let Some(p) = pts.get(i) {
+                                let text = if zero_line { format!("{:+.2}", p[1]) } else { format!("{:.0}", p[1]) };
+                                ui.label(RichText::new(text).font(semibold(14.0)).color(TEXT));
+                                let (sw, _) = ui.allocate_exact_size(vec2(12.0, 10.0), Sense::hover());
+                                ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(3.0, SERIES[*slot]));
+                            }
+                        }
+                    }
+                });
+            });
+            let response = Plot::new(("compare", title))
+                .height(ui.available_height())
+                .show_background(false)
+                .grid_color(GRID)
+                .show_axes([x_axis, true])
+                .y_axis_min_width(46.0)
+                .show_x(false)
+                .show_y(false)
+                .cursor_color(DIM)
+                .link_axis(link, [true, false])
+                .link_cursor(link, [true, false])
+                .allow_zoom([true, false])
+                .allow_drag([true, false])
+                .allow_scroll(false)
+                .include_x(0.0)
+                .include_x(ref_len)
+                .x_axis_formatter(|mark, _| format!("{:.0} m", mark.value))
+                .show(ui, |plot| {
+                    if zero_line {
+                        plot.hline(egui_plot::HLine::new("level", 0.0).color(DIM).width(1.0));
+                    }
+                    for (slot, pts) in lines {
+                        plot.line(Line::new(format!("lap{slot}"), PlotPoints::from(pts.clone())).color(SERIES[*slot]).width(2.0));
+                    }
+                    if let Some(x) = cursor {
+                        plot.vline(VLine::new("cursor", x).color(SECONDARY).width(1.0));
+                    }
+                    plot.pointer_coordinate()
+                });
+            if let Some(p) = response.inner {
+                hovered = Some(p.x.clamp(0.0, ref_len));
+            }
+        });
+        hovered
+    }
+
+    /// The reference lap's line, coloured by where the second lap gains (blue)
+    /// or loses (red) time against it, with the cursor.
+    fn compare_map(&mut self, ui: &mut Ui, reference: &crate::compare::DistanceProfile) {
+        let ref_lap = self.compare[0].clone();
+        let other = self.compare[1].clone();
+        let Some(gps) = ref_lap.session.gps.as_ref() else { return };
+        let lo = gps.times_ms.partition_point(|&t| t < ref_lap.lap.start_ms);
+        let hi = gps.times_ms.partition_point(|&t| t <= ref_lap.lap.end_ms);
+        if hi < lo + 2 {
+            return;
+        }
+        let gaps = crate::compare::time_gap(other.profile.as_ref().unwrap(), reference, 600);
+        // Rate the gap changes per metre: positive means the other lap is losing time there.
+        let rate_at = |d: f64| {
+            let i = gaps.partition_point(|p| p[0] < d).clamp(1, gaps.len() - 1);
+            let (a, b) = (gaps[i - 1], gaps[i]);
+            (b[1] - a[1]) / (b[0] - a[0]).max(1e-6)
+        };
+        let rates: Vec<f64> = (lo..hi).map(|i| rate_at(reference.dist_at(gps.times_ms[i] as f64))).collect();
+        let scale = rates.iter().map(|r| r.abs()).fold(0.0_f64, f64::max).max(1e-6) * 0.6;
+
+        Frame::new()
+            .fill(SURFACE)
+            .corner_radius(CornerRadius::same(theme::RADIUS))
+            .inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 12 })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.set_height(ui.available_height() - 24.0);
+                ui.horizontal(|ui| {
+                    ui.add(Icon::MapPin.image(DIM, 16.0));
+                    ui.label(RichText::new("Where time changes").font(medium(14.5)).color(TEXT));
+                });
+                ui.label(RichText::new(format!("{} against the reference", other.label)).size(12.5).color(SECONDARY));
+                let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), (ui.available_height() - 40.0).max(120.0)), Sense::hover());
+                let (lat0, lon0) = (gps.latitude[lo], gps.longitude[lo]);
+                let kx = 111_320.0 * lat0.to_radians().cos();
+                let xy: Vec<(f64, f64)> = (lo..hi).map(|i| ((gps.longitude[i] - lon0) * kx, (gps.latitude[i] - lat0) * 110_540.0)).collect();
+                let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+                for &(x, y) in &xy {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+                let area = rect.shrink(12.0);
+                let s = (area.width() as f64 / (x1 - x0).max(1.0)).min(area.height() as f64 / (y1 - y0).max(1.0));
+                let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+                let pts: Vec<egui::Pos2> =
+                    xy.iter().map(|&(x, y)| pos2(area.center().x + ((x - cx) * s) as f32, area.center().y - ((y - cy) * s) as f32)).collect();
+                let painter = ui.painter_at(rect);
+                for k in 0..pts.len() - 1 {
+                    painter.line_segment([pts[k], pts[k + 1]], Stroke::new(4.0, gain_color((rates[k] / scale) as f32)));
+                }
+                // Hover the map to move the cursor.
+                if let Some(pointer) = response.hover_pos() {
+                    let (k, d) = pts.iter().enumerate().map(|(k, p)| (k, p.distance_sq(pointer))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+                    if d < 28.0 * 28.0 {
+                        self.compare_cursor_m = Some(reference.dist_at(gps.times_ms[lo + k] as f64));
+                    }
+                }
+                if let Some(m) = self.compare_cursor_m {
+                    let t = reference.time_at(m);
+                    let k = gps.times_ms[lo..hi].partition_point(|&g| (g as f64) < t).min(pts.len() - 1);
+                    painter.circle_filled(pts[k], 7.0, SURFACE);
+                    painter.circle_filled(pts[k], 5.0, TEXT);
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Gaining").size(12.0).color(DIM));
+                    let (bar, _) = ui.allocate_exact_size(vec2(140.0, 8.0), Sense::hover());
+                    for j in 0..40 {
+                        let r = Rect::from_min_size(pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
+                        ui.painter().rect_filled(r, 0.0, gain_color(-1.0 + 2.0 * j as f32 / 39.0));
+                    }
+                    ui.label(RichText::new("Losing time").size(12.0).color(DIM));
+                });
+            });
+    }
+}
+
+/// Diverging colour for time gained (−1, blue) through even (0, grey) to lost (+1, red).
+fn gain_color(t: f32) -> Color32 {
+    const GAIN: Color32 = Color32::from_rgb(0x39, 0x87, 0xe5);
+    const EVEN: Color32 = Color32::from_rgb(0x58, 0x5e, 0x66);
+    const LOSE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
+    let t = t.clamp(-1.0, 1.0);
+    if t < 0.0 { mix(EVEN, GAIN, -t) } else { mix(EVEN, LOSE, t) }
+}
+
+// ---------------------------------------------------------------------------
 // Analysis page
 
 impl App {
-    fn analysis(&mut self, ui: &mut Ui, session: &Session, start_ms: i64, end_ms: i64) {
+    fn analysis(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
         self.page_header(ui, session);
-        ui.add_space(18.0);
+        ui.add_space(14.0);
+        // Session / Compare tabs.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if chip(ui, "Session", !self.compare_tab).clicked() {
+                self.compare_tab = false;
+            }
+            let label = if self.compare.is_empty() { "Compare".to_string() } else { format!("Compare  {}", self.compare.len()) };
+            if chip(ui, &label, self.compare_tab).clicked() {
+                self.compare_tab = true;
+            }
+        });
+        ui.add_space(14.0);
+        if self.compare_tab {
+            self.compare_view(ui, session);
+            return;
+        }
         summary_tiles(ui, session);
         ui.add_space(22.0);
 
