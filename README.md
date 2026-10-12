@@ -29,6 +29,11 @@ works today:
 - **Lap by lap** (RaceStudio's channels report): one row per lap with chosen statistics (RPM, speed, EGT,
   lateral and braking g by default; presets for engine and driving), max/min/
   average/std dev over the laps you tick, and any column graphed by lap.
+- **Splits** (RaceStudio's split times report): each lap's time through 2–8
+  splits, shown as times or against the best split or best lap, each split or
+  running total, shaded fastest to slowest; best theoretical and best rolling
+  laps; average, median, slowest and std dev; per-split details (speed through
+  it, time and distance driven by lap) and a map of every lap through it.
 - **Lap comparison:** overlay up to eight laps from any sessions, lined up by
   distance around the track, with the time gap to a reference lap and a map of
   where time is gained and lost.
@@ -69,14 +74,9 @@ Roughly in priority order.
 - [ ] **Lap comparison, more:** the time-change map for every compared lap, not
       just the second; a "differential" view beside the gap; a time-based mode
       for laps without GPS.
-- [ ] **Split report** per session, as in RaceStudio: absolute or cumulative
-      times, against the best split or the best lap, cells shaded best to
-      worst, and statistics (average, median, best theoretical, slowest,
-      standard deviation, best rolling); per-split graphs.
-- [ ] **Split divisions:** by corners and straights, from the track's official
-      splits, or N even segments; rename, divide, merge and drag splits; saved
-      per track. Split bands over the distance graphs, double-click to zoom
-      into one.
+- [ ] **Split divisions:** by corners and straights, or the track's official
+      splits; rename, divide, merge and drag splits; saved per track. Split
+      bands over the distance graphs, double-click to zoom into one.
 - [ ] **Tracks:** make a custom track from a session's lap; import and export
       `.tkk` files; show the track's local time and time zone.
 - [ ] **Device information:** firmware version, the tracks stored on the
