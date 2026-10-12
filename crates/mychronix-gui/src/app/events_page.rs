@@ -297,8 +297,26 @@ impl App {
         }
 
         let stats = driver_stats(lib, profiles, e, &self.peak_egt);
+        let setups = crate::setup::resolve(lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
         for (k, d) in stats.iter().enumerate() {
-            if let Some(a) = driver_card(ui, lib, d, SERIES[k % SERIES.len()]) {
+            // Setup at the start of the event, then each change during it.
+            let mine: Vec<usize> = e.sessions.iter().copied().filter(|&i| driver_for(&lib.sessions[i], profiles).eq_ignore_ascii_case(&d.name)).collect();
+            let mut setup_lines = Vec::new();
+            if let Some(&first) = mine.first() {
+                let start = setups[first].setup.summary();
+                if !start.is_empty() {
+                    setup_lines.push((false, format!("Setup: {start}")));
+                }
+                for &i in &mine[1..] {
+                    if !setups[i].changes.is_empty() {
+                        setup_lines.push((true, format!("Session {}: {}", lib.sessions[i].summary.number.unwrap_or(0), setups[i].changes.join(", "))));
+                    }
+                }
+                if !setups[first].changes.is_empty() {
+                    setup_lines.insert(1.min(setup_lines.len()), (true, format!("Changed for this event: {}", setups[first].changes.join(", "))));
+                }
+            }
+            if let Some(a) = driver_card(ui, lib, d, SERIES[k % SERIES.len()], &setup_lines) {
                 action = Some(a);
             }
             ui.add_space(12.0);
@@ -349,7 +367,8 @@ impl App {
             ui.add_space(14.0);
         }
 
-        // Sessions by day.
+        // Sessions by day, with setup changes flagged.
+        let setups = crate::setup::resolve(lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
         let mut days: Vec<aim_xrk::summary::Date> = e.sessions.iter().filter_map(|&i| lib.sessions[i].summary.date).collect();
         days.dedup();
         for day in days {
@@ -375,7 +394,7 @@ impl App {
                 if events::is_warm_up(&s.summary) {
                     who = format!("Warm-up  ·  {who}");
                 }
-                if session_row(ui, lib, i, &who, best).clicked() {
+                if session_row(ui, lib, i, &who, best, !setups[i].changes.is_empty()).clicked() {
                     action = Some(DetailAction::Open(s.path.clone(), None));
                 }
             }
@@ -574,7 +593,7 @@ fn driver_stats(
 }
 
 /// A driver's card: name and kart, then fastest lap, sessions, laps, time, peaks.
-fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32) -> Option<DetailAction> {
+fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setup_lines: &[(bool, String)]) -> Option<DetailAction> {
     let mut action = None;
     card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -637,6 +656,9 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32) -> O
                 }
             });
             ui.add_space(8.0);
+        }
+        for (changed, line) in setup_lines {
+            ui.label(RichText::new(line).size(12.5).color(if *changed { theme::FAVORITE } else { SECONDARY }));
         }
     });
     action

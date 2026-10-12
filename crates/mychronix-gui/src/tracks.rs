@@ -87,6 +87,8 @@ pub struct LocalSession {
     pub track: Option<usize>,
     /// Driver, kart, championship and comment entered when it was downloaded.
     pub meta: Option<crate::device::SessionMeta>,
+    /// Its own setup sheet, when one was written for it.
+    pub setup: Option<crate::setup::Setup>,
 }
 
 #[derive(Debug, Default)]
@@ -230,7 +232,8 @@ impl Library {
             if let Some(i) = track {
                 lib.tracks[i].sessions.push(session);
             }
-            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta });
+            let setup = crate::setup::Setup::load(&xrz);
+            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup });
         }
         for t in &mut lib.tracks {
             t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));

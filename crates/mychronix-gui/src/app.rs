@@ -9,6 +9,7 @@ use eframe::egui::{
 use egui_plot::{Line, Plot, PlotPoints, VLine};
 
 mod events_page;
+mod setup_ui;
 
 use crate::splits;
 use crate::tracks::{self, Kind, Library};
@@ -38,6 +39,11 @@ struct DownloadDialog {
     /// Tracks the logger recorded for the selected sessions; more than one means
     /// each session keeps its own.
     detected: Vec<String>,
+    /// Setup for these sessions, starting from the logger's latest; saved on the
+    /// earliest one only when it changed or has notes.
+    setup: crate::setup::Setup,
+    setup_before: crate::setup::Setup,
+    setup_open: bool,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +98,12 @@ pub struct App {
     peak_egt: std::collections::HashMap<PathBuf, Option<f64>>,
     peak_egt_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<f64>)>>,
     peak_egt_asked: std::collections::HashSet<PathBuf>,
+    /// Setup sheets: baselines, the editor, the open session's measured RPM per km/h,
+    /// and a sheet to write once a download finishes.
+    setup_baselines: Option<crate::setup::Baselines>,
+    setup_edit: Option<setup_ui::SetupEdit>,
+    measured_ratio: Option<f64>,
+    pending_setup: Option<(PathBuf, crate::setup::Setup)>,
     /// Channel that colours the track map (None: RPM if present).
     map_channel: Option<usize>,
     pub screenshot_to: Option<PathBuf>,
@@ -156,6 +168,7 @@ impl App {
         match Session::open(&path) {
             Ok(mut session) => {
                 self.fill_names(&mut session, &path);
+                self.measured_ratio = crate::setup::measured_rpm_per_kmh(&session);
                 self.selected.clear();
                 for i in default_channels(&session) {
                     self.select(i);
@@ -225,6 +238,13 @@ impl App {
 
     pub fn show_tracks_page(&mut self) {
         self.page = Page::Tracks;
+    }
+
+    /// The setup in force for a logger after its newest session.
+    fn latest_setup(&mut self, logger: &str) -> crate::setup::Setup {
+        let lib = self.library.get_or_insert_with(Library::load);
+        let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
+        crate::setup::latest(lib, baselines, logger)
     }
 
     pub fn show_events_page(&mut self) {
@@ -447,6 +467,7 @@ impl App {
             profiles.get(logger).map(|p| p.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("Logger {logger}"))
         };
 
+        let setups = crate::setup::resolve(&lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
         let raced: Vec<usize> = {
             let mut v: Vec<usize> = lib.sessions.iter().filter_map(|s| s.track).collect();
             v.sort();
@@ -581,7 +602,7 @@ impl App {
                         for &i in day {
                             let s = &lib.sessions[i];
                             let driver = s.meta.as_ref().map(|m| m.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| driver_name(&s.logger, &profiles));
-                            if session_row(ui, &lib, i, &driver, best).clicked() {
+                            if session_row(ui, &lib, i, &driver, best, !setups[i].changes.is_empty()).clicked() {
                                 open = Some(lib.sessions[i].path.clone());
                             }
                         }
@@ -634,7 +655,7 @@ impl App {
 }
 
 /// One session in the list: number, time, driver; laps and best lap on the right.
-fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>) -> egui::Response {
+fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>, setup_changed: bool) -> egui::Response {
     let s = &lib.sessions[i];
     let sum = &s.summary;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
@@ -648,7 +669,13 @@ fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Opt
         }
         let (l, r) = (rect.left() + 14.0, rect.right() - 14.0);
         let (top, bottom) = (rect.top() + 17.0, rect.top() + 35.0);
-        p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.5), TEXT);
+        let title = p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.5), TEXT);
+        if setup_changed {
+            let galley = p.layout_no_wrap("Setup changed".into(), medium(11.5), theme::FAVORITE);
+            let tag = Rect::from_min_size(pos2(title.right() + 10.0, top - galley.size().y / 2.0 - 3.0), galley.size() + vec2(14.0, 6.0));
+            p.rect_filled(tag, CornerRadius::same(255), theme::FAVORITE.gamma_multiply(0.16));
+            p.galley(tag.min + vec2(7.0, 3.0), galley, theme::FAVORITE);
+        }
         let track = s.track.map(|t| lib.tracks[t].name.clone()).or(sum.track.clone()).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
         let line = [sum.start_time.clone().map(|t| t.get(..5).unwrap_or(&t).to_string()), Some(driver.to_string()), Some(track), championship]
@@ -1765,6 +1792,11 @@ impl App {
                     self.dev_progress = Some((index, count, file, done, total));
                 }
                 Event::Downloaded { saved } => {
+                    if let Some((path, setup)) = self.pending_setup.take() {
+                        if let Err(e) = setup.save(&path) {
+                            self.error = Some(format!("Couldn't save the setup: {e}"));
+                        }
+                    }
                     self.dev_busy = None;
                     self.dev_progress = None;
                     self.dev_message = Some((true, format!("Downloaded {saved} session{}. They're on the Sessions page.", if saved == 1 { "" } else { "s" })));
@@ -1853,6 +1885,9 @@ impl App {
                     ..Default::default()
                 },
                 detected: if multi { vec!["NKA".into(), "mka".into()] } else { vec!["mka".into()] },
+                setup: self.latest_setup(&id),
+                setup_before: self.latest_setup(&id),
+                setup_open: false,
             });
         }
         self.device_status(ui);
@@ -1963,6 +1998,8 @@ impl App {
             v.sort_by(|a, b| b.name.cmp(&a.name));
             v
         };
+        let logger_id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
+        let setup_now = self.latest_setup(&logger_id);
         let summary_of = |name: &str| self.dev_summaries.iter().find(|s| s.file.as_deref() == Some(name)).cloned();
         card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1989,6 +2026,9 @@ impl App {
                                 comment: String::new(),
                             },
                             detected,
+                            setup: setup_now.clone(),
+                            setup_before: setup_now.clone(),
+                            setup_open: false,
                         });
                     }
                     if chip(ui, "None", false).clicked() {
@@ -2067,6 +2107,9 @@ impl App {
         let lib = self.library.take().unwrap_or_else(Library::load);
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let s = Suggestions::gather(&lib, &profiles);
+        self.library = Some(lib);
+        let tyres = self.tyre_suggestions();
+        let lib = self.library.take().unwrap();
         let multiple = dlg.detected.len() > 1;
         let mut open = true;
         let mut go = false;
@@ -2122,6 +2165,26 @@ impl App {
                         });
                     }
                     ui.end_row();
+                    label(ui, "Setup");
+                    ui.vertical(|ui| {
+                        let summary = dlg.setup.summary();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(if summary.is_empty() { "None recorded yet".to_string() } else { summary }).color(TEXT));
+                            let toggle = if dlg.setup_open { "Done" } else { "Change" };
+                            if ui.add(egui::Label::new(RichText::new(toggle).color(theme::FAVORITE)).sense(Sense::click())).clicked() {
+                                dlg.setup_open = !dlg.setup_open;
+                            }
+                        });
+                        let changes = dlg.setup.changes_from(&dlg.setup_before);
+                        let note = if changes.is_empty() { "Same as last time.".to_string() } else { format!("Changed: {}", changes.join(", ")) };
+                        ui.label(RichText::new(note).size(12.5).color(if changes.is_empty() { DIM } else { theme::FAVORITE }));
+                    });
+                    ui.end_row();
+                    if dlg.setup_open {
+                        ui.label("");
+                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tyres, field_w));
+                        ui.end_row();
+                    }
                     label(ui, "Comment");
                     ui.add(egui::TextEdit::multiline(&mut dlg.meta.comment).hint_text("Optional: conditions, setup, how it went").font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_rows(2).desired_width(field_w));
                     ui.end_row();
@@ -2162,6 +2225,13 @@ impl App {
                     (e.clone(), meta)
                 })
                 .collect();
+            // A setup sheet goes on the earliest session only, and only when there's something new.
+            let changed = !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
+            let earliest = files.iter().map(|(e, _)| e.name.clone()).min();
+            self.pending_setup = match (changed, earliest, self.logger_dir()) {
+                (true, Some(name), Some(dir)) => Some((dir.join(name), dlg.setup.clone())),
+                _ => None,
+            };
             if std::env::var("MYCHRONIX_FAKE_DEVICE").is_ok() {
                 // Preview mode: there's no MyChron to download from.
                 self.dev_message = Some((true, format!(
@@ -2821,7 +2891,9 @@ impl App {
             return;
         }
         summary_tiles(ui, session);
-        ui.add_space(22.0);
+        ui.add_space(12.0);
+        self.setup_strip(ui);
+        ui.add_space(18.0);
 
         ui.horizontal(|ui| {
             match self.lap.and_then(|i| session.laps.get(i)) {

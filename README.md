@@ -31,6 +31,10 @@ works today:
   laps, time on track, fastest lap, peak RPM and EGT and top speed, best lap
   through the event, and a season summary per championship. Engine warm-ups
   are listed but left out of the numbers.
+- **Setup sheets:** gearing, tyres and pressures, weight and ballast, jetting
+  and notes per session, as RaceStudio's log sheets. A session without its own
+  sheet uses the previous one, changes are flagged on the session and the
+  event, and the gearing is checked against RPM and GPS speed.
 - **Tracks:** AiM's track database by country with venue details, outlines,
   elevation, favourites, your speed on the track with braking points, splits
   with sector times and an ideal lap, map or satellite view.
@@ -74,6 +78,9 @@ Roughly in priority order.
 - [ ] **Channel reports:** min/max/average per lap and session, histograms
       (e.g. time in each RPM band), and scatter plots of one channel against
       another.
+- [ ] **Gearing calculator:** predicted RPM at the end of each track's longest
+      straight for a sprocket change, from your data at that track or a similar
+      one.
 - [ ] **Export:** sessions and laps to CSV.
 - [ ] **Writing to the logger** (custom tracks, settings), only once that part
       of the protocol is properly understood. Firmware updates are out of scope.
@@ -94,7 +101,8 @@ command-line tool to `~/.local/bin`, and adds a launcher with its icon to your
 app menu.
 
 Data lives in `~/Mychronix/`: sessions under `sessions/<logger id>/`, your
-names, favourites and events as small JSON files.
+names, favourites, events and setups as small JSON files; each session's setup
+sheet sits beside it as `a_NNNN.setup.json`.
 
 ### AiM track database
 
