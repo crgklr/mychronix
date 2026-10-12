@@ -15,6 +15,7 @@ mod app;
 mod compare;
 mod countries;
 mod device;
+mod events;
 mod profiles;
 mod splits;
 mod theme;
@@ -73,6 +74,7 @@ fn main() -> eframe::Result {
                 Ok("device") => app.show_device_page(),
                 Ok("tracks") => app.show_tracks_page(),
                 Ok("sessions") => app.show_sessions_page(),
+                Ok("events") => app.show_events_page(),
                 _ => {}
             }
             app.screenshot_to = screenshot;
