@@ -11,6 +11,7 @@ name = "mychronix"
 path = "src/main.rs"
 
 [dependencies]
+log.workspace = true
 aim-xrk.workspace = true
 anyhow.workspace = true
 clap.workspace = true

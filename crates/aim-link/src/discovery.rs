@@ -43,6 +43,7 @@ impl Beacon {
 /// when something else (RS3 itself) already holds it. The logger answers
 /// either way.
 pub fn probe(target: Ipv4Addr, timeout: Duration) -> Result<Beacon, Error> {
+    log::trace!("aim-ka probe to {target}");
     let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT))
         .or_else(|_| UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))?;
     let deadline = Instant::now() + timeout;

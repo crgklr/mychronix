@@ -19,8 +19,12 @@ works today:
 - **Download** sessions from a MyChron 5/6 over its WiFi, including joining the
   logger's network from the app, with RaceStudio-style session details
   (driver, kart, championship, session type, track, comment).
-- **Sessions:** every downloaded session by race day, with best laps and
-  per-logger driver and kart names.
+- **Garage:** the home page. Your MyChrons and whether they're connected,
+  seat time per driver, and each kart with the setup it's running. Add and
+  edit drivers and karts there: a kart has its engine, usual driver, the
+  MyChron mounted on it and a baseline setup.
+- **Sessions:** every downloaded session by race day, with best laps, named
+  after the kart its MyChron is on.
 - **Analysis:** channels over time or distance with a shared cursor and the
   track map coloured by any channel; every lap as a strip across the top (best
   lap matching the logger's own, out/in and slow laps dimmed); channels added
@@ -50,7 +54,7 @@ works today:
   are listed but left out of the numbers.
 - **Setup sheets:** gearing, tyres and pressures, weight and ballast, jetting
   and notes per session, as RaceStudio's log sheets. A session without its own
-  sheet uses the previous one, changes are flagged on the session and the
+  sheet uses the previous one (the first uses the kart's baseline), changes are flagged on the session and the
   event, and the gearing is checked against RPM and GPS speed.
 - **Tracks:** AiM's track database by country with venue details, outlines,
   elevation, favourites, your speed on the track with braking points, splits
@@ -62,7 +66,7 @@ Mychronix only ever reads from the logger.
 
 Roughly in priority order.
 
-- [ ] **MyChron 4:** connect over USB and read its sessions; compare laps
+- [ ] **MyChron 4:** read its sessions through AiM's data key (CAN-to-USB on the 5-pin Binder connector); compare laps
       timed by the infrared beacon (no GPS) along time instead of distance.
 - [ ] **Live device test:** confirm joining, listing, downloading and
       disconnecting from the Device page end to end on a MyChron 6.
@@ -108,7 +112,18 @@ app menu.
 
 Data lives in `~/Mychronix/`: sessions under `sessions/<logger id>/`, your
 names, favourites, events and setups as small JSON files; each session's setup
-sheet sits beside it as `a_NNNN.setup.json`.
+sheet sits beside it as `a_NNNN.setup.json`. A file that can't be read is kept as
+`<name>.damaged-<time>.json` rather than overwritten, and if Mychronix ever
+crashes the details go to `~/.cache/mychronix/crash.log`.
+
+### Logs
+
+Mychronix keeps a log at `~/.cache/mychronix/mychronix.log` (rolled over at
+1 MB): startup, library loads, every MyChron scan, WiFi change, listing and
+download, and every error shown on screen. Start it with `MYCHRONIX_LOG=debug`
+for more (each session it lists, each WiFi command), or `MYCHRONIX_LOG=trace`
+to record every frame exchanged with the MyChron. The command-line tool takes
+`-v` / `-vv` for the same, printed to the terminal.
 
 ### AiM track database
 

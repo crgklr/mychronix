@@ -11,8 +11,26 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
+    /// Show what's happening: -v for each step, -vv for every frame exchanged with the MyChron.
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
     #[command(subcommand)]
     command: Command,
+}
+
+/// Prints log messages to the terminal (stderr), at the level -v asks for.
+struct StderrLog(log::LevelFilter);
+
+impl log::Log for StderrLog {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= self.0 && (m.target().starts_with("aim_") || m.target().starts_with("mychronix"))
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            eprintln!("{:<5} {}: {}", r.level(), r.target(), r.args());
+        }
+    }
+    fn flush(&self) {}
 }
 
 #[derive(Subcommand)]
@@ -58,7 +76,16 @@ enum DeviceCommand {
 }
 
 fn main() -> anyhow::Result<()> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    let level = match cli.verbose {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    if log::set_boxed_logger(Box::new(StderrLog(level))).is_ok() {
+        log::set_max_level(level);
+    }
+    match cli.command {
         Command::Info { file, channels } => info(&file, channels),
         Command::Sessions { dir } => local_sessions(dir),
         Command::Device(cmd) => device(cmd),
@@ -169,6 +196,11 @@ fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
     println!("Logger {id}: {} sessions; saving to {}", sessions.len(), dir.display());
     let (mut saved, mut skipped) = (0, 0);
     for entry in wanted {
+        // The name comes from the logger: never let it point outside this folder.
+        if !aim_link::is_safe_file_name(&entry.name) {
+            eprintln!("Skipping a file with an unusable name: {:?}", entry.name);
+            continue;
+        }
         let target = dir.join(&entry.name);
         if already_saved(&target, entry.size) {
             skipped += 1;

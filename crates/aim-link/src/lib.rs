@@ -11,7 +11,7 @@ pub mod client;
 pub mod discovery;
 pub mod frame;
 
-pub use client::{DirEntry, Logger, SESSIONS_DIR, TRACKS_DIR};
+pub use client::{DirEntry, Logger, MAX_FILE_BYTES, SESSIONS_DIR, TRACKS_DIR, is_safe_file_name};
 pub use discovery::{AP_ADDRESS, Beacon, probe};
 
 /// TCP port for the logger's data protocol.

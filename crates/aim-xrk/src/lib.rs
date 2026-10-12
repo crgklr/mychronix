@@ -119,8 +119,14 @@ impl Session {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
-        let file = libxrk::read_xrk(data).map_err(|e| Error::Parse(e.to_string()))?;
-        Ok(Self::from(file))
+        // The reader is third-party code working on whatever file it's given; a
+        // damaged file must come back as an error, never take the app down.
+        let read = std::panic::catch_unwind(|| libxrk::read_xrk(data).map(Self::from));
+        match read {
+            Ok(Ok(session)) => Ok(session),
+            Ok(Err(e)) => Err(Error::Parse(e.to_string())),
+            Err(_) => Err(Error::Parse("the file is damaged or in a format this version can't read".into())),
+        }
     }
 
     pub fn channel(&self, name: &str) -> Option<&Channel> {

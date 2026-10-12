@@ -138,7 +138,7 @@ impl App {
                         .color(SECONDARY),
                 );
                 ui.add_space(10.0);
-                setup_fields(ui, "setup_edit", &mut edit.setup, &tyres, 400.0);
+                setup_fields(ui, "setup_edit", &mut edit.setup, &tyres, 400.0, true);
                 ui.add_space(10.0);
                 let changes = edit.setup.changes_from(&edit.before);
                 let note = if changes.is_empty() { "Same as the session before.".to_string() } else { format!("Changes: {}", changes.join(", ")) };
@@ -190,8 +190,8 @@ impl App {
     }
 }
 
-/// The setup fields, as a two-column grid.
-pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String], width: f32) {
+/// The setup fields, as a two-column grid; `notes` adds the session's notes.
+pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String], width: f32, notes: bool) {
     let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
     let small = |ui: &mut Ui, value: &mut String, hint: &str, unit: &str| {
         ui.horizontal(|ui| {
@@ -227,6 +227,9 @@ pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String
         label(ui, "Jetting");
         ui.add(egui::TextEdit::singleline(&mut s.jetting).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(width).hint_text("From the IAME Swift app, or main jet / needle"));
         ui.end_row();
+        if !notes {
+            return;
+        }
         label(ui, "Notes");
         ui.add(
             egui::TextEdit::multiline(&mut s.notes)

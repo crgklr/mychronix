@@ -84,6 +84,8 @@ fastframe_icons::icons! {
         ChevronRight => lucide "chevron-right",
         Clock => lucide "clock",
         Settings => lucide "settings",
+        Plus => lucide "plus",
+        Pencil => lucide "pencil",
         House => "house",
         /// A MyChron: its case, screen and two buttons (Mychronix's own, in Lucide's style).
         Mychron => "mychron",

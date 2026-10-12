@@ -16,12 +16,14 @@ mod charts;
 mod compare;
 mod countries;
 mod device;
+mod logging;
 mod events;
 mod profiles;
 mod report;
 mod setup;
 mod split_report;
 mod splits;
+mod storage;
 mod theme;
 mod units;
 mod tracks;
@@ -37,7 +39,45 @@ fn app_icon() -> egui::IconData {
     egui::IconData { width: image.width(), height: image.height(), rgba: image.into_raw() }
 }
 
+/// Writes a crash to `~/.cache/mychronix/crash.log` (kept under about 1 MB)
+/// and, if the app itself is going down, undoes any WiFi changes first.
+fn install_crash_handler() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        if let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/mychronix")) {
+            let _ = std::fs::create_dir_all(&dir);
+            let log = dir.join("crash.log");
+            if std::fs::metadata(&log).is_ok_and(|m| m.len() > 1_000_000) {
+                let _ = std::fs::rename(&log, dir.join("crash.log.old"));
+            }
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let line = format!("[{secs}] Mychronix {} · thread {thread}: {info}\n", env!("CARGO_PKG_VERSION"));
+            log::error!("panic on thread {thread}: {info}");
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+                use std::io::Write;
+                let _ = f.write_all(line.as_bytes());
+            }
+        }
+        // The window's own thread: the app is going down. Don't leave the
+        // laptop stuck on the MyChron's WiFi with the home networks paused.
+        if thread == "main" && device::paused_networks() {
+            device::restore_wifi_now();
+        }
+        default(info);
+    }));
+}
+
 fn main() -> eframe::Result {
+    logging::init();
+    install_crash_handler();
+    log::info!(
+        "Mychronix {} starting ({} {}), log level from MYCHRONIX_LOG={:?}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::env::var("MYCHRONIX_LOG").unwrap_or_default()
+    );
     let path = std::env::args_os().nth(1).map(PathBuf::from);
     let screenshot = std::env::var_os("MYCHRONIX_SCREENSHOT").map(PathBuf::from);
     let demo = std::env::var_os("MYCHRONIX_DEMO").is_some();
@@ -60,6 +100,7 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             theme::install(&cc.egui_ctx);
             units::init();
+            log::info!("units: {}", if units::imperial() { "mph and °F" } else { "km/h and °C" });
             // Undo WiFi changes left behind if Mychronix quit while joined to a logger.
             device::restore_after_crash();
             let mut app = app::App::default();
