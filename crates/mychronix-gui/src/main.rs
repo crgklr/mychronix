@@ -17,6 +17,7 @@ mod countries;
 mod device;
 mod events;
 mod profiles;
+mod setup;
 mod splits;
 mod theme;
 mod tracks;
