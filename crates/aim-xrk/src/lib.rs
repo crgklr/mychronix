@@ -182,6 +182,15 @@ impl From<libxrk::XrkFile> for Session {
                 times_ms: g.times_ms.clone(),
                 values: g.speed_kmh.clone(),
             });
+            channels.push(Channel {
+                name: "GPS LonAcc".into(),
+                group: Some("GPS".into()),
+                units: "g".into(),
+                decimals: 2,
+                interpolate: true,
+                times_ms: g.times_ms.clone(),
+                values: longitudinal_g(&g.times_ms, &g.speed_kmh),
+            });
         }
         let laps = file
             .laps
@@ -233,5 +242,32 @@ mod tests {
         assert_eq!(s.best_lap(10_000).map(|l| l.number), Some(2));
         // With no lap that crosses the line twice there is no best lap.
         assert!(session(vec![lap(0, 0, 20_000), lap(1, 20_000, 75_000)]).best_lap(0).is_none());
+    }
+}
+
+/// Longitudinal acceleration in g from GPS speed: the slope over about ±160 ms,
+/// as RaceStudio's "GPS LonAcc" (negative when braking).
+pub fn longitudinal_g(times_ms: &[i64], speed_kmh: &[f64]) -> Vec<f64> {
+    const HALF_MS: i64 = 160;
+    let n = times_ms.len();
+    (0..n)
+        .map(|i| {
+            let a = times_ms[..i].partition_point(|&t| t < times_ms[i] - HALF_MS);
+            let b = (i + times_ms[i..].partition_point(|&t| t <= times_ms[i] + HALF_MS)).saturating_sub(1).max(i);
+            let dt = (times_ms[b] - times_ms[a]) as f64 / 1000.0;
+            if dt <= 0.0 { 0.0 } else { (speed_kmh[b] - speed_kmh[a]) / 3.6 / dt / 9.81 }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod lon_g_tests {
+    #[test]
+    fn steady_braking_reads_minus_one_g() {
+        // Losing 9.81 m/s (35.3 km/h) per second, sampled at 25 Hz.
+        let times: Vec<i64> = (0..50).map(|k| k * 40).collect();
+        let speeds: Vec<f64> = times.iter().map(|&t| 60.0 - 35.316 * t as f64 / 1000.0).collect();
+        let g = super::longitudinal_g(&times, &speeds);
+        assert!((g[25] + 1.0).abs() < 0.01, "{}", g[25]);
     }
 }

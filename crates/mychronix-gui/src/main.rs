@@ -17,6 +17,7 @@ mod countries;
 mod device;
 mod events;
 mod profiles;
+mod report;
 mod setup;
 mod splits;
 mod theme;
@@ -63,6 +64,12 @@ fn main() -> eframe::Result {
                     app.load(path);
                     if demo {
                         app.demo();
+                    }
+                    if std::env::var_os("MYCHRONIX_DISTANCE").is_some() {
+                        app.show_distance();
+                    }
+                    if std::env::var_os("MYCHRONIX_REPORT").is_some() {
+                        app.show_report();
                     }
                     if std::env::var_os("MYCHRONIX_COMPARE").is_some() {
                         app.demo_compare();

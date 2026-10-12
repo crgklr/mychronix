@@ -73,6 +73,45 @@ impl App {
         self.setup_dialog(ui.ctx());
     }
 
+    /// The setup in one line under the session title: summary, any change, Edit.
+    pub(super) fn setup_line(&mut self, ui: &mut Ui) {
+        let Some(path) = self.path.clone() else { return };
+        let lib = self.library.get_or_insert_with(Library::load);
+        let Some(i) = lib.sessions.iter().position(|s| s.path == path) else { return };
+        let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
+        let resolved = setup::resolve(lib, baselines);
+        let r = &resolved[i];
+        let check = gearing_check(&r.setup, self.measured_ratio);
+        let mut edit = false;
+        ui.horizontal(|ui| {
+            ui.add(Icon::Settings.image(DIM, 14.0));
+            let summary = r.setup.summary();
+            ui.label(RichText::new(if summary.is_empty() { "No setup recorded".to_string() } else { summary }).size(13.0).color(SECONDARY));
+            if !r.changes.is_empty() {
+                ui.label(RichText::new(format!("Changed: {}", r.changes.join(", "))).size(13.0).color(theme::FAVORITE));
+            }
+            if let Some((false, text)) = &check {
+                ui.label(RichText::new("Gearing doesn't match the data").size(13.0).color(theme::FAVORITE)).on_hover_text(text);
+            }
+            let link = ui.add(egui::Label::new(RichText::new("Edit setup").size(13.0).color(TEXT)).sense(Sense::click()));
+            if link.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if link.clicked() {
+                edit = true;
+            }
+        });
+        if edit {
+            self.setup_edit = Some(SetupEdit {
+                path,
+                setup: r.setup.clone(),
+                before: setup::before(lib, baselines, i),
+                has_own: r.source == Source::Own,
+            });
+        }
+        self.setup_dialog(ui.ctx());
+    }
+
     fn setup_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut edit) = self.setup_edit.take() else { return };
         let tyres = self.tyre_suggestions();

@@ -162,7 +162,6 @@ impl App {
                         if let Some(i) = s.laps.iter().position(|l| l.number as u32 == n) {
                             self.lap = Some(i);
                             self.cursor_s = Some(s.laps[i].duration_ms() as f64 / 2000.0);
-                            self.scroll_to_lap = true;
                         }
                     }
                     return;

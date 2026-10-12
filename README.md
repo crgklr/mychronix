@@ -21,8 +21,14 @@ works today:
   (driver, kart, championship, session type, track, comment).
 - **Sessions:** every downloaded session by race day, with best laps and
   per-logger driver and kart names.
-- **Analysis:** channels over time with a shared cursor, laps and best lap
-  (matching the logger's own), a GPS track map coloured by any channel.
+- **Analysis:** channels over time or distance with a shared cursor and the
+  track map coloured by any channel; every lap as a strip across the top (best
+  lap matching the logger's own, out/in and slow laps dimmed); channels added
+  from a grouped picker (engine, movement, lap timing, logger), with the
+  MyChron's timing channels in seconds and unused ones hidden.
+- **Lap by lap** (RaceStudio's channels report): one row per lap with chosen statistics (RPM, speed, EGT,
+  lateral and braking g by default; presets for engine and driving), max/min/
+  average/std dev over the laps you tick, and any column graphed by lap.
 - **Lap comparison:** overlay up to eight laps from any sessions, lined up by
   distance around the track, with the time gap to a reference lap and a map of
   where time is gained and lost.
@@ -75,9 +81,8 @@ Roughly in priority order.
       `.tkk` files; show the track's local time and time zone.
 - [ ] **Device information:** firmware version, the tracks stored on the
       logger, and its counters (odometers), all read-only.
-- [ ] **Channel reports:** min/max/average per lap and session, histograms
-      (e.g. time in each RPM band), and scatter plots of one channel against
-      another.
+- [ ] **Histograms and scatter plots:** time in each RPM band per lap; one
+      channel against another (RPM vs speed, the G-G diagram).
 - [ ] **Gearing calculator:** predicted RPM at the end of each track's longest
       straight for a sprocket change, from your data at that track or a similar
       one.
