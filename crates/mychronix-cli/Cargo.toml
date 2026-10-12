@@ -1,0 +1,17 @@
+[package]
+name = "mychronix-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mychronix"
+path = "src/main.rs"
+
+[dependencies]
+aim-xrk.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+aim-link.workspace = true
