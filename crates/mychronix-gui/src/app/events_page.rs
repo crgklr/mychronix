@@ -47,6 +47,10 @@ impl App {
         // Header.
         // MYCHRONIX_EVENT_DIALOG opens the plan dialog (for screenshots).
         let mut plan = self.event_dialog.is_none() && self.frames < 3 && std::env::var_os("MYCHRONIX_EVENT_DIALOG").is_some();
+        // "Plan an event" from the Garage.
+        if std::mem::take(&mut self.plan_on_open) {
+            plan = true;
+        }
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

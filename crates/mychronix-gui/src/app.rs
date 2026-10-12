@@ -11,6 +11,7 @@ use egui_plot::{Line, Plot, PlotPoints, VLine};
 mod analysis_ui;
 mod charts_ui;
 mod events_page;
+mod garage_ui;
 mod report_ui;
 mod setup_ui;
 mod splits_ui;
@@ -29,6 +30,7 @@ const MIN_LAP_MS: i64 = 10_000;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum Page {
+    Garage,
     Sessions,
     Events,
     #[default]
@@ -153,6 +155,12 @@ pub struct App {
     dev_joined: Option<String>,
     /// Frames seen by the input hook (for scripted test clicks).
     input_frames: u32,
+    /// The Garage: a session to open after the frame, and Events' plan dialog to open.
+    pending_open: Option<PathBuf>,
+    plan_on_open: bool,
+    /// The Analysis session picker's driver filter and warm-up toggle.
+    picker_logger: Option<String>,
+    picker_warmups: bool,
     /// When the WiFi was last checked from another page.
     wifi_check: f64,
     dev_files: Vec<aim_link::DirEntry>,
@@ -306,6 +314,14 @@ impl App {
         self.analysis_view = AnalysisView::Report;
     }
 
+    pub fn show_analysis_page(&mut self) {
+        self.page = Page::Analysis;
+    }
+
+    pub fn show_garage_page(&mut self) {
+        self.page = Page::Garage;
+    }
+
     pub fn show_events_page(&mut self) {
         self.page = Page::Events;
     }
@@ -418,7 +434,8 @@ impl eframe::App for App {
             .frame(Frame::new().fill(WINDOW).inner_margin(Margin { left: 28, right: 28, top: 22, bottom: 16 }))
             .show(ui, |ui| match (self.page, &session, window) {
                 (Page::Analysis, Some(s), Some((start, end))) => self.analysis(ui, s, start, end),
-                (Page::Analysis, _, _) => self.empty_state(ui),
+                (Page::Analysis, _, _) => self.session_picker(ui),
+                (Page::Garage, _, _) => self.garage_page(ui),
                 (Page::Sessions, _, _) => self.sessions_page(ui),
                 (Page::Events, _, _) => self.events_page(ui),
                 (Page::Tracks, _, _) => self.tracks_page(ui),
@@ -471,21 +488,6 @@ impl App {
                     });
                 });
             });
-    }
-
-    fn empty_state(&mut self, ui: &mut Ui) {
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            ui.add_space((ui.available_height() * 0.5 - 120.0).max(24.0));
-            ui.add(Icon::ChartLine.image(DIM, 44.0));
-            ui.add_space(14.0);
-            ui.label(RichText::new("Open a session").font(semibold(24.0)).color(TEXT));
-            ui.add_space(2.0);
-            ui.label(RichText::new("Pick a .xrk or .xrz file recorded by your MyChron to see laps and channels.").color(SECONDARY));
-            ui.add_space(18.0);
-            if button(ui, Some(Icon::FolderOpen), "Open session…", true).clicked() {
-                self.open_dialog();
-            }
-        });
     }
 
     fn screenshot(&mut self, ui: &mut Ui) {
@@ -699,6 +701,9 @@ impl App {
                             ui.end_row();
                             ui.label(RichText::new("Kart").color(SECONDARY));
                             changed |= ui.add(egui::TextEdit::singleline(&mut entry.kart).desired_width(side_w - 120.0)).changed();
+                            ui.end_row();
+                            ui.label(RichText::new("Engine").color(SECONDARY));
+                            changed |= ui.add(egui::TextEdit::singleline(&mut entry.engine).desired_width(side_w - 120.0).hint_text("e.g. IAME Mini Swift")).changed();
                             ui.end_row();
                         });
                         ui.add_space(10.0);
@@ -1106,7 +1111,7 @@ impl App {
         let info = file.map(|f| &f.info);
 
         // AiM's details for the venue, laid out like RaceStudio's track view.
-        card(ui, |ui| {
+        section(ui, |ui| {
             ui.horizontal_top(|ui| {
                 let logo_w = 150.0;
                 let text_w = ui.available_width() - logo_w - 12.0;
@@ -1118,7 +1123,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(title).font(semibold(22.0)).color(TEXT));
                         let (icon, label) = if fav { (Icon::StarFilled, "Favorite") } else { (Icon::Star, "Add to favorites") };
-                        if button(ui, Some(icon), label, false).clicked() {
+                        if button_with(ui, Some(icon), fav.then_some(theme::FAVORITE), label, false).clicked() {
                             if let Err(e) = self.favorites.as_mut().unwrap().toggle(&t.guid) {
                                 self.error = Some(format!("Couldn't save favourites: {e}"));
                             }
@@ -1390,7 +1395,7 @@ impl App {
 
         // Sessions recorded here.
         let mut open = None;
-        card(ui, |ui| {
+        section(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Your sessions here").font(semibold(16.0)).color(TEXT));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1609,7 +1614,7 @@ fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
                 .map(|t| (l.number, l.duration_ms(), t))
         })
         .collect();
-    card(ui, |ui| {
+    section(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("Sector times  ·  session {}", lap.session_number)).font(semibold(16.0)).color(TEXT));
         });
@@ -1812,9 +1817,11 @@ impl walkers::Plugin for TrackOverlay {
 }
 
 impl App {
-    fn device_page(&mut self, ui: &mut Ui) {
+    /// Applies what the MyChron worker has finished and keeps scanning for a
+    /// logger (the Device page and the Garage both show its status).
+    fn device_poll(&mut self, ctx: &egui::Context) {
         use crate::device::{Command, Event};
-        let ctx = ui.ctx().clone();
+        let ctx = ctx.clone();
         let worker = self.dev.get_or_insert_with(|| crate::device::Worker::spawn(ctx.clone()));
 
         // Apply whatever the worker has finished.
@@ -1933,6 +1940,12 @@ impl App {
             let _ = self.dev.as_ref().unwrap().tx.send(Command::Scan);
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    fn device_page(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        self.device_poll(&ctx);
+
 
         ui.label(RichText::new("Device").font(semibold(28.0)).color(TEXT));
         ui.label(RichText::new("Your MyChron, its sessions and downloads.").font(regular(14.5)).color(SECONDARY));
@@ -2000,7 +2013,7 @@ impl App {
                     let model = self.dev_joined.as_deref().or(self.dev_current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron");
                     let who = profiles.get(&id).map(|p| p.driver.clone()).filter(|d| !d.is_empty());
                     ui.horizontal(|ui| {
-                        ui.add(Icon::Gauge.image(theme::GOOD, 32.0));
+                        ui.add(Icon::Mychron.image(theme::GOOD, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new(format!("{model} connected")).font(semibold(17.0)).color(TEXT));
@@ -2023,7 +2036,7 @@ impl App {
                 }
                 None => {
                     ui.horizontal(|ui| {
-                        ui.add(Icon::Gauge.image(DIM, 32.0));
+                        ui.add(Icon::Mychron.image(DIM, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new("No logger connected").font(semibold(17.0)).color(TEXT));
@@ -3320,6 +3333,14 @@ fn section_header(ui: &mut Ui, title: &str, detail: &str) {
     ui.add_space(4.0);
 }
 
+/// A titled area without a box: full width, on the page background.
+fn section(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    ui.vertical(|ui| {
+        ui.set_width(ui.available_width());
+        add(ui)
+    });
+}
+
 fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(SURFACE)
@@ -3363,6 +3384,11 @@ fn tile(ui: &mut Ui, width: f32, icon: Icon, label: &str, value: String) {
 
 /// Pill button; `primary` fills it with ink.
 fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, primary: bool) -> egui::Response {
+    button_with(ui, icon, None, label, primary)
+}
+
+/// A button whose icon can have its own colour (e.g. a yellow star).
+fn button_with(ui: &mut Ui, icon: Option<Icon>, icon_tint: Option<Color32>, label: &str, primary: bool) -> egui::Response {
     let (fg, fill, hover) = if primary {
         (ON_TEXT, TEXT, Color32::from_rgb(0xd9, 0xdd, 0xe2))
     } else {
@@ -3375,7 +3401,7 @@ fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, primary: bool) -> egui::
     ui.painter().rect_filled(rect, CornerRadius::same(19), fill);
     let mut x = rect.left() + 16.0;
     if let Some(icon) = icon {
-        icon.image(fg, 16.0).paint_at(ui, Rect::from_min_size(pos2(x, rect.center().y - 8.0), Vec2::splat(16.0)));
+        icon.image(icon_tint.unwrap_or(fg), 16.0).paint_at(ui, Rect::from_min_size(pos2(x, rect.center().y - 8.0), Vec2::splat(16.0)));
         x += icon_w;
     }
     ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, fg);
