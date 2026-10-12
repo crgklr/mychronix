@@ -87,7 +87,7 @@ pub const ENGINES: [(&str, &[&str]); 10] = [
         "IAME / Parilla",
         &["IAME Micro Swift", "IAME Mini Swift", "IAME X30 Mini", "IAME X30 Junior", "IAME X30 Senior", "IAME KA100", "IAME X30 Super Shifter 175", "IAME OK", "IAME OK-J", "IAME KZ"],
     ),
-    ("Vortex", &["Vortex Mini ROK", "Vortex Junior ROK", "Vortex ROK GP", "Vortex Shifter ROK", "Vortex VTS (OK)", "Vortex VTJ (OK-J)"]),
+    ("Vortex", &["Vortex Mini ROK", "Vortex ROK VLR", "Vortex ROK GP", "Vortex Shifter ROK", "Vortex VTS (OK)", "Vortex VTJ (OK-J)"]),
     ("TM Racing", &["TM KZ-R3", "TM OK", "TM OK-J"]),
     ("Modena Engines", &["Modena KK1", "Modena ME-K", "Modena ME-KJ"]),
     ("Comer", &["Comer C50", "Comer C51", "Comer C52", "Comer W60"]),
@@ -127,16 +127,24 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
     const ROTAX_MAX: &[u8] = include_bytes!("../assets/engines/rotax-max.png");
     // The X30 Mini, Junior and Senior are one engine.
     const IAME_X30: &[u8] = include_bytes!("../assets/engines/iame-x30.png");
-    const BUNDLED: [(&str, &str, &[u8]); 9] = [
+    const IAME_KA100: &[u8] = include_bytes!("../assets/engines/iame-ka100.png");
+    const IAME_SHIFTER: &[u8] = include_bytes!("../assets/engines/iame-super-shifter-175.png");
+    const VORTEX_MINI_ROK: &[u8] = include_bytes!("../assets/engines/vortex-mini-rok.png");
+    const VORTEX_ROK_VLR: &[u8] = include_bytes!("../assets/engines/vortex-rok-vlr.png");
+    const BUNDLED: [(&str, &str, &[u8]); 13] = [
         ("iame-micro-swift", "iame-mini-swift", IAME_SWIFT),
         ("iame-mini-swift", "iame-mini-swift", IAME_SWIFT),
+        ("iame-ka100", "iame-ka100", IAME_KA100),
         ("iame-x30-mini", "iame-x30", IAME_X30),
         ("iame-x30-junior", "iame-x30", IAME_X30),
         ("iame-x30-senior", "iame-x30", IAME_X30),
+        ("iame-x30-super-shifter-175", "iame-super-shifter-175", IAME_SHIFTER),
         ("rotax-125-micro-max", "rotax-mini-max", ROTAX_MINI),
         ("rotax-125-mini-max", "rotax-mini-max", ROTAX_MINI),
         ("rotax-125-junior-max", "rotax-max", ROTAX_MAX),
         ("rotax-125-senior-max", "rotax-max", ROTAX_MAX),
+        ("vortex-mini-rok", "vortex-mini-rok", VORTEX_MINI_ROK),
+        ("vortex-rok-vlr", "vortex-rok-vlr", VORTEX_ROK_VLR),
     ];
     let bundled = BUNDLED.iter().find(|(s, ..)| *s == slug);
     // Your own picture, under this engine's name or the one it shares a picture with.
@@ -362,6 +370,10 @@ mod tests {
         assert!(uri("IAME X30 Junior").is_some_and(|u| u.ends_with("iame-x30.png")));
         assert!(uri("IAME Mini Swift").is_some());
         assert_eq!(uri("IAME Micro Swift"), uri("IAME Mini Swift"));
+        assert!(uri("IAME KA100").is_some_and(|u| u.ends_with("iame-ka100.png")));
+        assert!(uri("Vortex Mini ROK").is_some_and(|u| u.ends_with("vortex-mini-rok.png")));
+        assert!(uri("Vortex ROK VLR").is_some_and(|u| u.ends_with("vortex-rok-vlr.png")));
+        assert!(uri("IAME X30 Super Shifter 175").is_some_and(|u| u.ends_with("iame-super-shifter-175.png")));
     }
 
     #[test]
