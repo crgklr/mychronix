@@ -1,7 +1,11 @@
 # Mychronix
 
 A Linux desktop app for **AiM MyChron** kart data loggers: download sessions
-over WiFi, analyse laps, and browse tracks, without RaceStudio 3.
+over WiFi, analyse laps, and browse tracks.
+
+Mychronix exists to fill a gap on systems AiM doesn't support, such as Linux.
+It is not meant to replace AiM products or RaceStudio in any way on officially
+supported operating systems; if you're on one of those, use RaceStudio.
 
 > Mychronix is an independent project. It is not affiliated with, endorsed by
 > or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of
