@@ -60,11 +60,11 @@ impl SessionMeta {
     }
 
     pub fn load(session: &Path) -> Option<Self> {
-        serde_json::from_str(&std::fs::read_to_string(Self::path_for(session)).ok()?).ok()
+        crate::storage::load(&Self::path_for(session))
     }
 
     pub fn save(&self, session: &Path) -> std::io::Result<()> {
-        std::fs::write(Self::path_for(session), serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)
+        crate::storage::save(&Self::path_for(session), self)
     }
 }
 
@@ -87,24 +87,61 @@ impl Worker {
                     Command::Scan => {
                         let logger = aim_link::probe(AP_ADDRESS, Duration::from_millis(700)).ok();
                         let (networks, current) = if logger.is_some() { (Vec::new(), current_wifi()) } else { (aim_networks(), current_wifi()) };
+                        log::debug!(
+                            "scan: logger {:?}, on WiFi {:?}, MyChron networks {:?}",
+                            logger.as_ref().map(|b| (b.logger_id, b.round_trip)),
+                            current,
+                            networks
+                        );
                         send(Event::Scanned { logger, networks, current });
                     }
-                    Command::Join { ssid } => match join(&ssid) {
-                        Ok(()) => send(Event::Joined { ssid }),
-                        Err(e) => send(Event::Error(e)),
-                    },
+                    Command::Join { ssid } => {
+                        log::info!("joining {ssid}");
+                        match join(&ssid) {
+                            Ok(()) => {
+                                log::info!("joined {ssid}");
+                                send(Event::Joined { ssid })
+                            }
+                            Err(e) => {
+                                log::error!("joining {ssid} failed: {e}");
+                                send(Event::Error(e))
+                            }
+                        }
+                    }
                     Command::Leave => {
+                        log::info!("leaving the MyChron's WiFi");
                         leave();
                         send(Event::Left);
                     }
-                    Command::List => match list() {
-                        Ok((files, summaries, new_tracks)) => send(Event::Listed { files, summaries, new_tracks }),
-                        Err(e) => send(Event::Error(e)),
-                    },
-                    Command::Download { files, dir } => match download(&files, &dir, &send) {
-                        Ok(saved) => send(Event::Downloaded { saved }),
-                        Err(e) => send(Event::Error(e)),
-                    },
+                    Command::List => {
+                        let started = std::time::Instant::now();
+                        match list() {
+                            Ok((files, summaries, new_tracks)) => {
+                                log::info!("listed {} files, {} summaries, {} new custom tracks in {:?}", files.len(), summaries.len(), new_tracks, started.elapsed());
+                                for f in &files {
+                                    log::debug!("  {} {} bytes {} {}", f.name, f.size, f.date, f.time);
+                                }
+                                send(Event::Listed { files, summaries, new_tracks })
+                            }
+                            Err(e) => {
+                                log::error!("listing failed: {e}");
+                                send(Event::Error(e))
+                            }
+                        }
+                    }
+                    Command::Download { files, dir } => {
+                        log::info!("downloading {} sessions to {}", files.len(), dir.display());
+                        match download(&files, &dir, &send) {
+                            Ok(saved) => {
+                                log::info!("downloaded {saved} sessions");
+                                send(Event::Downloaded { saved })
+                            }
+                            Err(e) => {
+                                log::error!("download failed: {e}");
+                                send(Event::Error(e))
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -136,8 +173,12 @@ fn copy_custom_tracks(logger: &mut Logger) -> usize {
     let _ = std::fs::create_dir_all(&dir);
     let mut copied = 0;
     for t in tracks {
+        // The track id comes from the logger: only plain names make a file name.
+        if !aim_link::is_safe_file_name(&t.id) {
+            continue;
+        }
         let target = dir.join(format!("{}.tkk", t.id));
-        if t.id.is_empty() || target.exists() {
+        if target.exists() {
             continue;
         }
         if let Ok(bytes) = logger.read_file(&format!("0:/tkk/o/{}.tkk", t.id), |_, _| {}) {
@@ -158,6 +199,10 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
     let count = files.len();
     let mut saved = 0;
     for (index, (entry, meta)) in files.iter().enumerate() {
+        // The name comes from the logger: never let it point outside this folder.
+        if !aim_link::is_safe_file_name(&entry.name) {
+            return Err(format!("The MyChron listed a file with an unusable name ({:?}), so it wasn't downloaded.", entry.name));
+        }
         let path = format!("{}/{}", aim_link::SESSIONS_DIR, entry.name);
         let data = logger
             .read_file(&path, |done, total| send(Event::Progress { index, count, file: entry.name.clone(), done, total }))
@@ -165,6 +210,7 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
         let target = dir.join(&entry.name);
         let partial = target.with_extension("part");
         std::fs::write(&partial, &data).and_then(|_| std::fs::rename(&partial, &target)).map_err(|e| e.to_string())?;
+        log::info!("saved {} ({} bytes)", target.display(), data.len());
         // The small summary beside it, used by the Sessions and Tracks pages.
         let xri = Path::new(&entry.name).with_extension("xri");
         if let Ok(bytes) = logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}) {
@@ -192,11 +238,17 @@ struct Restore {
 }
 
 fn nmcli(args: &[&str]) -> Result<String, String> {
-    let out = Process::new("nmcli").args(args).output().map_err(|e| format!("nmcli: {e}"))?;
+    log::debug!("nmcli {}", args.join(" "));
+    let out = Process::new("nmcli").args(args).output().map_err(|e| {
+        log::error!("couldn't run nmcli: {e}");
+        format!("nmcli: {e}")
+    })?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        log::warn!("nmcli {} failed: {err}", args.join(" "));
+        Err(err)
     }
 }
 
@@ -270,6 +322,13 @@ fn join(ssid: &str) -> Result<(), String> {
 }
 
 /// Re-enables paused auto-join and goes back to the previous network.
+/// Turns the other networks' auto-connect back on right away (used when the
+/// app crashes while joined to a MyChron).
+pub fn restore_wifi_now() {
+    log::warn!("restoring WiFi after a crash");
+    leave();
+}
+
 fn leave() {
     let Some(path) = restore_file() else { return };
     let Some(restore) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Restore>(&s).ok()) else { return };

@@ -101,6 +101,14 @@ pub struct Library {
 
 impl Library {
     pub fn load() -> Self {
+        let started = std::time::Instant::now();
+        let lib = Self::load_inner();
+        log::info!("library: {} tracks, {} sessions, {} sources, in {:?}", lib.tracks.len(), lib.sessions.len(), lib.sources.len(), started.elapsed());
+        log::debug!("library sources: {:?}", lib.sources);
+        lib
+    }
+
+    fn load_inner() -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
         let ours = home.join("Mychronix").join("tracks");
         let rs3 = home.join(".rs3-wine/drive_c/AIM_SPORT/RaceStudio3");
@@ -372,10 +380,7 @@ impl Favorites {
     }
 
     pub fn load() -> Self {
-        Self::path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        crate::storage::load_or_default(Self::path())
     }
 
     pub fn contains(&self, guid: &str) -> bool {
@@ -388,9 +393,6 @@ impl Favorites {
             self.guids.insert(guid.to_string());
         }
         let Some(path) = Self::path() else { return Ok(()) };
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)
+        crate::storage::save(&path, self)
     }
 }

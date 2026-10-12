@@ -60,6 +60,20 @@ impl DirEntry {
 
 /// Parses a directory listing: one `FLE` record per file, each holding
 /// `TMD` (date), `TMT` (time), `SZ` (decimal size) and `N` (name).
+/// Largest file Mychronix will download (a long session is a few MB).
+pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// True for a plain file name that's safe to save under: letters, digits,
+/// `.`, `_` and `-`, no leading dot (so no `..`, no paths, no hidden files).
+/// Names come from the logger over an open WiFi network, so they're checked
+/// before any is used to name a file on disk.
+pub fn is_safe_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 pub fn parse_listing(data: &[u8]) -> Result<Vec<DirEntry>, Error> {
     let mut entries = Vec::new();
     for file in frame::parse_all(data)? {
@@ -156,8 +170,13 @@ impl Logger {
             }
         }
         let size = size.unwrap_or(0);
+        log::debug!("{path}: {size} bytes to read");
+        if size > MAX_FILE_BYTES {
+            return Err(Error::Protocol(format!("{path}: the logger reports {size} bytes, more than any session file should be")));
+        }
 
-        let mut data = Vec::with_capacity(size as usize);
+        // Grow as data arrives rather than trusting the reported size up front.
+        let mut data = Vec::with_capacity((size as usize).min(4 * 1024 * 1024));
         while (data.len() as u64) < size {
             let offset = data.len() as u32;
             let chunk = self.pull(offset)?;
@@ -174,7 +193,10 @@ impl Logger {
     /// Asks for the chunk at `offset`, re-asking if the logger goes quiet and
     /// skipping stale chunks left over from an earlier ask.
     fn pull(&mut self, offset: u32) -> Result<Vec<u8>, Error> {
-        for _ in 0..=CHUNK_RETRIES {
+        for attempt in 0..=CHUNK_RETRIES {
+            if attempt > 0 {
+                log::warn!("no reply for offset {offset}; asking again ({attempt} of {CHUNK_RETRIES})");
+            }
             self.send(STCP, offset.to_le_bytes().to_vec())?;
             loop {
                 match self.recv() {
@@ -195,13 +217,19 @@ impl Logger {
     }
 
     fn send(&mut self, tag: &[u8; 4], payload: Vec<u8>) -> Result<(), Error> {
+        log::trace!("send {} {} bytes: {:02x?}", String::from_utf8_lossy(tag), payload.len(), &payload[..payload.len().min(64)]);
         Frame::new(tag, payload).write_to(&mut self.writer)?;
         self.writer.flush()?;
         Ok(())
     }
 
     fn recv(&mut self) -> Result<Frame, Error> {
-        Frame::read_from(&mut self.reader, MAX_FRAME)
+        let frame = Frame::read_from(&mut self.reader, MAX_FRAME);
+        match &frame {
+            Ok(f) => log::trace!("recv {} {} bytes: {:02x?}", f.tag_str(), f.payload.len(), &f.payload[..f.payload.len().min(64)]),
+            Err(e) => log::debug!("recv failed: {e}"),
+        }
+        frame
     }
 }
 
@@ -248,5 +276,15 @@ mod tests {
     #[test]
     fn rejects_long_paths() {
         assert!(request_body(2, 4, "0:/a/very/long/path/that/does/not/fit.xrz").is_err());
+    }
+
+    #[test]
+    fn names_from_the_logger_are_checked() {
+        for ok in ["a_0035.xrz", "a_0035.xri", "nl2amuco.tkk", "summary1.csv"] {
+            assert!(is_safe_file_name(ok), "{ok}");
+        }
+        for bad in ["", "..", "../x.xrz", "a/b.xrz", "..\\x", ".bashrc", "x y.xrz", "/etc/passwd", "a_0035.xrz\0"] {
+            assert!(!is_safe_file_name(bad), "{bad}");
+        }
     }
 }

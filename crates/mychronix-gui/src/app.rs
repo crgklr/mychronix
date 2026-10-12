@@ -139,6 +139,9 @@ pub struct App {
     /// and a sheet to write once a download finishes.
     setup_baselines: Option<crate::setup::Baselines>,
     setup_edit: Option<setup_ui::SetupEdit>,
+    /// The Garage's driver and kart dialogs.
+    driver_edit: Option<garage_ui::DriverEdit>,
+    kart_edit: Option<garage_ui::KartEdit>,
     measured_ratio: Option<f64>,
     pending_setup: Option<(PathBuf, crate::setup::Setup)>,
     /// Channel that colours the track map (None: RPM if present).
@@ -153,6 +156,9 @@ pub struct App {
     dev_current_wifi: Option<String>,
     /// The AiM network Mychronix joined (so it can leave it).
     dev_joined: Option<String>,
+    /// The last error and device message written to the log.
+    logged_error: Option<String>,
+    logged_dev_message: Option<(bool, String)>,
     /// Frames seen by the input hook (for scripted test clicks).
     input_frames: u32,
     /// The Garage: a session to open after the frame, and Events' plan dialog to open.
@@ -230,7 +236,10 @@ impl App {
                 self.path = Some(path);
                 self.page = Page::Analysis;
             }
-            Err(e) => self.error = Some(format!("Couldn't open {}: {e}", file_name(&path))),
+            Err(e) => {
+                log::error!("couldn't open {}: {e}", path.display());
+                self.error = Some(format!("Couldn't open {}: {e}", file_name(&path)));
+            }
         }
     }
 
@@ -415,6 +424,24 @@ impl eframe::App for App {
                 std::thread::spawn(crate::device::restore_after_crash);
             }
         }
+        // Everything shown as an error or a device message also goes to the log, once.
+        if self.error != self.logged_error {
+            if let Some(e) = &self.error {
+                log::warn!("shown: {e}");
+            }
+            self.logged_error = self.error.clone();
+        }
+        if self.dev_message != self.logged_dev_message {
+            if let Some((ok, m)) = &self.dev_message {
+                if *ok { log::info!("device: {m}") } else { log::warn!("device: {m}") }
+            }
+            self.logged_dev_message = self.dev_message.clone();
+        }
+        // A damaged settings file was moved aside: say so once.
+        let warnings = crate::storage::take_warnings();
+        if !warnings.is_empty() {
+            self.error = Some(warnings.join("\n"));
+        }
         let session = self.session.take();
         let window = session.as_ref().map(|s| self.window(s));
 
@@ -523,7 +550,8 @@ impl App {
 impl App {
     fn sessions_page(&mut self, ui: &mut Ui) {
         let lib = self.library.take().unwrap_or_else(Library::load);
-        let mut profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let mut go_garage = false;
         let loggers: Vec<String> = {
             let mut l: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
             l.sort();
@@ -681,7 +709,7 @@ impl App {
                 });
             });
 
-            // Drivers & karts: names for each logger, saved as you type.
+            // Drivers & karts: which kart each logger is on; edited in the Garage.
             ui.allocate_ui_with_layout(vec2(side_w, height), column, |ui| {
                 ui.set_width(side_w);
                 card(ui, |ui| {
@@ -689,29 +717,17 @@ impl App {
                         ui.add(Icon::User.image(SECONDARY, 16.0));
                         ui.label(RichText::new("Drivers & karts").font(semibold(16.0)).color(TEXT));
                     });
-                    ui.label(RichText::new("Your MyChrons don't store names, so Mychronix keeps them here, one per logger.").size(12.5).color(SECONDARY));
+                    ui.label(RichText::new("Your MyChrons don't store names, so each session takes its driver and kart from the kart its MyChron is on.").size(12.5).color(SECONDARY));
                     ui.add_space(8.0);
-                    let mut changed = false;
                     for l in &loggers {
-                        let entry = profiles.loggers.entry(l.clone()).or_default();
                         ui.label(RichText::new(format!("Logger {l}")).size(12.5).color(DIM));
-                        egui::Grid::new(("profile", l.as_str())).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                            ui.label(RichText::new("Driver").color(SECONDARY));
-                            changed |= ui.add(egui::TextEdit::singleline(&mut entry.driver).desired_width(side_w - 120.0)).changed();
-                            ui.end_row();
-                            ui.label(RichText::new("Kart").color(SECONDARY));
-                            changed |= ui.add(egui::TextEdit::singleline(&mut entry.kart).desired_width(side_w - 120.0)).changed();
-                            ui.end_row();
-                            ui.label(RichText::new("Engine").color(SECONDARY));
-                            changed |= ui.add(egui::TextEdit::singleline(&mut entry.engine).desired_width(side_w - 120.0).hint_text("e.g. IAME Mini Swift")).changed();
-                            ui.end_row();
-                        });
-                        ui.add_space(10.0);
+                        let p = profiles.for_logger(l);
+                        let line = [p.kart, p.driver].into_iter().filter(|x| !x.trim().is_empty()).collect::<Vec<_>>().join("  ·  ");
+                        ui.label(RichText::new(if line.is_empty() { "Not on a kart yet".to_string() } else { line }).color(TEXT));
+                        ui.add_space(8.0);
                     }
-                    if changed {
-                        if let Err(e) = profiles.save() {
-                            self.error = Some(format!("Couldn't save names: {e}"));
-                        }
+                    if button(ui, Some(Icon::House), "Edit in the Garage", false).clicked() {
+                        go_garage = true;
                     }
                 });
             });
@@ -724,6 +740,9 @@ impl App {
         }
         self.library = Some(lib);
         self.profiles = Some(profiles);
+        if go_garage {
+            self.page = Page::Garage;
+        }
         if let Some(path) = open {
             self.load(path);
         }
@@ -1826,8 +1845,24 @@ impl App {
 
         // Apply whatever the worker has finished.
         let mut events = Vec::new();
-        while let Ok(e) = worker.rx.try_recv() {
-            events.push(e);
+        let mut worker_died = false;
+        loop {
+            match worker.rx.try_recv() {
+                Ok(e) => events.push(e),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    worker_died = true;
+                    break;
+                }
+            }
+        }
+        // The worker stopped (it crashed; see ~/.cache/mychronix/crash.log): start a new one.
+        if worker_died {
+            self.dev = None;
+            self.dev_busy = None;
+            self.dev_progress = None;
+            self.dev_message = Some((false, "The connection to the MyChron stopped unexpectedly and has been restarted. Try again.".into()));
+            return;
         }
         for e in events {
             match e {
@@ -1871,6 +1906,14 @@ impl App {
                         self.dev_message = Some((true, format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" })));
                     }
                     self.dev_selected = self.new_on_logger().into_iter().map(|e| e.name).collect();
+                    // Why each session counts as new or already downloaded.
+                    let dir = self.logger_dir();
+                    let sessions: Vec<_> = self.dev_files.iter().filter(|e| e.is_session()).collect();
+                    log::info!("{} of {} sessions on the logger are new (compared with {:?})", self.dev_selected.len(), sessions.len(), dir);
+                    for e in sessions {
+                        let local = dir.as_ref().and_then(|d| std::fs::metadata(d.join(&e.name)).ok()).map(|m| m.len());
+                        log::debug!("  {}: logger {} bytes, here {:?} → {}", e.name, e.size, local, if local == Some(e.size) { "downloaded" } else { "new" });
+                    }
                 }
                 Event::Progress { index, count, file, done, total } => {
                     self.dev_progress = Some((index, count, file, done, total));
@@ -1965,7 +2008,7 @@ impl App {
         if std::env::var("MYCHRONIX_FAKE_DIALOG").is_ok() && self.dev_dialog.is_none() && self.frames < 3 && self.dev_logger.is_some() {
             let multi = std::env::var("MYCHRONIX_FAKE_DIALOG").as_deref() == Ok("multi");
             let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-            let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).loggers.get(&id).cloned().unwrap_or_default();
+            let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
             self.dev_dialog = Some(DownloadDialog {
                 meta: crate::device::SessionMeta {
                     driver: p.driver,
@@ -2100,7 +2143,7 @@ impl App {
                     let label = if n == 0 { "Download".to_string() } else { format!("Download {n}") };
                     if button(ui, Some(Icon::FolderOpen), &label, true).clicked() && n > 0 && self.dev_busy.is_none() {
                         let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-                        let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).loggers.get(&id).cloned().unwrap_or_default();
+                        let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
                         // The track comes from the logger: one track pre-fills the field, several defer to each session.
                         let mut detected: Vec<String> = self.dev_selected.iter().filter_map(|n| summary_of(n)).filter_map(|s| s.track).filter(|t| !t.is_empty()).collect();
                         detected.sort();
@@ -2272,7 +2315,7 @@ impl App {
                     ui.end_row();
                     if dlg.setup_open {
                         ui.label("");
-                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tyres, field_w));
+                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tyres, field_w, true));
                         ui.end_row();
                     }
                     label(ui, "Comment");
@@ -2293,15 +2336,13 @@ impl App {
         if go {
             let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
             // Remember these for next time (not the comment or session type, which change every time).
+            // The MyChron is now on the kart named, so the kart's baseline applies to it.
             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-            let entry = profiles.loggers.entry(id).or_default();
-            entry.driver = dlg.meta.driver.clone();
-            entry.kart = dlg.meta.kart.clone();
-            entry.championship = dlg.meta.championship.clone();
-            if !multiple {
-                entry.track = dlg.meta.track.clone();
+            profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()));
+            if let Err(e) = profiles.save() {
+                self.error = Some(format!("Couldn't save the driver and kart: {e}"));
             }
-            let _ = profiles.save();
+            self.setup_baselines = None;
             // Each file gets the dialog's details; with several tracks, its own track from the logger.
             let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
                 .dev_files
@@ -2352,11 +2393,9 @@ struct Suggestions {
 impl Suggestions {
     fn gather(lib: &Library, profiles: &crate::profiles::Profiles) -> Self {
         let mut s = Suggestions { drivers: vec![], karts: vec![], championships: vec![], session_types: vec![], tracks: vec![] };
-        for p in profiles.loggers.values() {
-            s.drivers.push(p.driver.clone());
-            s.karts.push(p.kart.clone());
-            s.championships.push(p.championship.clone());
-        }
+        s.drivers.extend(profiles.drivers.iter().map(|d| d.name.clone()));
+        s.karts.extend(profiles.karts.iter().map(|k| k.name.clone()));
+        s.championships.extend(profiles.loggers.values().map(|p| p.championship.clone()));
         for m in lib.sessions.iter().filter_map(|x| x.meta.as_ref()) {
             s.drivers.push(m.driver.clone());
             s.karts.push(m.kart.clone());
@@ -2415,7 +2454,7 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
     let matches: Vec<&String> = suggestions
         .iter()
         .filter(|s| needle.is_empty() || exact || s.to_lowercase().contains(&needle))
-        .take(8)
+        .take(40)
         .collect();
     if matches.is_empty() {
         ctx.data_mut(|d| d.remove::<Rect>(popup_id));
@@ -2433,17 +2472,20 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
                 .show(ui, |ui| {
                     ui.set_width(response.rect.width() - 8.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    for m in &matches {
-                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-                        if resp.hovered() {
-                            ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    // Eight rows show; more scroll.
+                    egui::ScrollArea::vertical().max_height(34.0 * 8.0).show(ui, |ui| {
+                        for m in &matches {
+                            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            ui.painter().text(r.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, m.as_str(), regular(14.5), TEXT);
+                            if resp.clicked() {
+                                picked = Some((*m).clone());
+                            }
                         }
-                        ui.painter().text(r.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, m.as_str(), regular(14.5), TEXT);
-                        if resp.clicked() {
-                            picked = Some((*m).clone());
-                        }
-                    }
+                    });
                 });
         });
     ctx.data_mut(|d| d.insert_temp(popup_id, area.response.rect));

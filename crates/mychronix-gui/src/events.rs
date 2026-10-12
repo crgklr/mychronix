@@ -53,16 +53,14 @@ impl Events {
     }
 
     pub fn load() -> Self {
-        Self::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        crate::storage::load_or_default(Self::path())
     }
 
     pub fn save(&self) -> std::io::Result<()> {
         let path = Self::path().ok_or_else(|| std::io::Error::other("no home folder"))?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)
+        crate::storage::save(&path, self)
     }
+
 
     /// Adds or replaces `def` (by id; id 0 gets a new one). Returns its id.
     pub fn upsert(&mut self, mut def: EventDef) -> u64 {

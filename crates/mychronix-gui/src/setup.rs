@@ -4,7 +4,8 @@
 //! A sheet is saved beside a session as `a_NNNN.setup.json`. A session
 //! without one uses the previous session's (same logger), so a sheet only
 //! needs writing when something changes; the first sessions fall back to the
-//! logger's baseline in `~/Mychronix/setups.json`.
+//! baseline of the kart the logger is on (older versions kept baselines by
+//! logger in `~/Mychronix/setups.json`, still read for loggers not on a kart).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -51,11 +52,11 @@ impl Setup {
     }
 
     pub fn load(session: &Path) -> Option<Self> {
-        serde_json::from_str(&std::fs::read_to_string(Self::path_for(session)).ok()?).ok()
+        crate::storage::load(&Self::path_for(session))
     }
 
     pub fn save(&self, session: &Path) -> std::io::Result<()> {
-        std::fs::write(Self::path_for(session), serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)
+        crate::storage::save(&Self::path_for(session), self)
     }
 
     pub fn remove(session: &Path) -> std::io::Result<()> {
@@ -163,8 +164,23 @@ impl Baselines {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("setups.json"))
     }
 
+    /// What `setups.json` holds.
+    pub fn saved() -> Self {
+        crate::storage::load_or_default(Self::path())
+    }
+
+    /// Each logger's baseline: its kart's, else what `setups.json` holds.
     pub fn load() -> Self {
-        Self::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        Self::with_karts(Self::saved(), &crate::profiles::Profiles::load())
+    }
+
+    pub fn with_karts(mut saved: Self, profiles: &crate::profiles::Profiles) -> Self {
+        for k in &profiles.karts {
+            if !k.logger.is_empty() && k.baseline != Setup::default() {
+                saved.loggers.insert(k.logger.clone(), k.baseline.clone());
+            }
+        }
+        saved
     }
 }
 

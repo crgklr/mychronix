@@ -161,6 +161,7 @@ dependencies = [
 name = "aim-link"
 version = "0.1.0"
 dependencies = [
+ "log",
  "thiserror 2.0.21",
 ]
 
@@ -2619,6 +2620,7 @@ dependencies = [
  "aim-xrk",
  "anyhow",
  "clap",
+ "log",
 ]
 
 [[package]]
@@ -2635,6 +2637,7 @@ dependencies = [
  "fastframe-icons",
  "fastframe-text",
  "image",
+ "log",
  "rfd",
  "serde",
  "serde_json",
