@@ -1314,13 +1314,13 @@ impl App {
         match (mode, lap) {
             (MapMode::Speed, Some(lap)) => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{:.0}", lap.min_kmh)).size(12.0).color(DIM));
+                    ui.label(RichText::new(format!("{:.0}", crate::units::speed(lap.min_kmh))).size(12.0).color(DIM));
                     let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
                     for k in 0..40 {
                         let r = Rect::from_min_size(pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
                         ui.painter().rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
                     }
-                    ui.label(RichText::new(format!("{:.0} km/h", lap.max_kmh)).size(12.0).color(DIM));
+                    ui.label(RichText::new(format!("{:.0} {}", crate::units::speed(lap.max_kmh), crate::units::speed_unit())).size(12.0).color(DIM));
                     ui.add_space(14.0);
                     let (dot, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
                     ui.painter().circle_filled(dot.center(), 6.0, Color32::from_black_alpha(170));
@@ -3214,7 +3214,7 @@ impl App {
                         if !line.is_empty() {
                             line.push_str("   ");
                         }
-                        line.push_str(&format!("{:.1} km/h", gps.speed_kmh[i]));
+                        line.push_str(&format!("{:.1} {}", crate::units::speed(gps.speed_kmh[i]), crate::units::speed_unit()));
                     }
                     painter.text(rect.left_top() + vec2(2.0, 2.0), egui::Align2::LEFT_TOP, line, medium(14.0), TEXT);
                 }
@@ -3508,7 +3508,12 @@ fn slow_laps(session: &Session) -> Vec<bool> {
 }
 
 /// Lap-timing channels are stored in milliseconds; show them in seconds.
+/// Speeds and temperatures are converted to the display units too.
 fn seconds_not_ms(session: &mut Session) {
+    // Speeds and temperatures in the chosen units (mph and °F, or metric).
+    for c in session.channels.iter_mut() {
+        crate::units::convert_channel(c);
+    }
     for c in session.channels.iter_mut().filter(|c| c.units.trim() == "ms") {
         for v in &mut c.values {
             *v /= 1000.0;

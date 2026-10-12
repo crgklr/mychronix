@@ -234,17 +234,20 @@ pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String
 /// Does the recorded gearing match RPM vs speed? (ok, explanation)
 fn gearing_check(s: &Setup, measured: Option<f64>) -> Option<(bool, String)> {
     let m = measured?;
+    // Shown per mph or per km/h; the check itself works in km/h.
+    let per = |rpm_per_kmh: f64| rpm_per_kmh / crate::units::speed(1.0);
+    let unit = crate::units::speed_unit();
     match s.expected_rpm_per_kmh() {
         Some(e) => {
             let off = (m - e) / e;
             // One rear tooth is ~1.25% and a tyre's rolling size is uncertain by ~2%,
             // so this catches a wrong drive sprocket or tyre size, not a single rear tooth.
             if off.abs() < 0.03 {
-                Some((true, format!("RPM and speed are consistent with {}/{} ({m:.0} rpm per km/h measured, {e:.0} expected for nominal tyre size).", s.drive_teeth.trim(), s.driven_teeth.trim())))
+                Some((true, format!("RPM and speed are consistent with {}/{} ({:.0} rpm per {unit} measured, {:.0} expected for nominal tyre size).", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             } else {
                 let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tyres));
                 let hint = implied.map(|t| format!(" With {}T rear that's a {t:.1}-tooth drive.", s.driven_teeth.trim())).unwrap_or_default();
-                Some((false, format!("RPM and speed don't match {}/{}: {m:.0} rpm per km/h measured, {e:.0} expected.{hint} Check the sheet.", s.drive_teeth.trim(), s.driven_teeth.trim())))
+                Some((false, format!("RPM and speed don't match {}/{}: {:.0} rpm per {unit} measured, {:.0} expected.{hint} Check the sheet.", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             }
         }
         None => {
