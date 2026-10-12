@@ -445,7 +445,7 @@ fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool],
         });
         ui.add_space(10.0);
     };
-    small(ui, &format!("Speed through split {}", k + 1), "km/h by metres in", &mut |plot| {
+    small(ui, &format!("Speed through split {}", k + 1), &format!("{} by metres in", crate::units::speed_unit()), &mut |plot| {
         for (ri, t, line, _) in &per_lap {
             let w = if hovered_row == Some(*ri) { 3.0 } else { 1.5 };
             plot.line(Line::new(format!("lap {ri}"), PlotPoints::from(line.clone())).color(rank_color(rank(*t))).width(w));

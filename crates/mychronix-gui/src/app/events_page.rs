@@ -612,7 +612,7 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
             .unwrap_or_default();
         let egt = match d.peak_egt {
             None => "…".to_string(),
-            Some(Some(v)) => format!("{v:.0} °C"),
+            Some(Some(v)) => format!("{:.0} {}", crate::units::temp(v), crate::units::temp_unit()),
             Some(None) => dash(),
         };
         let tiles: [(&str, String, String, bool); 7] = [
@@ -622,7 +622,7 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
             ("On track", if d.time_ms > 0 { format_duration(d.time_ms as i64) } else { dash() }, String::new(), false),
             ("Peak RPM", d.peak_rpm.map(|r| group_thousands(r as usize)).unwrap_or_else(dash), String::new(), false),
             ("Peak EGT", egt, String::new(), false),
-            ("Top speed", d.top_speed.map(|v| format!("{v:.1} km/h")).unwrap_or_else(dash), String::new(), false),
+            ("Top speed", d.top_speed.map(|v| format!("{:.1} {}", crate::units::speed(v), crate::units::speed_unit())).unwrap_or_else(dash), String::new(), false),
         ];
         let w = ui.available_width();
         // All in one row when there's room, else 4 + 3.

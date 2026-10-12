@@ -22,6 +22,7 @@ mod setup;
 mod split_report;
 mod splits;
 mod theme;
+mod units;
 mod tracks;
 
 use std::path::PathBuf;
@@ -57,6 +58,7 @@ fn main() -> eframe::Result {
         },
         Box::new(move |cc| {
             theme::install(&cc.egui_ctx);
+            units::init();
             // Undo WiFi changes left behind if Mychronix quit while joined to a logger.
             device::restore_after_crash();
             let mut app = app::App::default();
