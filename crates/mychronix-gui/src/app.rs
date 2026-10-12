@@ -8,6 +8,8 @@ use eframe::egui::{
 };
 use egui_plot::{Line, Plot, PlotPoints, VLine};
 
+mod events_page;
+
 use crate::splits;
 use crate::tracks::{self, Kind, Library};
 use crate::theme::{
@@ -23,6 +25,7 @@ const MIN_LAP_MS: i64 = 10_000;
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum Page {
     Sessions,
+    Events,
     #[default]
     Analysis,
     Tracks,
@@ -81,6 +84,14 @@ pub struct App {
     compare_tab: bool,
     /// Shared cursor on the compare tab, metres along the reference lap.
     compare_cursor_m: Option<f64>,
+    /// Events page: saved events, selection, championship filter, dialog, peak EGT per session.
+    events: Option<crate::events::Events>,
+    event_sel: Option<String>,
+    event_champ: Option<String>,
+    event_dialog: Option<crate::events::EventDef>,
+    peak_egt: std::collections::HashMap<PathBuf, Option<f64>>,
+    peak_egt_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<f64>)>>,
+    peak_egt_asked: std::collections::HashSet<PathBuf>,
     /// Channel that colours the track map (None: RPM if present).
     map_channel: Option<usize>,
     pub screenshot_to: Option<PathBuf>,
@@ -216,6 +227,10 @@ impl App {
         self.page = Page::Tracks;
     }
 
+    pub fn show_events_page(&mut self) {
+        self.page = Page::Events;
+    }
+
     pub fn show_sessions_page(&mut self) {
         self.page = Page::Sessions;
     }
@@ -304,6 +319,7 @@ impl eframe::App for App {
                 (Page::Analysis, Some(s), Some((start, end))) => self.analysis(ui, s, start, end),
                 (Page::Analysis, _, _) => self.empty_state(ui),
                 (Page::Sessions, _, _) => self.sessions_page(ui),
+                (Page::Events, _, _) => self.events_page(ui),
                 (Page::Tracks, _, _) => self.tracks_page(ui),
                 (Page::Device, _, _) => self.device_page(ui),
             });
@@ -321,6 +337,7 @@ impl App {
         ui.spacing_mut().item_spacing.y = 2.0;
         for (page, icon, label) in [
             (Page::Sessions, Icon::List, "Sessions"),
+            (Page::Events, Icon::Calendar, "Events"),
             (Page::Analysis, Icon::ChartLine, "Analysis"),
             (Page::Tracks, Icon::MapPin, "Tracks"),
             (Page::Device, Icon::Gauge, "Device"),

@@ -26,6 +26,11 @@ works today:
 - **Lap comparison:** overlay up to eight laps from any sessions, lined up by
   distance around the track, with the time gap to a reference lap and a map of
   where time is gained and lost.
+- **Events:** sessions grouped into events as RaceStudio does (week, track and
+  championship), plus events you name or plan ahead. Each driver's sessions,
+  laps, time on track, fastest lap, peak RPM and EGT and top speed, best lap
+  through the event, and a season summary per championship. Engine warm-ups
+  are listed but left out of the numbers.
 - **Tracks:** AiM's track database by country with venue details, outlines,
   elevation, favourites, your speed on the track with braking points, splits
   with sector times and an ideal lap, map or satellite view.
@@ -36,10 +41,6 @@ Mychronix only ever reads from the logger.
 
 Roughly in priority order.
 
-- [ ] **Events and championships:** group sessions into events by week, track
-      and championship, as RaceStudio does, plus named and planned events.
-      Per-event stats for each driver: sessions, laps, time on track, fastest
-      lap, peak RPM and EGT.
 - [ ] **MyChron 4:** connect over USB and read its sessions; compare laps
       timed by the infrared beacon (no GPS) along time instead of distance.
 - [ ] **Live device test:** confirm joining, listing, downloading and
@@ -93,7 +94,7 @@ command-line tool to `~/.local/bin`, and adds a launcher with its icon to your
 app menu.
 
 Data lives in `~/Mychronix/`: sessions under `sessions/<logger id>/`, your
-names and favourites as small JSON files.
+names, favourites and events as small JSON files.
 
 ### AiM track database
 
