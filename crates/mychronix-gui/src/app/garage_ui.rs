@@ -119,9 +119,9 @@ pub(super) struct DriverEdit {
 }
 
 /// Classes offered while typing, besides those already entered.
-const CLASSES: [&str; 16] = [
-    "Kid Kart", "Micro Swift", "Mini Swift", "Cadet", "Junior 1", "Junior 2", "Junior 3", "KA100 Junior", "KA100 Senior", "X30 Junior", "X30 Senior", "LO206",
-    "Clones", "Animal", "Open Class", "Masters",
+const CLASSES: [&str; 22] = [
+    "Kid Kart", "Micro Swift", "Mini Swift", "Cadet", "Junior 1", "Junior 2", "Junior 3", "KA100 Junior", "KA100 Senior", "X30 Junior", "X30 Senior",
+    "Junior ROK", "Senior ROK", "Masters ROK", "Junior VLR", "Senior VLR", "Masters VLR", "LO206", "Clones", "Animal", "Open Class", "Masters",
 ];
 
 /// A kart being added or edited.
