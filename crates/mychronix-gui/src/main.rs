@@ -85,14 +85,16 @@ fn main() -> eframe::Result {
                         app.demo_compare();
                     }
                 }
-                // Without a file, start from the list of sessions.
-                None => app.show_sessions_page(),
+                // Without a file, start at home: the Garage.
+                None => app.show_garage_page(),
             }
             match std::env::var("MYCHRONIX_PAGE").as_deref() {
                 Ok("device") => app.show_device_page(),
                 Ok("tracks") => app.show_tracks_page(),
                 Ok("sessions") => app.show_sessions_page(),
                 Ok("events") => app.show_events_page(),
+                Ok("garage") => app.show_garage_page(),
+                Ok("analysis") => app.show_analysis_page(),
                 _ => {}
             }
             app.screenshot_to = screenshot;

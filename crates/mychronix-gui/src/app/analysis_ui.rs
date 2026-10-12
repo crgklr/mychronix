@@ -7,12 +7,13 @@ use super::*;
 pub(super) const RAIL_W: f32 = 64.0;
 const RAIL_OPEN_W: f32 = 236.0;
 
-const PAGES: [(Page, Icon, &str); 5] = [
+const PAGES: [(Page, Icon, &str); 6] = [
+    (Page::Garage, Icon::House, "Garage"),
     (Page::Sessions, Icon::List, "Sessions"),
     (Page::Events, Icon::Calendar, "Events"),
     (Page::Analysis, Icon::ChartLine, "Analysis"),
     (Page::Tracks, Icon::MapPin, "Tracks"),
-    (Page::Device, Icon::Gauge, "Device"),
+    (Page::Device, Icon::Mychron, "Device"),
 ];
 
 impl App {
@@ -38,6 +39,14 @@ impl App {
                     // Logo: the MyChron icon, then the wordmark as the rail opens.
                     let icon = Rect::from_min_size(rect.min + vec2((RAIL_W - 38.0) / 2.0, 18.0), Vec2::splat(38.0));
                     egui::Image::new(egui::include_image!("../../assets/mychronix-icon.svg")).paint_at(ui, icon);
+                    // The logo goes home, to the Garage.
+                    let logo = ui.interact(icon.expand(4.0), egui::Id::new("rail_logo"), Sense::click()).on_hover_text("Garage");
+                    if logo.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if logo.clicked() {
+                        self.page = Page::Garage;
+                    }
                     if t > 0.05 {
                         let mark = Rect::from_min_size(pos2(icon.right() + 10.0, icon.center().y - 11.0), vec2(22.0 * 578.0 / 82.0, 22.0));
                         egui::Image::new(egui::include_image!("../../assets/mychronix.svg")).tint(Color32::from_white_alpha((255.0 * t) as u8)).paint_at(ui, mark.intersect(rect));

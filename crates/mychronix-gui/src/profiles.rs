@@ -16,6 +16,35 @@ pub struct LoggerProfile {
     /// Last track entered when downloading from this logger.
     #[serde(default)]
     pub track: String,
+    /// The engine package, e.g. "IAME Mini Swift". A picture of it in
+    /// `~/Mychronix/engines/<name>.png` stands in for the driver's initial.
+    #[serde(default)]
+    pub engine: String,
+}
+
+/// A picture of `engine` as (uri, PNG bytes): `~/Mychronix/engines/<name>.png`
+/// if you've added one, else one bundled with the app.
+/// "IAME Mini Swift" → `iame-mini-swift.png`.
+pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
+    let slug: String = engine
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        return None;
+    }
+    let own = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("engines").join(format!("{slug}.png")));
+    if let Some(bytes) = own.as_ref().and_then(|p| std::fs::read(p).ok()) {
+        return Some((format!("bytes://engine/{slug}.png"), bytes));
+    }
+    const BUNDLED: [(&str, &[u8]); 1] = [("iame-mini-swift", include_bytes!("../assets/engines/iame-mini-swift.png"))];
+    BUNDLED.iter().find(|(s, _)| *s == slug).map(|(_, b)| (format!("bytes://engine/bundled/{slug}.png"), b.to_vec()))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -121,7 +121,7 @@ impl App {
         self.setup_dialog(ui.ctx());
     }
 
-    fn setup_dialog(&mut self, ctx: &egui::Context) {
+    pub(super) fn setup_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut edit) = self.setup_edit.take() else { return };
         let tyres = self.tyre_suggestions();
         let (mut open, mut save, mut cancel, mut revert) = (true, false, false, false);
