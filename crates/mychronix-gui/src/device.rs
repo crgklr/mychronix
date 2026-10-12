@@ -276,6 +276,12 @@ fn leave() {
     for name in &restore.paused {
         let _ = nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]);
     }
+    // Already back on a network of your choosing: leave it be.
+    let current = current_wifi();
+    if current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
     match &restore.previous {
         Some(ssid) => {
             let _ = nmcli(&["connection", "up", ssid]).or_else(|_| nmcli(&["device", "wifi", "connect", ssid]));
@@ -287,7 +293,14 @@ fn leave() {
     let _ = std::fs::remove_file(path);
 }
 
-/// If Mychronix quit while joined to a logger, undo the WiFi changes now.
+/// True while Mychronix has other networks' auto-connect paused.
+pub fn paused_networks() -> bool {
+    restore_file().is_some_and(|p| p.exists())
+}
+
+/// If Mychronix quit while joined to a logger, or you switched networks
+/// yourself, turn the other networks' auto-connect back on (only once the
+/// computer is off the MyChron's network).
 pub fn restore_after_crash() {
     if restore_file().is_some_and(|p| p.exists()) && !current_wifi().is_some_and(|s| s.starts_with("AiM-")) {
         leave();
