@@ -12,6 +12,7 @@ mod analysis_ui;
 mod events_page;
 mod report_ui;
 mod setup_ui;
+mod splits_ui;
 
 use crate::splits;
 use crate::tracks::{self, Kind, Library};
@@ -54,6 +55,7 @@ enum AnalysisView {
     #[default]
     Session,
     Report,
+    Splits,
     Compare,
 }
 
@@ -110,6 +112,7 @@ pub struct App {
     compare: Vec<crate::compare::CompareLap>,
     analysis_view: AnalysisView,
     report: report_ui::ReportState,
+    splits: splits_ui::SplitsState,
     /// Shared cursor on the compare tab, metres along the reference lap.
     compare_cursor_m: Option<f64>,
     /// The reference length the compare graphs last showed (as bits), to reset their range.
@@ -281,6 +284,10 @@ impl App {
 
     pub fn show_distance(&mut self) {
         self.graph_distance = true;
+    }
+
+    pub fn show_splits(&mut self) {
+        self.analysis_view = AnalysisView::Splits;
     }
 
     pub fn show_report(&mut self) {
@@ -2909,6 +2916,10 @@ impl App {
             }
             AnalysisView::Report => {
                 self.report_view(ui, session);
+                return;
+            }
+            AnalysisView::Splits => {
+                self.splits_view(ui, session);
                 return;
             }
             AnalysisView::Session => {}

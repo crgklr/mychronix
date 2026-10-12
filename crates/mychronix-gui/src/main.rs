@@ -19,6 +19,7 @@ mod events;
 mod profiles;
 mod report;
 mod setup;
+mod split_report;
 mod splits;
 mod theme;
 mod tracks;
@@ -67,6 +68,9 @@ fn main() -> eframe::Result {
                     }
                     if std::env::var_os("MYCHRONIX_DISTANCE").is_some() {
                         app.show_distance();
+                    }
+                    if std::env::var_os("MYCHRONIX_SPLITS").is_some() {
+                        app.show_splits();
                     }
                     if std::env::var_os("MYCHRONIX_REPORT").is_some() {
                         app.show_report();
