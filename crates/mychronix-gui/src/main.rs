@@ -12,6 +12,7 @@
 //! (`MYCHRONIX_FAKE_DIALOG=1` also opens the download dialog).
 
 mod app;
+mod charts;
 mod compare;
 mod countries;
 mod device;
@@ -70,6 +71,9 @@ fn main() -> eframe::Result {
                     }
                     if std::env::var_os("MYCHRONIX_DISTANCE").is_some() {
                         app.show_distance();
+                    }
+                    if let Ok(v) = std::env::var("MYCHRONIX_VIEW") {
+                        app.show_view(&v);
                     }
                     if std::env::var_os("MYCHRONIX_SPLITS").is_some() {
                         app.show_splits();

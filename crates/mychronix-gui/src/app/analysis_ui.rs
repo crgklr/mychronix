@@ -122,6 +122,8 @@ impl App {
             (AnalysisView::Session, Icon::ChartLine, "Graphs".to_string(), "Channels through a lap, with the track map"),
             (AnalysisView::Report, Icon::List, "Lap by lap".to_string(), "Each lap's numbers side by side"),
             (AnalysisView::Splits, Icon::Flag, "Splits".to_string(), "Each lap's time through each part of the track"),
+            (AnalysisView::Histogram, Icon::Gauge, "Histogram".to_string(), "How much time a channel spends in each band, e.g. RPM"),
+            (AnalysisView::Scatter, Icon::Activity, "Scatter".to_string(), "One channel against another: RPM vs speed, the G-G diagram"),
             (AnalysisView::Compare, Icon::Activity, compare, "Laps from any sessions overlaid by distance"),
         ];
         let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 0.0), Sense::hover());
