@@ -154,9 +154,10 @@ impl App {
         ui.painter().hline(line.left()..=line.right(), y, Stroke::new(1.0, theme::OUTLINE));
     }
 
-    /// Every lap as a block, sized by its time: click to view it; the small
-    /// circle adds it to Compare. Out, in and slow laps are dimmed.
-    pub(super) fn lap_strip(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
+    /// Every lap as a block, sized by its time. On Graphs a click views the
+    /// lap and the small circle adds it to Compare; on Compare a click adds or
+    /// removes it. Out, in and slow laps are dimmed.
+    pub(super) fn lap_strip(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, compare_mode: bool) {
         let laps = &session.laps;
         if laps.is_empty() {
             return;
@@ -168,7 +169,7 @@ impl App {
         let median = sorted[sorted.len() / 2].max(1) as f32;
         // Racing laps share one width; long laps (stopped under a flag) are wider, capped so they don't swamp the strip.
         let weight = |l: &aim_xrk::Lap| (l.duration_ms() as f32 / median).clamp(1.0, 1.8);
-        let all_w = 64.0;
+        let all_w = if compare_mode { 86.0 } else { 64.0 };
         let gap = 4.0;
         let avail = ui.available_width() - all_w - gap * laps.len() as f32;
         let total: f32 = laps.iter().map(weight).sum();
@@ -177,22 +178,32 @@ impl App {
         let mut pick: Option<Option<usize>> = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            // The whole session.
-            let (rect, resp) = ui.allocate_exact_size(vec2(all_w, h), Sense::click());
-            let on = self.lap.is_none();
-            let p = ui.painter();
-            p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else if resp.hovered() { SURFACE_HOVER } else { SURFACE });
-            if on {
-                p.rect_stroke(rect, CornerRadius::same(theme::RADIUS_SMALL), Stroke::new(1.5, TEXT), egui::StrokeKind::Inside);
-            }
-            p.text(rect.center(), egui::Align2::CENTER_CENTER, "All", medium(13.5), if on { TEXT } else { SECONDARY });
-            if resp.on_hover_text("The whole session").clicked() {
-                pick = Some(None);
+            if compare_mode {
+                // Which session these laps come from, and what a click does.
+                let (rect, _) = ui.allocate_exact_size(vec2(all_w, h), Sense::hover());
+                let number = self.path.as_ref().and_then(|p| p.file_stem()).and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+                let p = ui.painter();
+                p.text(pos2(rect.left() + 4.0, rect.top() + 13.0), egui::Align2::LEFT_CENTER, "Add laps", regular(11.5), DIM);
+                p.text(pos2(rect.left() + 4.0, rect.top() + 31.0), egui::Align2::LEFT_CENTER, number.map(|n| format!("Session {n}")).unwrap_or_default(), medium(12.5), SECONDARY);
+            } else {
+                // The whole session.
+                let (rect, resp) = ui.allocate_exact_size(vec2(all_w, h), Sense::click());
+                let on = self.lap.is_none();
+                let p = ui.painter();
+                p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else if resp.hovered() { SURFACE_HOVER } else { SURFACE });
+                if on {
+                    p.rect_stroke(rect, CornerRadius::same(theme::RADIUS_SMALL), Stroke::new(1.5, TEXT), egui::StrokeKind::Inside);
+                }
+                p.text(rect.center(), egui::Align2::CENTER_CENTER, "All", medium(13.5), if on { TEXT } else { SECONDARY });
+                if resp.on_hover_text("The whole session").clicked() {
+                    pick = Some(None);
+                }
             }
             for (i, lap) in laps.iter().enumerate() {
                 let w = (avail * weight(lap) / total).max(28.0);
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
-                let selected = self.lap == Some(i);
+                // On Compare, "selected" means in the comparison.
+                let selected = if compare_mode { false } else { self.lap == Some(i) };
                 let is_best = Some(*lap) == best;
                 let compare_slot = self.compare.iter().find(|c| c.lap == *lap && Some(&c.path) == self.path.as_ref()).map(|c| c.slot);
                 let p = ui.painter();
@@ -212,6 +223,9 @@ impl App {
                 if selected {
                     p.rect_stroke(rect, CornerRadius::same(theme::RADIUS_SMALL), Stroke::new(1.5, TEXT), egui::StrokeKind::Inside);
                 }
+                if let (true, Some(slot)) = (compare_mode, compare_slot) {
+                    p.rect_stroke(rect, CornerRadius::same(theme::RADIUS_SMALL), Stroke::new(2.0, SERIES[slot]), egui::StrokeKind::Inside);
+                }
                 let time_color = if is_best { theme::GOOD } else if slow[i] { DIM } else { TEXT };
                 if w >= 62.0 {
                     p.text(pos2(rect.left() + 8.0, rect.top() + 13.0), egui::Align2::LEFT_CENTER, lap.number.to_string(), regular(11.5), DIM);
@@ -226,7 +240,7 @@ impl App {
                     Some(slot) => {
                         p.circle_filled(dot.center(), 5.0, SERIES[slot]);
                     }
-                    None if resp.hovered() && w >= 40.0 => {
+                    None if resp.hovered() && w >= 40.0 && !compare_mode => {
                         p.circle_stroke(dot.center(), 6.0, Stroke::new(1.2, if over_dot { TEXT } else { DIM }));
                         p.text(dot.center() - vec2(0.0, 0.5), egui::Align2::CENTER_CENTER, "+", medium(11.0), if over_dot { TEXT } else { DIM });
                     }
@@ -243,9 +257,14 @@ impl App {
                 } else if slow[i] {
                     tip.push_str("  ·  out, in or slow lap");
                 }
-                tip.push_str(if compare_slot.is_some() { "\nThe dot: remove from Compare" } else { "\nClick to view  ·  + to add to Compare" });
+                tip.push_str(match (compare_mode, compare_slot.is_some()) {
+                    (true, true) => "\nClick to remove from the comparison",
+                    (true, false) => "\nClick to add to the comparison",
+                    (false, true) => "\nClick to view  ·  the dot: remove from Compare",
+                    (false, false) => "\nClick to view  ·  + to add to Compare",
+                });
                 let clicked = resp.on_hover_text(tip).clicked();
-                if clicked && (over_dot || (compare_slot.is_some() && over_dot)) {
+                if clicked && (compare_mode || over_dot) {
                     toggle = Some(*lap);
                 } else if clicked {
                     pick = Some(Some(i));

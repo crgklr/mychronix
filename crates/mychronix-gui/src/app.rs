@@ -2610,6 +2610,9 @@ impl App {
     }
 
     fn compare_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
+        // This session's laps, to add or remove with a click.
+        self.lap_strip(ui, session, true);
+        ui.add_space(12.0);
         // Lap chips: colour, label, reference marker; click to make reference, × to remove.
         let mut make_ref = None;
         let mut remove = None;
@@ -2657,7 +2660,7 @@ impl App {
                 ui.set_min_height(160.0);
                 ui.label(RichText::new("Pick laps to compare").font(semibold(17.0)).color(TEXT));
                 ui.label(
-                    RichText::new("Use the + next to any lap in the sidebar (from this session or any other), or add your best laps at this track. The first lap is the reference the others are measured against.")
+                    RichText::new("Click laps in the strip above to add them; open another session (Sessions page) to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
                         .color(SECONDARY),
                 );
             });
@@ -2910,7 +2913,7 @@ impl App {
             }
             AnalysisView::Session => {}
         }
-        self.lap_strip(ui, session);
+        self.lap_strip(ui, session, false);
         ui.add_space(12.0);
 
         let gap = 12.0;
