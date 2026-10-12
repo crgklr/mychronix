@@ -73,6 +73,15 @@ impl App {
         self.setup_dialog(ui.ctx());
     }
 
+    /// The setup in force for the open session.
+    pub(super) fn current_setup(&mut self) -> Option<Setup> {
+        let path = self.path.clone()?;
+        let lib = self.library.get_or_insert_with(Library::load);
+        let i = lib.sessions.iter().position(|s| s.path == path)?;
+        let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
+        Some(setup::resolve(lib, baselines).swap_remove(i).setup)
+    }
+
     /// The setup in one line under the session title: summary, any change, Edit.
     pub(super) fn setup_line(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };

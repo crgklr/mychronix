@@ -34,6 +34,12 @@ works today:
   running total, shaded fastest to slowest; best theoretical and best rolling
   laps; average, median, slowest and std dev; per-split details (speed through
   it, time and distance driven by lap) and a map of every lap through it.
+- **Histogram:** time spent in each band of a channel (RPM, speed, EGT, g) for
+  a lap or every racing lap, as % of time or seconds, with the best lap
+  outlined for comparison.
+- **Scatter:** one channel against another, optionally coloured by a third:
+  RPM against speed with the setup sheet's gearing drawn as a line, and the
+  G-G diagram on a circular grid.
 - **Lap comparison:** overlay up to eight laps from any sessions, lined up by
   distance around the track, with the time gap to a reference lap and a map of
   where time is gained and lost.
@@ -81,11 +87,6 @@ Roughly in priority order.
       `.tkk` files; show the track's local time and time zone.
 - [ ] **Device information:** firmware version, the tracks stored on the
       logger, and its counters (odometers), all read-only.
-- [ ] **Histograms and scatter plots:** time in each RPM band per lap; one
-      channel against another (RPM vs speed, the G-G diagram).
-- [ ] **Gearing calculator:** predicted RPM at the end of each track's longest
-      straight for a sprocket change, from your data at that track or a similar
-      one.
 - [ ] **Export:** sessions and laps to CSV.
 - [ ] **Writing to the logger** (custom tracks, settings), only once that part
       of the protocol is properly understood. Firmware updates are out of scope.
