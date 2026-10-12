@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/crgklr/mychronix"
+
+[workspace.dependencies]
+aim-xrk = { path = "crates/aim-xrk" }
+aim-link = { path = "crates/aim-link" }
+aim-mychron = { path = "crates/aim-mychron" }
+aim-cfg = { path = "crates/aim-cfg" }
+aim-track = { path = "crates/aim-track" }
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+eframe = "0.36"
+egui_plot = "0.37"
+fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.5.0" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.5.0" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.5.0" }
+egui_extras = { version = "0.36", features = ["svg", "image"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+walkers = "0.61"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

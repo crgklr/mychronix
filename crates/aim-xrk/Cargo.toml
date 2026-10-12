@@ -1,0 +1,12 @@
+[package]
+name = "aim-xrk"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+# MIT-licensed XRK/XRZ reader (github.com/m3rlin45/libxrk); not on crates.io, so pinned by commit.
+libxrk = { git = "https://github.com/m3rlin45/libxrk", rev = "4e44d38debc9445b8e5446c9b7a241f5730ac920" }
