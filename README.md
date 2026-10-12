@@ -23,13 +23,61 @@ works today:
   per-logger driver and kart names.
 - **Analysis:** channels over time with a shared cursor, laps and best lap
   (matching the logger's own), a GPS track map coloured by any channel.
+- **Lap comparison:** overlay up to eight laps from any sessions, lined up by
+  distance around the track, with the time gap to a reference lap and a map of
+  where time is gained and lost.
 - **Tracks:** AiM's track database by country with venue details, outlines,
   elevation, favourites, your speed on the track with braking points, splits
   with sector times and an ideal lap, map or satellite view.
 
-Not yet: lap comparison, events, MyChron 4 (USB), writing anything to the
-logger (tracks, settings, firmware). Mychronix only ever reads from the
-logger.
+Mychronix only ever reads from the logger.
+
+## To do
+
+Roughly in priority order.
+
+- [ ] **Events and championships:** group sessions into events by week, track
+      and championship, as RaceStudio does, plus named and planned events.
+      Per-event stats for each driver: sessions, laps, time on track, fastest
+      lap, peak RPM and EGT.
+- [ ] **MyChron 4:** connect over USB and read its sessions; compare laps
+      timed by the infrared beacon (no GPS) along time instead of distance.
+- [ ] **Live device test:** confirm joining, listing, downloading and
+      disconnecting from the Device page end to end on a MyChron 6.
+- [ ] **Session details after download:** edit driver, kart, championship,
+      session type and comment for one or many sessions; filter by session
+      type.
+- [ ] **Import, export and delete sessions:** add `.xrk`/`.xrz` files or folders
+      from elsewhere (e.g. a friend's data); export copies; remove sessions.
+- [ ] **Laps preview** on the Sessions page: lap times for the selected session
+      and a lap-time-by-lap graph, without opening it.
+- [ ] **Analysis by distance:** a time/distance switch for the Session tab's
+      graphs; quick lap picks (best 1/3/5, first or last laps); drag a range to
+      read the time and channel change across it; min/max/average per
+      channel.
+- [ ] **Lap comparison, more:** the time-change map for every compared lap, not
+      just the second; a "differential" view beside the gap; a time-based mode
+      for laps without GPS.
+- [ ] **Split report** per session, as in RaceStudio: absolute or cumulative
+      times, against the best split or the best lap, cells shaded best to
+      worst, and statistics (average, median, best theoretical, slowest,
+      standard deviation, best rolling); per-split graphs.
+- [ ] **Split divisions:** by corners and straights, from the track's official
+      splits, or N even segments; rename, divide, merge and drag splits; saved
+      per track. Split bands over the distance graphs, double-click to zoom
+      into one.
+- [ ] **Tracks:** make a custom track from a session's lap; import and export
+      `.tkk` files; show the track's local time and time zone.
+- [ ] **Device information:** firmware version, the tracks stored on the
+      logger, and its counters (odometers), all read-only.
+- [ ] **Channel reports:** min/max/average per lap and session, histograms
+      (e.g. time in each RPM band), and scatter plots of one channel against
+      another.
+- [ ] **Export:** sessions and laps to CSV.
+- [ ] **Writing to the logger** (custom tracks, settings), only once that part
+      of the protocol is properly understood. Firmware updates are out of scope.
+- [ ] **MyChron 5:** confirm it works the same as the 6 over WiFi.
+- [ ] **Packaging:** a Flatpak or similar so installing doesn't need Rust.
 
 ## Install (Linux)
 

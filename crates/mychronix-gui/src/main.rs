@@ -12,6 +12,7 @@
 //! (`MYCHRONIX_FAKE_DIALOG=1` also opens the download dialog).
 
 mod app;
+mod compare;
 mod countries;
 mod device;
 mod profiles;
@@ -60,6 +61,9 @@ fn main() -> eframe::Result {
                     app.load(path);
                     if demo {
                         app.demo();
+                    }
+                    if std::env::var_os("MYCHRONIX_COMPARE").is_some() {
+                        app.demo_compare();
                     }
                 }
                 // Without a file, start from the list of sessions.
