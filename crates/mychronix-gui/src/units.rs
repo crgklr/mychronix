@@ -1,6 +1,7 @@
 //! Display units: mph and °F, or km/h and °C. The MyChron records metric;
 //! values are converted when shown. Chosen in `~/Mychronix/settings.json`
-//! (`"units": "imperial"` or `"metric"`), else from the system's country.
+//! (`"units": "imperial"` or `"metric"`), else from the Mac's measurement
+//! setting or the system's country.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,9 +24,15 @@ pub fn init() {
         Some("metric") => false,
         // The countries that use miles per hour and Fahrenheit day to day. The
         // measurement locale wins when set (e.g. US English with metric units).
-        _ => matches!(measurement_country().or_else(crate::countries::system_country).as_deref(), Some("US") | Some("LR") | Some("MM")),
+        _ => mac_imperial().unwrap_or_else(|| matches!(measurement_country().or_else(crate::countries::system_country).as_deref(), Some("US") | Some("LR") | Some("MM"))),
     };
     IMPERIAL.store(imperial, Ordering::Relaxed);
+}
+
+/// A Mac's own measurement setting (System Settings → General → Language &
+/// Region), when it has one: metric unless set to US units.
+fn mac_imperial() -> Option<bool> {
+    crate::countries::mac_default("AppleMetricUnits").map(|v| v == "0")
 }
 
 /// The region of `LC_MEASUREMENT`, e.g. `en_DK.UTF-8` → `DK`.

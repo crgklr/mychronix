@@ -17,6 +17,7 @@ mod compare;
 mod countries;
 mod device;
 mod logging;
+mod paths;
 mod events;
 mod profiles;
 mod report;
@@ -39,13 +40,13 @@ fn app_icon() -> egui::IconData {
     egui::IconData { width: image.width(), height: image.height(), rgba: image.into_raw() }
 }
 
-/// Writes a crash to `~/.cache/mychronix/crash.log` (kept under about 1 MB)
+/// Writes a crash to `crash.log` beside the log (kept under about 1 MB)
 /// and, if the app itself is going down, undoes any WiFi changes first.
 fn install_crash_handler() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-        if let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/mychronix")) {
+        if let Some(dir) = crate::paths::log_dir() {
             let _ = std::fs::create_dir_all(&dir);
             let log = dir.join("crash.log");
             if std::fs::metadata(&log).is_ok_and(|m| m.len() > 1_000_000) {

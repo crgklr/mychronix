@@ -304,11 +304,11 @@ mod tests {
 
 /// Peak exhaust temperature of each session, read from the session files in
 /// the background (the logger's summary doesn't record it) and cached in
-/// `~/.cache/mychronix/peak-egt.json`.
+/// `peak-egt.json` in the cache folder.
 pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Option<f64>)> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let cache_path = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/mychronix/peak-egt.json"));
+        let cache_path = crate::paths::cache_dir().map(|d| d.join("peak-egt.json"));
         let mut cache: std::collections::BTreeMap<String, Option<f64>> =
             cache_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let mut changed = false;

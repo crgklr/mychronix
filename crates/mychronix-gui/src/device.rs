@@ -2,10 +2,11 @@
 //! logger and downloads sessions, all on a background thread so the window
 //! never stalls. The UI sends [`Command`]s and reads [`Event`]s.
 //!
-//! WiFi goes through NetworkManager (`nmcli`). While joined to the logger,
+//! On Linux, WiFi goes through NetworkManager (`nmcli`). While joined to the logger,
 //! other WiFi networks stop auto-joining so the computer doesn't wander back
 //! to one with internet; they're restored when you leave, or at the next
-//! start if Mychronix quit while joined (see [`restore_after_crash`]).
+//! start if Mychronix quit while joined (see [`restore_after_crash`]). On a
+//! Mac you join the MyChron's network from the menu bar (see `mod wifi`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
@@ -223,155 +224,239 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
 }
 
 // ---------------------------------------------------------------------------
-// WiFi via NetworkManager
+// WiFi: NetworkManager on Linux; on a Mac you join from the menu bar.
 
-fn restore_file() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("wifi-restore.json"))
-}
+pub use wifi::{JOIN_HINT, paused_networks, restore_after_crash, restore_wifi_now};
+use wifi::{aim_networks, current_wifi, join, leave};
 
-#[derive(Serialize, Deserialize, Default)]
-struct Restore {
-    /// Connection profiles whose auto-join we paused.
-    paused: Vec<String>,
-    /// The network to go back to.
-    previous: Option<String>,
-}
+#[cfg(not(target_os = "macos"))]
+mod wifi {
+    use super::*;
 
-fn nmcli(args: &[&str]) -> Result<String, String> {
-    log::debug!("nmcli {}", args.join(" "));
-    let out = Process::new("nmcli").args(args).output().map_err(|e| {
-        log::error!("couldn't run nmcli: {e}");
-        format!("nmcli: {e}")
-    })?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        log::warn!("nmcli {} failed: {err}", args.join(" "));
-        Err(err)
+    /// What the Device page says while no MyChron answers.
+    pub const JOIN_HINT: &str = "Turn on the MyChron and its WiFi. Mychronix keeps looking.";
+
+
+    fn restore_file() -> Option<PathBuf> {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("wifi-restore.json"))
     }
-}
 
-/// `nmcli -t` escapes ':' inside fields as '\:'.
-fn split_terse(line: &str) -> Vec<String> {
-    let mut fields = vec![String::new()];
-    let mut chars = line.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => fields.last_mut().unwrap().extend(chars.next()),
-            ':' => fields.push(String::new()),
-            c => fields.last_mut().unwrap().push(c),
+    #[derive(Serialize, Deserialize, Default)]
+    struct Restore {
+        /// Connection profiles whose auto-join we paused.
+        paused: Vec<String>,
+        /// The network to go back to.
+        previous: Option<String>,
+    }
+
+    pub(super) fn nmcli(args: &[&str]) -> Result<String, String> {
+        log::debug!("nmcli {}", args.join(" "));
+        let out = Process::new("nmcli").args(args).output().map_err(|e| {
+            log::error!("couldn't run nmcli: {e}");
+            format!("nmcli: {e}")
+        })?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            log::warn!("nmcli {} failed: {err}", args.join(" "));
+            Err(err)
         }
     }
-    fields
-}
 
-/// AiM networks in range (SSID, signal %), strongest first.
-fn aim_networks() -> Vec<(String, u8)> {
-    let Ok(out) = nmcli(&["-t", "-f", "SSID,SIGNAL", "device", "wifi", "list", "--rescan", "yes"]) else { return Vec::new() };
-    let mut nets: Vec<(String, u8)> = out
-        .lines()
-        .map(split_terse)
-        .filter(|f| f.len() >= 2 && f[0].starts_with("AiM-"))
-        .map(|f| (f[0].clone(), f[1].parse().unwrap_or(0)))
-        .collect();
-    nets.sort_by(|a, b| b.1.cmp(&a.1));
-    nets.dedup_by(|a, b| a.0 == b.0);
-    nets
-}
-
-fn current_wifi() -> Option<String> {
-    nmcli(&["-t", "-f", "ACTIVE,SSID", "device", "wifi"])
-        .ok()?
-        .lines()
-        .map(split_terse)
-        .find(|f| f.first().is_some_and(|a| a == "yes"))
-        .and_then(|f| f.get(1).cloned())
-        .filter(|s| !s.is_empty())
-}
-
-fn join(ssid: &str) -> Result<(), String> {
-    let previous = current_wifi().filter(|s| !s.starts_with("AiM-"));
-    // Stop other WiFi profiles from pulling the computer back to the internet.
-    let mut paused = Vec::new();
-    for line in nmcli(&["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"])?.lines() {
-        let f = split_terse(line);
-        if f.len() >= 3 && f[1] == "802-11-wireless" && f[2] == "yes" && f[0] != ssid {
-            if nmcli(&["connection", "modify", &f[0], "connection.autoconnect", "no"]).is_ok() {
-                paused.push(f[0].clone());
+    /// `nmcli -t` escapes ':' inside fields as '\:'.
+    pub(super) fn split_terse(line: &str) -> Vec<String> {
+        let mut fields = vec![String::new()];
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => fields.last_mut().unwrap().extend(chars.next()),
+                ':' => fields.push(String::new()),
+                c => fields.last_mut().unwrap().push(c),
             }
         }
+        fields
     }
-    if let Some(path) = restore_file() {
-        let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let _ = std::fs::write(&path, serde_json::to_string(&Restore { paused: paused.clone(), previous }).unwrap_or_default());
+
+    /// AiM networks in range (SSID, signal %), strongest first.
+    pub(super) fn aim_networks() -> Vec<(String, u8)> {
+        let Ok(out) = nmcli(&["-t", "-f", "SSID,SIGNAL", "device", "wifi", "list", "--rescan", "yes"]) else { return Vec::new() };
+        let mut nets: Vec<(String, u8)> = out
+            .lines()
+            .map(split_terse)
+            .filter(|f| f.len() >= 2 && f[0].starts_with("AiM-"))
+            .map(|f| (f[0].clone(), f[1].parse().unwrap_or(0)))
+            .collect();
+        nets.sort_by(|a, b| b.1.cmp(&a.1));
+        nets.dedup_by(|a, b| a.0 == b.0);
+        nets
     }
-    if let Err(e) = nmcli(&["device", "wifi", "connect", ssid]) {
-        leave();
-        return Err(format!("Couldn't join {ssid}: {e}"));
+
+    pub(super) fn current_wifi() -> Option<String> {
+        nmcli(&["-t", "-f", "ACTIVE,SSID", "device", "wifi"])
+            .ok()?
+            .lines()
+            .map(split_terse)
+            .find(|f| f.first().is_some_and(|a| a == "yes"))
+            .and_then(|f| f.get(1).cloned())
+            .filter(|s| !s.is_empty())
     }
-    // The MyChron's network never auto-joins on its own.
-    let _ = nmcli(&["connection", "modify", ssid, "connection.autoconnect", "no"]);
-    // Wait for its DHCP address.
-    for _ in 0..20 {
-        if aim_link::probe(AP_ADDRESS, Duration::from_millis(500)).is_ok() {
-            return Ok(());
+
+    pub(super) fn join(ssid: &str) -> Result<(), String> {
+        let previous = current_wifi().filter(|s| !s.starts_with("AiM-"));
+        // Stop other WiFi profiles from pulling the computer back to the internet.
+        let mut paused = Vec::new();
+        for line in nmcli(&["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"])?.lines() {
+            let f = split_terse(line);
+            if f.len() >= 3 && f[1] == "802-11-wireless" && f[2] == "yes" && f[0] != ssid {
+                if nmcli(&["connection", "modify", &f[0], "connection.autoconnect", "no"]).is_ok() {
+                    paused.push(f[0].clone());
+                }
+            }
         }
+        if let Some(path) = restore_file() {
+            let _ = std::fs::create_dir_all(path.parent().unwrap());
+            let _ = std::fs::write(&path, serde_json::to_string(&Restore { paused: paused.clone(), previous }).unwrap_or_default());
+        }
+        if let Err(e) = nmcli(&["device", "wifi", "connect", ssid]) {
+            leave();
+            return Err(format!("Couldn't join {ssid}: {e}"));
+        }
+        // The MyChron's network never auto-joins on its own.
+        let _ = nmcli(&["connection", "modify", ssid, "connection.autoconnect", "no"]);
+        // Wait for its DHCP address.
+        for _ in 0..20 {
+            if aim_link::probe(AP_ADDRESS, Duration::from_millis(500)).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(format!("Joined {ssid}, but the MyChron didn't answer"))
     }
-    Err(format!("Joined {ssid}, but the MyChron didn't answer"))
-}
 
-/// Re-enables paused auto-join and goes back to the previous network.
-/// Turns the other networks' auto-connect back on right away (used when the
-/// app crashes while joined to a MyChron).
-pub fn restore_wifi_now() {
-    log::warn!("restoring WiFi after a crash");
-    leave();
-}
-
-fn leave() {
-    let Some(path) = restore_file() else { return };
-    let Some(restore) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Restore>(&s).ok()) else { return };
-    for name in &restore.paused {
-        let _ = nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]);
+    /// Re-enables paused auto-join and goes back to the previous network.
+    /// Turns the other networks' auto-connect back on right away (used when the
+    /// app crashes while joined to a MyChron).
+    pub fn restore_wifi_now() {
+        log::warn!("restoring WiFi after a crash");
+        leave();
     }
-    // Already back on a network of your choosing: leave it be.
-    let current = current_wifi();
-    if current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
+
+    pub(super) fn leave() {
+        let Some(path) = restore_file() else { return };
+        let Some(restore) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Restore>(&s).ok()) else { return };
+        for name in &restore.paused {
+            let _ = nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]);
+        }
+        // Already back on a network of your choosing: leave it be.
+        let current = current_wifi();
+        if current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+        match &restore.previous {
+            Some(ssid) => {
+                let _ = nmcli(&["connection", "up", ssid]).or_else(|_| nmcli(&["device", "wifi", "connect", ssid]));
+            }
+            None => {
+                let _ = nmcli(&["device", "disconnect", "wifi"]);
+            }
+        }
         let _ = std::fs::remove_file(path);
-        return;
     }
-    match &restore.previous {
-        Some(ssid) => {
-            let _ = nmcli(&["connection", "up", ssid]).or_else(|_| nmcli(&["device", "wifi", "connect", ssid]));
-        }
-        None => {
-            let _ = nmcli(&["device", "disconnect", "wifi"]);
+
+    /// True while Mychronix has other networks' auto-connect paused.
+    pub fn paused_networks() -> bool {
+        restore_file().is_some_and(|p| p.exists())
+    }
+
+    /// If Mychronix quit while joined to a logger, or you switched networks
+    /// yourself, turn the other networks' auto-connect back on (only once the
+    /// computer is off the MyChron's network).
+    pub fn restore_after_crash() {
+        if restore_file().is_some_and(|p| p.exists()) && !current_wifi().is_some_and(|s| s.starts_with("AiM-")) {
+            leave();
         }
     }
-    let _ = std::fs::remove_file(path);
 }
 
-/// True while Mychronix has other networks' auto-connect paused.
-pub fn paused_networks() -> bool {
-    restore_file().is_some_and(|p| p.exists())
-}
+/// On a Mac, apps can't list WiFi networks without Location access, so you
+/// join the MyChron's network from the menu bar and Mychronix finds the
+/// logger there. Joining by name still works (`networksetup`), and nothing
+/// is paused, so there's nothing to restore.
+#[cfg(target_os = "macos")]
+mod wifi {
+    use super::*;
 
-/// If Mychronix quit while joined to a logger, or you switched networks
-/// yourself, turn the other networks' auto-connect back on (only once the
-/// computer is off the MyChron's network).
-pub fn restore_after_crash() {
-    if restore_file().is_some_and(|p| p.exists()) && !current_wifi().is_some_and(|s| s.starts_with("AiM-")) {
-        leave();
+    pub const JOIN_HINT: &str = "Turn on the MyChron and its WiFi, then choose its network (AiM-MYC…) from the WiFi menu in the menu bar. Mychronix keeps looking.";
+
+    fn networksetup(args: &[&str]) -> Result<String, String> {
+        log::debug!("networksetup {}", args.join(" "));
+        let out = Process::new("networksetup").args(args).output().map_err(|e| format!("networksetup: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        // networksetup reports some failures on stdout with a zero exit.
+        if out.status.success() && !text.contains("Error") && !text.contains("Could not") {
+            Ok(text)
+        } else {
+            let err = format!("{}{}", text.trim(), String::from_utf8_lossy(&out.stderr).trim());
+            log::warn!("networksetup {} failed: {err}", args.join(" "));
+            Err(err)
+        }
     }
+
+    /// The WiFi interface, e.g. "en0".
+    fn interface() -> Option<String> {
+        let out = networksetup(&["-listallhardwareports"]).ok()?;
+        let mut lines = out.lines();
+        while let Some(line) = lines.next() {
+            if line.trim() == "Hardware Port: Wi-Fi" {
+                return lines.next()?.strip_prefix("Device: ").map(|d| d.trim().to_string());
+            }
+        }
+        None
+    }
+
+    /// Not available without Location access; you pick the network yourself.
+    pub(super) fn aim_networks() -> Vec<(String, u8)> {
+        Vec::new()
+    }
+
+    /// The current network's name, when macOS shares it (recent versions may not).
+    pub(super) fn current_wifi() -> Option<String> {
+        let out = networksetup(&["-getairportnetwork", &interface()?]).ok()?;
+        out.trim().strip_prefix("Current Wi-Fi Network: ").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    }
+
+    pub(super) fn join(ssid: &str) -> Result<(), String> {
+        let iface = interface().ok_or("No WiFi on this Mac")?;
+        networksetup(&["-setairportnetwork", &iface, ssid]).map_err(|e| format!("Couldn't join {ssid}: {e}"))?;
+        for _ in 0..20 {
+            if aim_link::probe(AP_ADDRESS, Duration::from_millis(500)).is_ok() {
+                return Ok(());
+            }
+        }
+        Err(format!("Joined {ssid}, but the MyChron didn't answer"))
+    }
+
+    /// macOS goes back to a known network by itself.
+    pub(super) fn leave() {}
+
+    pub fn restore_wifi_now() {}
+
+    pub fn paused_networks() -> bool {
+        false
+    }
+
+    pub fn restore_after_crash() {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn splits_nmcli_terse_fields() {
+        use wifi::split_terse;
         assert_eq!(split_terse("AiM-MYC6-345678:72"), ["AiM-MYC6-345678", "72"]);
         assert_eq!(split_terse(r"Cafe\: Guest:802-11-wireless:yes"), ["Cafe: Guest", "802-11-wireless", "yes"]);
     }

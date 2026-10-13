@@ -1,11 +1,13 @@
-# Builds the Linux downloads (AppImage, .deb, .rpm, tarball).
+# Builds the downloads: Linux (AppImage, .deb, .rpm, tarball) and Mac
+# (Apple Silicon .dmg).
 #
 # - Push a tag like v0.1.0: builds them and attaches them to a GitHub Release.
-# - Run it by hand (Actions → Release → Run workflow): builds them as a
-#   downloadable artifact on the run, without making a release.
+# - Run it by hand (Actions → Release → Run workflow): builds them as
+#   downloadable artifacts on the run, without making a release.
 #
-# Built on Ubuntu 22.04 so the programs also run on distros a few years old
-# (a program built against an older glibc runs on newer ones, not the reverse).
+# Linux is built on Ubuntu 22.04 so the programs also run on distros a few
+# years old (a program built against an older glibc runs on newer ones, not
+# the reverse).
 name: Release
 
 on:
@@ -45,10 +47,44 @@ jobs:
           name: mychronix-linux-x86_64
           path: target/dist/*
 
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: brew install librsvg
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Package
+        run: scripts/package-macos.sh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: mychronix-macos-arm64
+          path: target/dist/*
+
+  # One job makes the release, once both builds are done.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Mychronix ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" target/dist/* --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber

@@ -116,6 +116,23 @@ join the MyChron's network yourself and everything else works.
 `scripts/package-linux.sh` builds the same downloads locally (see the script
 for what it needs); `.github/workflows/release.yml` runs it for each `v*` tag.
 
+## Install (Mac)
+
+For Apple Silicon Macs (M1 and later) on macOS 11 or newer: download
+`Mychronix-<version>-arm64.dmg` from a release, open it and drag Mychronix into
+Applications.
+
+Mychronix isn't signed with an Apple Developer ID, so the first launch shows
+"Apple could not verify…". Click Done, open System Settings → Privacy &
+Security, and click **Open Anyway** next to Mychronix. Once per version.
+
+On a Mac, join the MyChron's WiFi (AiM-MYC…) from the menu bar yourself (macOS
+doesn't let apps list WiFi networks without Location access); Mychronix finds
+the logger once you're on it. If macOS asks to let Mychronix find devices on
+your local network, allow it. The `mychronix` command-line tool is inside the
+app at `Mychronix.app/Contents/MacOS/mychronix`. Logs go to
+`~/Library/Logs/Mychronix`; your data is in `~/Mychronix` as on Linux.
+
 ### Build from source
 
 Needs Rust (via [rustup](https://rustup.rs)), a C compiler, and ImageMagick for
@@ -137,7 +154,8 @@ crashes the details go to `~/.cache/mychronix/crash.log`.
 
 ### Logs
 
-Mychronix keeps a log at `~/.cache/mychronix/mychronix.log` (rolled over at
+Mychronix keeps a log at `~/.cache/mychronix/mychronix.log` (on a Mac,
+`~/Library/Logs/Mychronix/mychronix.log`; rolled over at
 1 MB): startup, library loads, every MyChron scan, WiFi change, listing and
 download, and every error shown on screen. Start it with `MYCHRONIX_LOG=debug`
 for more (each session it lists, each WiFi command), or `MYCHRONIX_LOG=trace`
