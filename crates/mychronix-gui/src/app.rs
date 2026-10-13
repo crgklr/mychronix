@@ -2014,10 +2014,10 @@ impl App {
                     driver: p.driver,
                     kart: p.kart,
                     championship: p.championship,
-                    track: if multi { String::new() } else { "mka".into() },
+                    track: if multi { String::new() } else { "Club Circuit".into() },
                     ..Default::default()
                 },
-                detected: if multi { vec!["NKA".into(), "mka".into()] } else { vec!["mka".into()] },
+                detected: if multi { vec!["Club North".into(), "Club Circuit".into()] } else { vec!["Club Circuit".into()] },
                 setup: self.latest_setup(&id),
                 setup_before: self.latest_setup(&id),
                 setup_open: false,
