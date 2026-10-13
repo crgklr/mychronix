@@ -99,6 +99,25 @@ Roughly in priority order.
 
 ## Install (Linux)
 
+Each release on GitHub has downloads for most Linux systems:
+
+| Download | For |
+|---|---|
+| `Mychronix-<version>-x86_64.AppImage` | Any distro, no install: mark it executable and double-click. |
+| `mychronix_<version>-1_amd64.deb` | Ubuntu, Debian, Mint, Pop!_OS: `sudo apt install ./mychronix_*.deb` |
+| `mychronix-<version>-1.x86_64.rpm` | Fedora, openSUSE: `sudo dnf install ./mychronix-*.rpm` |
+| `mychronix-<version>-x86_64.tar.gz` | Anything else: unpack and run `bin/mychronix-gui`. |
+
+They're built on Ubuntu 22.04, so they run on that and newer (glibc 2.35+:
+Debian 12, Fedora 36, Mint 21 and later). Joining the MyChron's WiFi from the
+app uses NetworkManager, which nearly every desktop distro has; without it,
+join the MyChron's network yourself and everything else works.
+
+`scripts/package-linux.sh` builds the same downloads locally (see the script
+for what it needs); `.github/workflows/release.yml` runs it for each `v*` tag.
+
+### Build from source
+
 Needs Rust (via [rustup](https://rustup.rs)), a C compiler, and ImageMagick for
 the icons. WiFi joining uses NetworkManager (`nmcli`).
 

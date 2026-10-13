@@ -1,0 +1,54 @@
+# Builds the Linux downloads (AppImage, .deb, .rpm, tarball).
+#
+# - Push a tag like v0.1.0: builds them and attaches them to a GitHub Release.
+# - Run it by hand (Actions → Release → Run workflow): builds them as a
+#   downloadable artifact on the run, without making a release.
+#
+# Built on Ubuntu 22.04 so the programs also run on distros a few years old
+# (a program built against an older glibc runs on newer ones, not the reverse).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends librsvg2-bin libxkbcommon-dev libwayland-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install packagers
+        run: cargo install --locked cargo-deb cargo-generate-rpm
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Package
+        run: scripts/package-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mychronix-linux-x86_64
+          path: target/dist/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Mychronix ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" target/dist/* --clobber
