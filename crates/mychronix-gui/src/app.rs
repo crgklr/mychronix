@@ -1299,7 +1299,7 @@ impl App {
         };
 
         let options = || walkers::HttpOptions {
-            cache: std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/mychronix/tiles")),
+            cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
             user_agent: Some(walkers::HeaderValue::from_static("Mychronix/0.1 (AiM MyChron data analysis; Linux desktop)")),
             ..Default::default()
         };
@@ -1856,7 +1856,7 @@ impl App {
                 }
             }
         }
-        // The worker stopped (it crashed; see ~/.cache/mychronix/crash.log): start a new one.
+        // The worker stopped (it crashed; see crash.log beside the log): start a new one.
         if worker_died {
             self.dev = None;
             self.dev_busy = None;
@@ -2085,7 +2085,7 @@ impl App {
                             ui.label(RichText::new("No logger connected").font(semibold(17.0)).color(TEXT));
                             let hint = match &self.dev_busy {
                                 Some(b) => b.clone(),
-                                None => "Turn on the MyChron and its WiFi. Mychronix keeps looking.".into(),
+                                None => crate::device::JOIN_HINT.into(),
                             };
                             ui.label(RichText::new(hint).color(SECONDARY));
                         });

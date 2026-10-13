@@ -124,9 +124,47 @@ pub fn name(code: &str) -> Option<&'static str> {
 /// The country from the system locale (`LC_ALL`, `LC_ADDRESS`, then `LANG`),
 /// e.g. `en_US.UTF-8` → `US`.
 pub fn system_country() -> Option<String> {
-    ["LC_ALL", "LC_ADDRESS", "LANG"].iter().find_map(|var| {
-        let value = std::env::var(var).ok()?;
-        let region = value.split(['.', '@']).next()?.split('_').nth(1)?;
-        (region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic())).then(|| region.to_ascii_uppercase())
-    })
+    ["LC_ALL", "LC_ADDRESS", "LANG"]
+        .iter()
+        .find_map(|var| locale_region(&std::env::var(var).ok()?))
+        // Apps opened from the Dock on a Mac get no locale variables; ask the system.
+        .or_else(|| mac_default("AppleLocale").and_then(|l| mac_region(&l)))
+}
+
+/// "en_US.UTF-8" → "US".
+fn locale_region(value: &str) -> Option<String> {
+    let region = value.split(['.', '@']).next()?.split('_').nth(1)?;
+    (region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic())).then(|| region.to_ascii_uppercase())
+}
+
+/// A Mac's "en_US", or "en_US@rg=gbzzzz" when the region was set apart from
+/// the language ("GB").
+fn mac_region(locale: &str) -> Option<String> {
+    if let Some(rg) = locale.split("rg=").nth(1) {
+        let r = rg.get(..2)?;
+        return r.chars().all(|c| c.is_ascii_alphabetic()).then(|| r.to_ascii_uppercase());
+    }
+    locale_region(locale)
+}
+
+/// A global Mac setting (`defaults read -g <key>`); None elsewhere.
+pub fn mac_default(key: &str) -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let out = std::process::Command::new("defaults").args(["read", "-g", key]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::*;
+
+    #[test]
+    fn regions_from_locales() {
+        assert_eq!(locale_region("en_US.UTF-8").as_deref(), Some("US"));
+        assert_eq!(locale_region("C"), None);
+        assert_eq!(mac_region("en_US").as_deref(), Some("US"));
+        assert_eq!(mac_region("en_US@rg=gbzzzz").as_deref(), Some("GB"));
+    }
 }

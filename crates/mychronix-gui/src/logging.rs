@@ -1,4 +1,5 @@
-//! The app's log: `~/.cache/mychronix/mychronix.log`, rolled over to
+//! The app's log: `mychronix.log` in [`crate::paths::log_dir`]
+//! (`~/.cache/mychronix` on Linux, `~/Library/Logs/Mychronix` on a Mac), rolled over to
 //! `mychronix.log.old` past 1 MB. Mychronix's own messages at info and above
 //! by default (`MYCHRONIX_LOG=debug` or `trace` for more, including every
 //! frame exchanged with the MyChron); other libraries' only at warn and above.
@@ -74,7 +75,7 @@ fn timestamp() -> String {
 
 /// Where the log is.
 pub fn path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/mychronix/mychronix.log"))
+    crate::paths::log_dir().map(|d| d.join("mychronix.log"))
 }
 
 /// Starts logging to the file. Safe to call once; without a home folder it
