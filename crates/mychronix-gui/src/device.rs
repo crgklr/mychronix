@@ -192,7 +192,7 @@ fn copy_custom_tracks(logger: &mut Logger) -> usize {
 
 /// Downloads each session (and its `.xri` summary) into `dir`, writing the
 /// metadata beside it. Files land under a temporary name first, so a
-/// cancelled download never looks complete.
+/// canceled download never looks complete.
 fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)) -> Result<usize, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let mut logger = Logger::connect_ap().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))?;

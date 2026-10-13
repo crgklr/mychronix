@@ -18,7 +18,7 @@ pub struct CompareLap {
     pub lap: Lap,
     /// e.g. "S35 L10 · 0:30.480 · Alex".
     pub label: String,
-    /// Colour slot, kept for as long as the lap is in the comparison.
+    /// Color slot, kept for as long as the lap is in the comparison.
     pub slot: usize,
     pub profile: Option<DistanceProfile>,
 }
@@ -35,7 +35,7 @@ impl CompareLap {
 pub struct DistanceProfile {
     /// Logger time, ms.
     pub times_ms: Vec<i64>,
-    /// Metres from the lap's start.
+    /// Meters from the lap's start.
     pub dist_m: Vec<f64>,
 }
 
@@ -80,7 +80,7 @@ impl DistanceProfile {
         interpolate(&self.times_ms.iter().map(|&t| t as f64).collect::<Vec<_>>(), &self.dist_m, t_ms)
     }
 
-    /// Logger time when the kart had covered `d` metres.
+    /// Logger time when the kart had covered `d` meters.
     pub fn time_at(&self, d: f64) -> f64 {
         interpolate(&self.dist_m, &self.times_ms.iter().map(|&t| t as f64).collect::<Vec<_>>(), d)
     }

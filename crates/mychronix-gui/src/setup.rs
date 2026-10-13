@@ -1,5 +1,5 @@
 //! Kart setup sheets, RaceStudio's "log sheets" cut down to what a kart
-//! changes: gearing, tyres and pressures, weight and ballast, jetting.
+//! changes: gearing, tires and pressures, weight and ballast, jetting.
 //!
 //! A sheet is saved beside a session as `a_NNNN.setup.json`. A session
 //! without one uses the previous session's (same logger), so a sheet only
@@ -23,7 +23,9 @@ pub struct Setup {
     /// Rear axle sprocket teeth.
     pub driven_teeth: String,
     /// e.g. "MG Yellow 10x4.60-5 SM2".
-    pub tyres: String,
+    /// Older sheets spelled it "tyres".
+    #[serde(alias = "tyres")]
+    pub tires: String,
     pub front_psi: String,
     pub rear_psi: String,
     /// Kart with driver, lb.
@@ -38,7 +40,7 @@ pub struct Setup {
 const FIELDS: [(&str, fn(&Setup) -> &String); 8] = [
     ("Drive sprocket", |s| &s.drive_teeth),
     ("Rear sprocket", |s| &s.driven_teeth),
-    ("Tyres", |s| &s.tyres),
+    ("Tires", |s| &s.tires),
     ("Front pressure", |s| &s.front_psi),
     ("Rear pressure", |s| &s.rear_psi),
     ("Weight", |s| &s.weight_lb),
@@ -97,8 +99,8 @@ impl Setup {
             (d, r) if !r.is_empty() => parts.push(format!("{r}T rear{d}")),
             _ => {}
         }
-        if !self.tyres.trim().is_empty() {
-            parts.push(t(&self.tyres));
+        if !self.tires.trim().is_empty() {
+            parts.push(t(&self.tires));
         }
         match (t(&self.front_psi), t(&self.rear_psi)) {
             (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} psi")),
@@ -117,10 +119,10 @@ impl Setup {
         parts.join("  ·  ")
     }
 
-    /// Engine RPM per km/h the gearing and tyre size should give with the clutch locked.
+    /// Engine RPM per km/h the gearing and tire size should give with the clutch locked.
     pub fn expected_rpm_per_kmh(&self) -> Option<f64> {
         let ratio = number(&self.driven_teeth)? / number(&self.drive_teeth)?;
-        let circumference_m = std::f64::consts::PI * tyre_diameter_in(&self.tyres)? * 0.0254;
+        let circumference_m = std::f64::consts::PI * tire_diameter_in(&self.tires)? * 0.0254;
         Some(ratio * 1000.0 / 60.0 / circumference_m)
     }
 }
@@ -138,17 +140,17 @@ pub fn number(s: &str) -> Option<f64> {
 }
 
 /// Outer diameter in inches from a size like "10x4.60-5".
-pub fn tyre_diameter_in(tyres: &str) -> Option<f64> {
-    let lower = tyres.to_lowercase();
+pub fn tire_diameter_in(tires: &str) -> Option<f64> {
+    let lower = tires.to_lowercase();
     let x = lower.find('x')?;
     let before = lower[..x].trim_end();
     let start = before.rfind(|c: char| !(c.is_ascii_digit() || c == '.')).map(|i| i + 1).unwrap_or(0);
     before[start..].parse().ok().filter(|d: &f64| (6.0..=16.0).contains(d))
 }
 
-/// Drive sprocket teeth that would give `rpm_per_kmh` with `driven` teeth on `tyres`.
-pub fn implied_drive_teeth(rpm_per_kmh: f64, driven: f64, tyres: &str) -> Option<f64> {
-    let circumference_m = std::f64::consts::PI * tyre_diameter_in(tyres)? * 0.0254;
+/// Drive sprocket teeth that would give `rpm_per_kmh` with `driven` teeth on `tires`.
+pub fn implied_drive_teeth(rpm_per_kmh: f64, driven: f64, tires: &str) -> Option<f64> {
+    let circumference_m = std::f64::consts::PI * tire_diameter_in(tires)? * 0.0254;
     let ratio = rpm_per_kmh * 60.0 / 1000.0 * circumference_m;
     Some(driven / ratio)
 }
@@ -254,7 +256,7 @@ mod tests {
     use super::*;
 
     fn gearing(drive: &str, driven: &str) -> Setup {
-        Setup { drive_teeth: drive.into(), driven_teeth: driven.into(), tyres: "MG Yellow 10x4.60-5 SM2".into(), ..Default::default() }
+        Setup { drive_teeth: drive.into(), driven_teeth: driven.into(), tires: "MG Yellow 10x4.60-5 SM2".into(), ..Default::default() }
     }
 
     #[test]
@@ -279,14 +281,20 @@ mod tests {
     }
 
     #[test]
+    fn older_sheets_still_read() {
+        let s: Setup = serde_json::from_str(r#"{"tyres": "MG Yellow"}"#).unwrap();
+        assert_eq!(s.tires, "MG Yellow");
+    }
+
+    #[test]
     fn gearing_matches_the_measured_ratio() {
-        // 10/80 on 10-inch tyres: about 167 rpm per km/h.
+        // 10/80 on 10-inch tires: about 167 rpm per km/h.
         let e = gearing("10", "80").expected_rpm_per_kmh().unwrap();
         assert!((e - 167.1).abs() < 0.5, "{e}");
         let teeth = implied_drive_teeth(170.0, 80.0, "MG Yellow 10x4.60-5 SM2").unwrap();
         assert!((teeth - 10.0).abs() < 0.3, "{teeth}");
-        assert_eq!(tyre_diameter_in("10x4.60-5"), Some(10.0));
-        assert_eq!(tyre_diameter_in("MG Yellow"), None);
+        assert_eq!(tire_diameter_in("10x4.60-5"), Some(10.0));
+        assert_eq!(tire_diameter_in("MG Yellow"), None);
         assert_eq!(number("~250 lb"), Some(250.0));
     }
 }

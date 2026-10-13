@@ -48,9 +48,9 @@ pub fn value_at(c: &Channel, t_ms: f64) -> Option<f64> {
     Some(c.values[i - 1] + f * (c.values[i] - c.values[i - 1]))
 }
 
-/// Points (x, y, colour value) at x's sample times within the windows, at
+/// Points (x, y, color value) at x's sample times within the windows, at
 /// most `max` of them (evenly thinned).
-pub fn scatter(x: &Channel, y: &Channel, colour: Option<&Channel>, windows: &[(i64, i64)], max: usize) -> Vec<[f64; 3]> {
+pub fn scatter(x: &Channel, y: &Channel, color: Option<&Channel>, windows: &[(i64, i64)], max: usize) -> Vec<[f64; 3]> {
     let times: Vec<i64> = windows
         .iter()
         .flat_map(|&(s, e)| {
@@ -67,7 +67,7 @@ pub fn scatter(x: &Channel, y: &Channel, colour: Option<&Channel>, windows: &[(i
         .filter_map(|&t| {
             let xv = value_at(x, t as f64)?;
             let yv = value_at(y, t as f64)?;
-            let cv = colour.and_then(|c| value_at(c, t as f64)).unwrap_or(0.0);
+            let cv = color.and_then(|c| value_at(c, t as f64)).unwrap_or(0.0);
             (xv.is_finite() && yv.is_finite()).then_some([xv, yv, cv])
         })
         .collect()

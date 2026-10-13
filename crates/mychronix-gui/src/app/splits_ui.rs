@@ -11,7 +11,7 @@ pub(super) struct SplitsState {
     pub count: usize,
     pub values: Values,
     pub cumulative: bool,
-    pub colour: bool,
+    pub color: bool,
     pub selected: Option<usize>,
     pub excluded: std::collections::BTreeSet<i32>,
     pub hovered_row: Option<usize>,
@@ -124,8 +124,8 @@ impl App {
                 st.cumulative = true;
             }
             ui.add_space(12.0);
-            if chip(ui, "Colour", st.colour).on_hover_text("Shade each split from fastest (green) to slowest (red)").clicked() {
-                st.colour = !st.colour;
+            if chip(ui, "Color", st.color).on_hover_text("Shade each split from fastest (green) to slowest (red)").clicked() {
+                st.color = !st.color;
             }
         });
         ui.add_space(12.0);
@@ -200,7 +200,7 @@ impl App {
                             }
                         });
                         ui.add_space(4.0);
-                        // Columns' ranges, for colouring.
+                        // Columns' ranges, for coloring.
                         let ranges: Vec<Option<(i64, i64)>> = (0..n)
                             .map(|k| {
                                 let v: Vec<i64> = inc_rows.iter().filter_map(|r| r.splits.as_ref().map(|s| s[k])).collect();
@@ -233,7 +233,7 @@ impl App {
                                             continue;
                                         };
                                         let v = split_report::cell(s, k, st.values, st.cumulative, &best, best_lap_splits.as_deref());
-                                        if st.colour && on {
+                                        if st.color && on {
                                             if let Some((lo, hi)) = ranges[k] {
                                                 let t = if hi > lo { (s[k] - lo) as f32 / (hi - lo) as f32 } else { 0.0 };
                                                 ui.painter().rect_filled(cr, CornerRadius::same(4), rank_color(t).gamma_multiply(0.28));
@@ -334,7 +334,7 @@ impl App {
 /// time and driven distance by lap, and time against distance.
 fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool], selected: Option<usize>, hovered_row: Option<usize>) {
     let Some(gps) = session.gps.as_ref() else { return };
-    // Laps in the selected split, ranked by their time there (for colour).
+    // Laps in the selected split, ranked by their time there (for color).
     let in_split: Vec<(usize, f64, f64, i64)> = match selected {
         Some(k) => c
             .crossings
@@ -445,7 +445,7 @@ fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool],
         });
         ui.add_space(10.0);
     };
-    small(ui, &format!("Speed through split {}", k + 1), &format!("{} by metres in", crate::units::speed_unit()), &mut |plot| {
+    small(ui, &format!("Speed through split {}", k + 1), &format!("{} by meters in", crate::units::speed_unit()), &mut |plot| {
         for (ri, t, line, _) in &per_lap {
             let w = if hovered_row == Some(*ri) { 3.0 } else { 1.5 };
             plot.line(Line::new(format!("lap {ri}"), PlotPoints::from(line.clone())).color(rank_color(rank(*t))).width(w));

@@ -245,7 +245,7 @@ impl App {
                 } else {
                     p.text(rect.center(), egui::Align2::CENTER_CENTER, lap.number.to_string(), medium(12.5), time_color);
                 }
-                // Compare: a circle in the corner, filled with its colour once added.
+                // Compare: a circle in the corner, filled with its color once added.
                 let dot = Rect::from_center_size(pos2(rect.right() - 10.0, rect.top() + 10.0), Vec2::splat(14.0));
                 let over_dot = resp.hover_pos().is_some_and(|q| dot.expand(3.0).contains(q));
                 match compare_slot {
@@ -302,7 +302,7 @@ impl App {
             if session.gps.is_some() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if chip(ui, "Distance", self.graph_distance).on_hover_text("Metres around the lap, so corners line up").clicked() {
+                    if chip(ui, "Distance", self.graph_distance).on_hover_text("Meters around the lap, so corners line up").clicked() {
                         self.graph_distance = true;
                     }
                     if chip(ui, "Time", !self.graph_distance).clicked() {

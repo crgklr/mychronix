@@ -1,7 +1,7 @@
 # Mychronix
 
 A Linux desktop app for **AiM MyChron** kart data loggers: download sessions
-over WiFi, analyse laps, and browse tracks.
+over WiFi, analyze laps, and browse tracks.
 
 Mychronix exists to fill a gap on systems AiM doesn't support, such as Linux.
 It is not meant to replace AiM products or RaceStudio in any way on officially
@@ -26,7 +26,7 @@ works today:
 - **Sessions:** every downloaded session by race day, with best laps, named
   after the kart its MyChron is on.
 - **Analysis:** channels over time or distance with a shared cursor and the
-  track map coloured by any channel; every lap as a strip across the top (best
+  track map colored by any channel; every lap as a strip across the top (best
   lap matching the logger's own, out/in and slow laps dimmed); channels added
   from a grouped picker (engine, movement, lap timing, logger), with the
   MyChron's timing channels in seconds and unused ones hidden.
@@ -41,7 +41,7 @@ works today:
 - **Histogram:** time spent in each band of a channel (RPM, speed, EGT, g) for
   a lap or every racing lap, as % of time or seconds, with the best lap
   outlined for comparison.
-- **Scatter:** one channel against another, optionally coloured by a third:
+- **Scatter:** one channel against another, optionally colored by a third:
   RPM against speed with the setup sheet's gearing drawn as a line, and the
   G-G diagram on a circular grid.
 - **Lap comparison:** overlay up to eight laps from any sessions, lined up by
@@ -52,12 +52,12 @@ works today:
   laps, time on track, fastest lap, peak RPM and EGT and top speed, best lap
   through the event, and a season summary per championship. Engine warm-ups
   are listed but left out of the numbers.
-- **Setup sheets:** gearing, tyres and pressures, weight and ballast, jetting
+- **Setup sheets:** gearing, tires and pressures, weight and ballast, jetting
   and notes per session, as RaceStudio's log sheets. A session without its own
   sheet uses the previous one (the first uses the kart's baseline), changes are flagged on the session and the
   event, and the gearing is checked against RPM and GPS speed.
 - **Tracks:** AiM's track database by country with venue details, outlines,
-  elevation, favourites, your speed on the track with braking points, splits
+  elevation, favorites, your speed on the track with braking points, splits
   with sector times and an ideal lap, map or satellite view.
 
 Mychronix only ever reads from the logger.
@@ -111,7 +111,7 @@ command-line tool to `~/.local/bin`, and adds a launcher with its icon to your
 app menu.
 
 Data lives in `~/Mychronix/`: sessions under `sessions/<logger id>/`, your
-names, favourites, events and setups as small JSON files; each session's setup
+names, favorites, events and setups as small JSON files; each session's setup
 sheet sits beside it as `a_NNNN.setup.json`. A file that can't be read is kept as
 `<name>.damaged-<time>.json` rather than overwritten, and if Mychronix ever
 crashes the details go to `~/.cache/mychronix/crash.log`.
@@ -162,12 +162,12 @@ known, and how sure we are of each part, is written up in
 | `mychronix-cli` | The `mychronix` command |
 | `mychronix-gui` | The app, built with [egui](https://github.com/emilk/egui) and [fastframe](https://github.com/crmne/fastframe) |
 
-## Licence
+## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
 your option.
 
-Third-party parts keep their own licences: Lucide icons (ISC, see
+Third-party parts keep their own licenses: Lucide icons (ISC, see
 `crates/mychronix-gui/assets/icons/LICENSE.txt`), the Inter typeface bundled by
 fastframe (SIL Open Font License), and the Rust dependencies (MIT, Apache-2.0
-and other permissive licences).
+and other permissive licenses).

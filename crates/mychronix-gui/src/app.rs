@@ -95,7 +95,7 @@ pub struct App {
     path: Option<PathBuf>,
     session: Option<std::sync::Arc<Session>>,
     error: Option<String>,
-    /// Selected channels and the colour slot each keeps while selected.
+    /// Selected channels and the color slot each keeps while selected.
     selected: BTreeMap<usize, usize>,
     /// Graphed channels in the order they were added (graphs stack in this order).
     graph_order: Vec<usize>,
@@ -119,7 +119,7 @@ pub struct App {
     report: report_ui::ReportState,
     splits: splits_ui::SplitsState,
     charts: charts_ui::ChartsState,
-    /// Shared cursor on the compare tab, metres along the reference lap.
+    /// Shared cursor on the compare tab, meters along the reference lap.
     compare_cursor_m: Option<f64>,
     /// The reference length the compare graphs last showed (as bits), to reset their range.
     compare_window: Option<u64>,
@@ -144,7 +144,7 @@ pub struct App {
     kart_edit: Option<garage_ui::KartEdit>,
     measured_ratio: Option<f64>,
     pending_setup: Option<(PathBuf, crate::setup::Setup)>,
-    /// Channel that colours the track map (None: RPM if present).
+    /// Channel that colors the track map (None: RPM if present).
     map_channel: Option<usize>,
     pub screenshot_to: Option<PathBuf>,
     frames: u32,
@@ -407,7 +407,7 @@ impl eframe::App for App {
                 ctx.input(|i| i.viewport().maximized)
             );
         }
-        // Some desktops ignore maximise at creation; ask again once the window is up.
+        // Some desktops ignore maximize at creation; ask again once the window is up.
         if self.frames < 2 && self.screenshot_to.is_none() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
         }
@@ -641,7 +641,7 @@ impl App {
                                 let hay = format!(
                                     "{} {} {} {} {} {} {} {} {} {} {}",
                                     sum.number.unwrap_or(0),
-                                    sum.date.map(|d| d.to_string()).unwrap_or_default(),
+                                    sum.date.map(|d| format!("{d} {}", crate::events::us_short(d))).unwrap_or_default(),
                                     sum.track.clone().unwrap_or_default(),
                                     s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default(),
                                     if m.driver.is_empty() { driver_name(&s.logger, &profiles) } else { m.driver.clone() },
@@ -773,7 +773,7 @@ fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Opt
         }
         let track = s.track.map(|t| lib.tracks[t].name.clone()).or(sum.track.clone()).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
-        let line = [sum.start_time.clone().map(|t| t.get(..5).unwrap_or(&t).to_string()), Some(driver.to_string()), Some(track), championship]
+        let line = [sum.start_time.as_deref().map(crate::events::us_time), Some(driver.to_string()), Some(track), championship]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -797,7 +797,7 @@ fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Opt
     response
 }
 
-/// "Saturday, 10 October 2026".
+/// "Saturday, October 10, 2026".
 fn long_date(d: aim_xrk::summary::Date) -> String {
     const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -805,7 +805,7 @@ fn long_date(d: aim_xrk::summary::Date) -> String {
     let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
     let y = if d.month < 3 { d.year as i32 - 1 } else { d.year as i32 };
     let dow = (y + y / 4 - y / 100 + y / 400 + t[d.month as usize - 1] + d.day as i32).rem_euclid(7) as usize;
-    format!("{}, {} {} {}", DAYS[dow], d.day, MONTHS[d.month as usize - 1], d.year)
+    format!("{}, {} {}, {}", DAYS[dow], MONTHS[d.month as usize - 1], d.day, d.year)
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,7 +1069,7 @@ impl App {
                         };
                         p.text(pos2(left, rect.top() + 39.0), egui::Align2::LEFT_CENTER, place, regular(12.5), SECONDARY);
                         p.text(pos2(left, rect.top() + 57.0), egui::Align2::LEFT_CENTER, t.description(), regular(12.0), DIM);
-                        // Right: favourite star, then the name on the device; custom tag and sessions below.
+                        // Right: favorite star, then the name on the device; custom tag and sessions below.
                         let star = Rect::from_center_size(pos2(rect.right() - 20.0, rect.top() + 18.0), Vec2::splat(26.0));
                         let star_resp = ui.interact(star, ui.id().with(("track_star", k)), Sense::click());
                         let fav = favorites.contains(&t.guid);
@@ -1101,7 +1101,7 @@ impl App {
         });
         if rows.is_empty() {
             let msg = match self.track_view {
-                TrackView::Favorites if !searching => "No favourites yet. Star a track to keep it here.",
+                TrackView::Favorites if !searching => "No favorites yet. Star a track to keep it here.",
                 TrackView::Custom if !searching => "No custom tracks yet. They come over from your MyChron when you connect.",
                 _ => "No tracks match.",
             };
@@ -1115,7 +1115,7 @@ impl App {
         if let Some(guid) = starred {
             if let Some(f) = self.favorites.as_mut() {
                 if let Err(e) = f.toggle(&guid) {
-                    self.error = Some(format!("Couldn't save favourites: {e}"));
+                    self.error = Some(format!("Couldn't save favorites: {e}"));
                 }
             }
         }
@@ -1144,7 +1144,7 @@ impl App {
                         let (icon, label) = if fav { (Icon::StarFilled, "Favorite") } else { (Icon::Star, "Add to favorites") };
                         if button_with(ui, Some(icon), fav.then_some(theme::FAVORITE), label, false).clicked() {
                             if let Err(e) = self.favorites.as_mut().unwrap().toggle(&t.guid) {
-                                self.error = Some(format!("Couldn't save favourites: {e}"));
+                                self.error = Some(format!("Couldn't save favorites: {e}"));
                             }
                         }
                     });
@@ -1444,7 +1444,7 @@ impl App {
                         let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
                         let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
                         p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.0), TEXT);
-                        let when = [sum.date.map(|d| d.to_string()), sum.start_time.clone()].into_iter().flatten().collect::<Vec<_>>().join("  ");
+                        let when = [sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
                         p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, when, regular(12.5), DIM);
                         let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
                         let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
@@ -1575,7 +1575,7 @@ fn speed_lap(lib: &Library, t: &tracks::Track) -> Option<SpeedLap> {
     })
 }
 
-/// Centred moving average over `±half` samples.
+/// Centered moving average over `±half` samples.
 fn smooth(v: &[f64], half: usize) -> Vec<f64> {
     (0..v.len())
         .map(|i| {
@@ -1703,7 +1703,7 @@ impl walkers::sources::TileSource for EsriImagery {
     }
 }
 
-/// Centre and web-map zoom that fit `points` into a `size` pixel view with a margin.
+/// Center and web-map zoom that fit `points` into a `size` pixel view with a margin.
 fn fit_view(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f64)> {
     if points.len() < 2 {
         return None;
@@ -1718,14 +1718,14 @@ fn fit_view(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatL
     let c = aim_track::LatLon { lat: (lat0 + lat1) / 2.0, lon: (lon0 + lon1) / 2.0 };
     let width_m = aim_track::LatLon { lat: c.lat, lon: lon0 }.distance_m(&aim_track::LatLon { lat: c.lat, lon: lon1 }).max(20.0);
     let height_m = aim_track::LatLon { lat: lat0, lon: c.lon }.distance_m(&aim_track::LatLon { lat: lat1, lon: c.lon }).max(20.0);
-    // Metres per pixel at zoom z (256-px tiles): 156543.03 × cos(lat) / 2^z.
+    // Meters per pixel at zoom z (256-px tiles): 156543.03 × cos(lat) / 2^z.
     let mpp = (width_m / (size.x as f64 * 0.75)).max(height_m / (size.y as f64 * 0.75));
     let zoom = (156_543.03 * c.lat.to_radians().cos() / mpp).log2().clamp(3.0, 19.5);
     Some((c, zoom))
 }
 
-/// Speed colour: viridis, dark purple when slow to yellow when fast. Its
-/// lightness rises steadily, so slow and fast stay apart for colourblind
+/// Speed color: viridis, dark purple when slow to yellow when fast. Its
+/// lightness rises steadily, so slow and fast stay apart for colorblind
 /// viewers too.
 fn speed_color(t: f32) -> Color32 {
     const STOPS: [Color32; 5] = [
@@ -1747,10 +1747,10 @@ fn one_loop(points: &[(i64, aim_track::LatLon, f64)]) -> std::ops::Range<usize> 
         return 0..points.len();
     };
     let origin = points[start].1;
-    let mut travelled = 0.0;
+    let mut traveled = 0.0;
     for j in start + 1..points.len() {
-        travelled += points[j - 1].1.distance_m(&points[j].1);
-        if travelled > 250.0 && points[j].1.distance_m(&origin) < 15.0 {
+        traveled += points[j - 1].1.distance_m(&points[j].1);
+        if traveled > 250.0 && points[j].1.distance_m(&origin) < 15.0 {
             return start..j + 1;
         }
     }
@@ -1764,7 +1764,7 @@ struct TrackOverlay {
     speed: Option<SpeedLap>,
     /// Splits view: the reference path and where each sector after the first begins.
     sectors: Option<(Vec<aim_track::LatLon>, Vec<usize>)>,
-    /// Elevation view: the outline and each point's height in metres.
+    /// Elevation view: the outline and each point's height in meters.
     elevation: Option<(Vec<aim_track::LatLon>, Vec<f32>)>,
     start_finish: Option<aim_track::LatLon>,
 }
@@ -2199,7 +2199,7 @@ impl App {
                         ui.add_space(6.0);
                         let number = aim_xrk::summary::session_number(&e.name).map(|n| format!("Session {n}")).unwrap_or(e.name.clone());
                         ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                        let when = sum.as_ref().map(|s| [s.date.map(|d| d.to_string()), s.start_time.clone()].into_iter().flatten().collect::<Vec<_>>().join(" ")).unwrap_or(e.date.clone());
+                        let when = sum.as_ref().map(|s| [s.date.map(crate::events::us_short), s.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
                         ui.label(RichText::new(when).color(DIM));
                         if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
                             ui.label(RichText::new(t).color(SECONDARY));
@@ -2241,7 +2241,7 @@ impl App {
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let s = Suggestions::gather(&lib, &profiles);
         self.library = Some(lib);
-        let tyres = self.tyre_suggestions();
+        let tires = self.tire_suggestions();
         let lib = self.library.take().unwrap();
         let multiple = dlg.detected.len() > 1;
         let mut open = true;
@@ -2292,7 +2292,7 @@ impl App {
                             } else if !from_logger.is_empty() {
                                 format!("The MyChron recorded {from_logger}; these sessions will be filed under {} instead.", dlg.meta.track)
                             } else {
-                                "The MyChron didn't recognise a track for these sessions.".into()
+                                "The MyChron didn't recognize a track for these sessions.".into()
                             };
                             ui.label(RichText::new(note).size(12.5).color(DIM));
                         });
@@ -2315,7 +2315,7 @@ impl App {
                     ui.end_row();
                     if dlg.setup_open {
                         ui.label("");
-                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tyres, field_w, true));
+                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tires, field_w, true));
                         ui.end_row();
                     }
                     label(ui, "Comment");
@@ -2687,7 +2687,7 @@ impl App {
         // This session's laps, to add or remove with a click.
         self.lap_strip(ui, session, true);
         ui.add_space(12.0);
-        // Lap chips: colour, label, reference marker; click to make reference, × to remove.
+        // Lap chips: color, label, reference marker; click to make reference, × to remove.
         let mut make_ref = None;
         let mut remove = None;
         ui.horizontal_wrapped(|ui| {
@@ -2878,7 +2878,7 @@ impl App {
         hovered
     }
 
-    /// The reference lap's line, coloured by where the second lap gains (blue)
+    /// The reference lap's line, colored by where the second lap gains (blue)
     /// or loses (red) time against it, with the cursor.
     fn compare_map(&mut self, ui: &mut Ui, reference: &crate::compare::DistanceProfile) {
         let ref_lap = self.compare[0].clone();
@@ -2890,7 +2890,7 @@ impl App {
             return;
         }
         let gaps = crate::compare::time_gap(other.profile.as_ref().unwrap(), reference, 600);
-        // Rate the gap changes per metre: positive means the other lap is losing time there.
+        // Rate the gap changes per meter: positive means the other lap is losing time there.
         let rate_at = |d: f64| {
             let i = gaps.partition_point(|p| p[0] < d).clamp(1, gaps.len() - 1);
             let (a, b) = (gaps[i - 1], gaps[i]);
@@ -2958,7 +2958,7 @@ impl App {
     }
 }
 
-/// Diverging colour for time gained (−1, blue) through even (0, grey) to lost (+1, red).
+/// Diverging color for time gained (−1, blue) through even (0, gray) to lost (+1, red).
 fn gain_color(t: f32) -> Color32 {
     const GAIN: Color32 = Color32::from_rgb(0x39, 0x87, 0xe5);
     const EVEN: Color32 = Color32::from_rgb(0x58, 0x5e, 0x66);
@@ -3045,7 +3045,7 @@ impl App {
         let card_h = ((ui.available_height() - gap * (n - 1.0)) / n).max(110.0);
         let scroll_to = self.scroll_to_graph.take();
         let mut remove = None;
-        // Distance mode: metres along the lap from GPS speed (time mode without GPS).
+        // Distance mode: meters along the lap from GPS speed (time mode without GPS).
         let profile = if self.graph_distance {
             crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })
         } else {
@@ -3159,7 +3159,7 @@ impl App {
 }
 
 impl App {
-    /// The GPS path for the current window, coloured by a channel, with a dot
+    /// The GPS path for the current window, colored by a channel, with a dot
     /// at the shared cursor. Hovering the map moves the cursor.
     fn track_map(&mut self, ui: &mut Ui, session: &Session, start_ms: i64, end_ms: i64) {
         let Some(gps) = &session.gps else { return };
@@ -3179,7 +3179,7 @@ impl App {
                 ui.set_width(ui.available_width());
                 ui.set_height(ui.available_height() - 24.0);
 
-                // Header: title, colour-by picker, readouts at the cursor.
+                // Header: title, color-by picker, readouts at the cursor.
                 ui.horizontal(|ui| {
                     ui.add(Icon::MapPin.image(DIM, 16.0));
                     ui.label(RichText::new("Track").font(medium(14.5)).color(TEXT));
@@ -3196,7 +3196,7 @@ impl App {
                                 }
                             })
                             .response
-                            .on_hover_text("Channel that colours the track");
+                            .on_hover_text("Channel that colors the track");
                     });
                 });
 
@@ -3210,7 +3210,7 @@ impl App {
                     return;
                 }
 
-                // Local flat projection: metres east/north of the window's first point.
+                // Local flat projection: meters east/north of the window's first point.
                 let (lat0, lon0) = (gps.latitude[lo], gps.longitude[lo]);
                 let kx = 111_320.0 * lat0.to_radians().cos();
                 let ky = 110_540.0;
@@ -3233,7 +3233,7 @@ impl App {
                 };
                 let pts: Vec<egui::Pos2> = xy.iter().map(|&p| to_screen(p)).collect();
 
-                // Colour scale from the window's values, ignoring the extreme 2% each side
+                // Color scale from the window's values, ignoring the extreme 2% each side
                 // (the logger records occasional sensor spikes).
                 let channel = color_ch.map(|i| &session.channels[i]);
                 let values: Vec<Option<f64>> = (lo..hi)
@@ -3294,7 +3294,7 @@ impl App {
                     painter.text(rect.left_top() + vec2(2.0, 2.0), egui::Align2::LEFT_TOP, line, medium(14.0), TEXT);
                 }
 
-                // Legend: the colour ramp and the range it covers.
+                // Legend: the color ramp and the range it covers.
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format_value(vmin, dec)).size(12.0).color(DIM));
@@ -3429,7 +3429,7 @@ fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, primary: bool) -> egui::
     button_with(ui, icon, None, label, primary)
 }
 
-/// A button whose icon can have its own colour (e.g. a yellow star).
+/// A button whose icon can have its own color (e.g. a yellow star).
 fn button_with(ui: &mut Ui, icon: Option<Icon>, icon_tint: Option<Color32>, label: &str, primary: bool) -> egui::Response {
     let (fg, fill, hover) = if primary {
         (ON_TEXT, TEXT, Color32::from_rgb(0xd9, 0xdd, 0xe2))
@@ -3499,7 +3499,7 @@ fn search_field(ui: &mut Ui, text: &mut String, hint: &str) {
         });
 }
 
-/// Channel colour key: filled dot when graphed, empty ring when not.
+/// Channel color key: filled dot when graphed, empty ring when not.
 fn swatch(ui: &mut Ui, color: Option<Color32>) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
     match color {

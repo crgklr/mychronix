@@ -30,7 +30,7 @@ impl App {
                 format!(
                     "Same as session {}{}",
                     s.number.unwrap_or(0),
-                    s.date.map(|d| format!(" ({} {})", d.day, short_month(d.month))).unwrap_or_default()
+                    s.date.map(|d| format!(" ({} {})", short_month(d.month), d.day)).unwrap_or_default()
                 )
             }
             Source::Baseline => "This kart's baseline setup".to_string(),
@@ -123,7 +123,7 @@ impl App {
 
     pub(super) fn setup_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut edit) = self.setup_edit.take() else { return };
-        let tyres = self.tyre_suggestions();
+        let tires = self.tire_suggestions();
         let (mut open, mut save, mut cancel, mut revert) = (true, false, false, false);
         egui::Window::new(RichText::new("Setup").font(semibold(18.0)))
             .collapsible(false)
@@ -138,7 +138,7 @@ impl App {
                         .color(SECONDARY),
                 );
                 ui.add_space(10.0);
-                setup_fields(ui, "setup_edit", &mut edit.setup, &tyres, 400.0, true);
+                setup_fields(ui, "setup_edit", &mut edit.setup, &tires, 400.0, true);
                 ui.add_space(10.0);
                 let changes = edit.setup.changes_from(&edit.before);
                 let note = if changes.is_empty() { "Same as the session before.".to_string() } else { format!("Changes: {}", changes.join(", ")) };
@@ -178,11 +178,11 @@ impl App {
         }
     }
 
-    /// Tyres already entered anywhere, for suggestions.
-    pub(super) fn tyre_suggestions(&mut self) -> Vec<String> {
-        let mut v: Vec<String> = self.setup_baselines.get_or_insert_with(Baselines::load).loggers.values().map(|s| s.tyres.clone()).collect();
+    /// Tires already entered anywhere, for suggestions.
+    pub(super) fn tire_suggestions(&mut self) -> Vec<String> {
+        let mut v: Vec<String> = self.setup_baselines.get_or_insert_with(Baselines::load).loggers.values().map(|s| s.tires.clone()).collect();
         if let Some(lib) = &self.library {
-            v.extend(lib.sessions.iter().filter_map(|s| s.setup.as_ref()).map(|s| s.tyres.clone()));
+            v.extend(lib.sessions.iter().filter_map(|s| s.setup.as_ref()).map(|s| s.tires.clone()));
         }
         let mut seen = std::collections::HashSet::new();
         v.retain(|t| !t.trim().is_empty() && seen.insert(t.to_lowercase()));
@@ -191,7 +191,7 @@ impl App {
 }
 
 /// The setup fields, as a two-column grid; `notes` adds the session's notes.
-pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String], width: f32, notes: bool) {
+pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tires: &[String], width: f32, notes: bool) {
     let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
     let small = |ui: &mut Ui, value: &mut String, hint: &str, unit: &str| {
         ui.horizontal(|ui| {
@@ -207,8 +207,8 @@ pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tyres: &[String
             small(ui, &mut s.driven_teeth, "80", "rear teeth");
         });
         ui.end_row();
-        label(ui, "Tyres");
-        suggest_field(ui, &format!("{id}_tyres"), &mut s.tyres, "e.g. MG Yellow 10x4.60-5 SM2", tyres, width);
+        label(ui, "Tires");
+        suggest_field(ui, &format!("{id}_tires"), &mut s.tires, "e.g. MG Yellow 10x4.60-5 SM2", tires, width);
         ui.end_row();
         label(ui, "Pressure");
         ui.horizontal(|ui| {
@@ -252,18 +252,18 @@ fn gearing_check(s: &Setup, measured: Option<f64>) -> Option<(bool, String)> {
     match s.expected_rpm_per_kmh() {
         Some(e) => {
             let off = (m - e) / e;
-            // One rear tooth is ~1.25% and a tyre's rolling size is uncertain by ~2%,
-            // so this catches a wrong drive sprocket or tyre size, not a single rear tooth.
+            // One rear tooth is ~1.25% and a tire's rolling size is uncertain by ~2%,
+            // so this catches a wrong drive sprocket or tire size, not a single rear tooth.
             if off.abs() < 0.03 {
-                Some((true, format!("RPM and speed are consistent with {}/{} ({:.0} rpm per {unit} measured, {:.0} expected for nominal tyre size).", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
+                Some((true, format!("RPM and speed are consistent with {}/{} ({:.0} rpm per {unit} measured, {:.0} expected for nominal tire size).", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             } else {
-                let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tyres));
+                let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tires));
                 let hint = implied.map(|t| format!(" With {}T rear that's a {t:.1}-tooth drive.", s.driven_teeth.trim())).unwrap_or_default();
                 Some((false, format!("RPM and speed don't match {}/{}: {:.0} rpm per {unit} measured, {:.0} expected.{hint} Check the sheet.", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             }
         }
         None => {
-            let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tyres))?;
+            let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tires))?;
             Some((true, format!("RPM and speed suggest a {:.0}-tooth drive sprocket ({implied:.1}) with {}T rear.", implied.round(), s.driven_teeth.trim())))
         }
     }

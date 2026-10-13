@@ -2,7 +2,7 @@
 Type=Application
 Name=Mychronix
 GenericName=Kart data analysis
-Comment=Download and analyse AiM MyChron data
+Comment=Download and analyze AiM MyChron data
 Exec=mychronix-gui %f
 Icon=mychronix
 Terminal=false

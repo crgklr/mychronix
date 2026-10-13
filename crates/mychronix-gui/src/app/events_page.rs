@@ -409,6 +409,14 @@ impl App {
     /// Plan, name or edit an event.
     fn event_dialog(&mut self, ctx: &egui::Context, lib: &Library, profiles: &crate::profiles::Profiles, defs: &mut Events) {
         let Some(mut def) = self.event_dialog.take() else { return };
+        // Saved dates are ISO; show them as written in the US.
+        for d in [&mut def.start, &mut def.end] {
+            if d.contains('-') {
+                if let Some(p) = events::parse_date(d) {
+                    *d = events::us_numeric(p);
+                }
+            }
+        }
         let s = Suggestions::gather(lib, profiles);
         let mut championships = s.championships.clone();
         for c in lib.sessions.iter().enumerate().filter_map(|(i, _)| events::session_key(lib, i, profiles)).map(|k| k.championship) {
@@ -437,10 +445,10 @@ impl App {
                     suggest_field(ui, "ev_track", &mut def.track, "Track name as your MyChron uses it", &s.tracks, field_w);
                     ui.end_row();
                     label(ui, "Starts");
-                    suggest_field(ui, "ev_start", &mut def.start, "YYYY-MM-DD", &[], field_w);
+                    suggest_field(ui, "ev_start", &mut def.start, "MM/DD/YYYY", &[], field_w);
                     ui.end_row();
                     label(ui, "Ends");
-                    suggest_field(ui, "ev_end", &mut def.end, "YYYY-MM-DD", &[], field_w);
+                    suggest_field(ui, "ev_end", &mut def.end, "MM/DD/YYYY", &[], field_w);
                     ui.end_row();
                     label(ui, "Championship");
                     suggest_field(ui, "ev_champ", &mut def.championship, "Optional", &championships, field_w);
@@ -452,7 +460,7 @@ impl App {
                             .margin(Margin::symmetric(12, 9))
                             .desired_width(field_w)
                             .desired_rows(3)
-                            .hint_text("Entry, class, tyres, anything to remember"),
+                            .hint_text("Entry, class, tires, anything to remember"),
                     );
                     ui.end_row();
                 });
@@ -462,7 +470,7 @@ impl App {
                 } else if def.track.trim().is_empty() {
                     Some("Choose a track.")
                 } else if events::parse_date(&def.start).is_none() || events::parse_date(&def.end).is_none() {
-                    Some("Dates look like 2026-10-17.")
+                    Some("Dates look like 10/17/2026.")
                 } else {
                     None
                 };
@@ -776,25 +784,20 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
     response
 }
 
-/// "Sat 10 Oct 2026", or "Sat 17 – Sun 18 Oct 2026".
+/// "Sat, Oct 10, 2026", or "Sat, Oct 17 – Sun, Oct 18, 2026".
 fn date_range(a: aim_xrk::summary::Date, b: aim_xrk::summary::Date) -> String {
+    // "Sat, Oct 10" from "Saturday, October 10, 2026".
     let short = |d: aim_xrk::summary::Date| {
-        let long = long_date(d); // "Saturday, 10 October 2026"
-        let (day, rest) = long.split_once(", ").unwrap_or(("", &long));
-        let mut parts = rest.split(' ');
-        let (n, month, year) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-        (day.get(..3).unwrap_or(day).to_string(), n.to_string(), month.get(..3).unwrap_or(month).to_string(), year.to_string())
+        let long = long_date(d);
+        let day = long.split(", ").next().unwrap_or("");
+        let month = long.split(", ").nth(1).and_then(|m| m.split(' ').next()).unwrap_or("");
+        format!("{}, {} {}", day.get(..3).unwrap_or(day), month.get(..3).unwrap_or(month), d.day)
     };
-    let (da, na, ma, ya) = short(a);
     if a == b {
-        return format!("{da} {na} {ma} {ya}");
-    }
-    let (db, nb, mb, yb) = short(b);
-    if ya != yb {
-        format!("{da} {na} {ma} {ya} – {db} {nb} {mb} {yb}")
-    } else if ma != mb {
-        format!("{da} {na} {ma} – {db} {nb} {mb} {yb}")
+        format!("{}, {}", short(a), a.year)
+    } else if a.year != b.year {
+        format!("{}, {} – {}, {}", short(a), a.year, short(b), b.year)
     } else {
-        format!("{da} {na} – {db} {nb} {mb} {yb}")
+        format!("{} – {}, {}", short(a), short(b), b.year)
     }
 }

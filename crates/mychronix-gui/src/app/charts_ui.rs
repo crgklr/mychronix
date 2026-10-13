@@ -12,7 +12,7 @@ pub(super) struct ChartsState {
     pub hist_best: bool,
     pub x: String,
     pub y: String,
-    pub colour: Option<String>,
+    pub color: Option<String>,
 }
 
 impl Default for ChartsState {
@@ -23,7 +23,7 @@ impl Default for ChartsState {
             hist_best: true,
             x: "GPS Speed".into(),
             y: "RPM".into(),
-            colour: None,
+            color: None,
         }
     }
 }
@@ -181,12 +181,12 @@ impl App {
             if has("RPM") && has("GPS Speed") && chip(ui, "RPM vs speed", st.x == "GPS Speed" && st.y == "RPM").on_hover_text("The gearing as a line; points off it are clutch slip").clicked() {
                 st.x = "GPS Speed".into();
                 st.y = "RPM".into();
-                st.colour = None;
+                st.color = None;
             }
             if has("AccelerometerY") && has("GPS LonAcc") && chip(ui, "G-G diagram", st.x == "AccelerometerY" && st.y == "GPS LonAcc").on_hover_text("Cornering against braking and acceleration").clicked() {
                 st.x = "AccelerometerY".into();
                 st.y = "GPS LonAcc".into();
-                st.colour = has("GPS Speed").then(|| "GPS Speed".into());
+                st.color = has("GPS Speed").then(|| "GPS Speed".into());
             }
         });
         ui.add_space(6.0);
@@ -198,18 +198,18 @@ impl App {
             ui.label(RichText::new("Up").size(12.5).color(DIM));
             Self::channel_choice(ui, "scatter_y", session, &mut st.y, false);
             ui.add_space(8.0);
-            ui.label(RichText::new("Colour by").size(12.5).color(DIM));
-            let mut colour = st.colour.clone().unwrap_or_default();
-            egui::ComboBox::from_id_salt("scatter_colour")
-                .selected_text(if colour.is_empty() { "Nothing".to_string() } else { short_name(&colour).to_string() })
+            ui.label(RichText::new("Color by").size(12.5).color(DIM));
+            let mut color = st.color.clone().unwrap_or_default();
+            egui::ComboBox::from_id_salt("scatter_color")
+                .selected_text(if color.is_empty() { "Nothing".to_string() } else { short_name(&color).to_string() })
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut colour, String::new(), "Nothing");
+                    ui.selectable_value(&mut color, String::new(), "Nothing");
                     for c in session.channels.iter().filter(|c| !is_dead(c)) {
-                        ui.selectable_value(&mut colour, c.name.clone(), short_name(&c.name));
+                        ui.selectable_value(&mut color, c.name.clone(), short_name(&c.name));
                     }
                 });
-            st.colour = (!colour.is_empty()).then_some(colour);
+            st.color = (!color.is_empty()).then_some(color);
         });
         ui.add_space(12.0);
         let find = |n: &str| session.channels.iter().find(|c| c.name == n);
@@ -219,8 +219,8 @@ impl App {
             });
             return;
         };
-        let colour = st.colour.as_deref().and_then(find);
-        let pts = charts::scatter(x, y, colour, &windows, 6000);
+        let color = st.color.as_deref().and_then(find);
+        let pts = charts::scatter(x, y, color, &windows, 6000);
         let gg = st.x == "AccelerometerY" && st.y == "GPS LonAcc";
         // The gearing on RPM vs speed: rpm = (rpm per unit of speed) × speed.
         let gearing = (st.x == "GPS Speed" && st.y == "RPM")
@@ -233,7 +233,7 @@ impl App {
                 ui.label(RichText::new(format!("{} against {} · {scope}", short_name(&y.name), short_name(&x.name))).font(medium(14.5)).color(TEXT));
                 ui.label(RichText::new(format!("{yu} up, {xu} across")).size(12.5).color(DIM));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let (Some(c), true) = (colour, cmax > cmin) {
+                    if let (Some(c), true) = (color, cmax > cmin) {
                         let unit = pretty_units(&c.units);
                         ui.label(RichText::new(format!("{cmax:.0} {unit}")).size(12.0).color(DIM));
                         let (bar, _) = ui.allocate_exact_size(vec2(120.0, 8.0), Sense::hover());
@@ -269,9 +269,9 @@ impl App {
                         plot.line(Line::new(format!("{r} g"), PlotPoints::from(ring)).color(GRID).width(1.0));
                     }
                 }
-                match colour {
+                match color {
                     Some(_) if cmax > cmin => {
-                        // A dozen colour bands, each its own set of points.
+                        // A dozen color bands, each its own set of points.
                         const BANDS: usize = 12;
                         let mut groups: Vec<Vec<[f64; 2]>> = vec![Vec::new(); BANDS];
                         for p in &pts {

@@ -35,7 +35,7 @@ impl LatLon {
         (lat != 0 || lon != 0).then(|| Self { lat: lat as f64 * 1e-7, lon: lon as f64 * 1e-7 })
     }
 
-    /// Great-circle distance in metres.
+    /// Great-circle distance in meters.
     pub fn distance_m(&self, other: &LatLon) -> f64 {
         let (p1, p2) = (self.lat.to_radians(), other.lat.to_radians());
         let dp = p2 - p1;
@@ -107,9 +107,9 @@ pub struct TrackFile {
     pub kind: TrackKind,
     /// Surface labels, e.g. `["Paved"]`.
     pub surface: Vec<&'static str>,
-    /// The track's centre line.
+    /// The track's center line.
     pub outline: Vec<LatLon>,
-    /// Elevation of each outline point in metres, when the file has it.
+    /// Elevation of each outline point in meters, when the file has it.
     pub elevation_m: Vec<f32>,
     /// IANA zone, e.g. `America/New_York`.
     pub timezone: Option<String>,
@@ -203,8 +203,8 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
         t.name = t.full_name.clone();
     }
 
-    // 12-byte points: lat, lon (i32 × 1e-7), elevation (i32 millimetres).
-    // Some custom tracks leave the elevation bytes uninitialised; drop them
+    // 12-byte points: lat, lon (i32 × 1e-7), elevation (i32 millimeters).
+    // Some custom tracks leave the elevation bytes uninitialized; drop them
     // unless every value is a believable height.
     if let Some(p) = find("pts") {
         let mut elevation = Vec::new();
@@ -284,8 +284,8 @@ fn unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
-/// A track length the way RaceStudio writes it: metres under a kilometre,
-/// kilometres above, and ovals as the nearest standard fraction of a mile.
+/// A track length the way RaceStudio writes it: meters under a kilometer,
+/// kilometers above, and ovals as the nearest standard fraction of a mile.
 pub fn length_label(length_m: f32, kind: TrackKind) -> String {
     const MILE: f32 = 1609.344;
     const OVALS: [(&str, f32); 21] = [
