@@ -368,7 +368,7 @@ pub fn load_details(files: Vec<(usize, PathBuf)>, ctx: eframe::egui::Context) ->
     rx
 }
 
-/// Tracks marked as favourites, by track guid, saved in `~/Mychronix/favorite-tracks.json`.
+/// Tracks marked as favorites, by track guid, saved in `~/Mychronix/favorite-tracks.json`.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Favorites {
     pub guids: std::collections::BTreeSet<String>,

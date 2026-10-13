@@ -171,7 +171,7 @@ impl KartEdit {
 
 fn short_date(d: aim_xrk::summary::Date) -> String {
     const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    format!("{} {}", d.day, M[(d.month.clamp(1, 12) - 1) as usize])
+    format!("{} {}", M[(d.month.clamp(1, 12) - 1) as usize], d.day)
 }
 
 fn hours(ms: u64) -> String {
@@ -407,7 +407,7 @@ impl App {
                                 rect.left() + 78.0
                             }
                         };
-                        // Name and kart on the left, best lap on the right, both centred on the tile.
+                        // Name and kart on the left, best lap on the right, both centered on the tile.
                         let p = ui.painter_at(rect);
                         let mid = rect.center().y;
                         let person = d.id.and_then(|id| profiles.drivers.iter().find(|p| p.id == id));
@@ -499,7 +499,7 @@ impl App {
                             };
                             let rows: Vec<(&str, String)> = [
                                 ("Gearing", if s.drive_teeth.trim().is_empty() && s.driven_teeth.trim().is_empty() { String::new() } else { format!("{} / {}", s.drive_teeth.trim(), s.driven_teeth.trim()) }),
-                                ("Tyres", s.tyres.trim().to_string()),
+                                ("Tires", s.tires.trim().to_string()),
                                 ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} psi"), (f, r) => format!("{f} / {r} psi") }),
                                 ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} lb with driver", s.weight_lb.trim()) }),
                                 ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} lb", s.ballast_lb.trim()) }),
@@ -790,7 +790,7 @@ impl App {
     /// and its baseline setup.
     fn kart_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut edit) = self.kart_edit.take() else { return };
-        let tyres = self.tyre_suggestions();
+        let tires = self.tire_suggestions();
         // MyChrons known here: from sessions, karts and the one connected.
         let mut loggers: Vec<String> = self.library.as_ref().map(|l| l.sessions.iter().map(|s| s.logger.clone()).collect()).unwrap_or_default();
         loggers.extend(self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()));
@@ -889,7 +889,7 @@ impl App {
                 ui.label(RichText::new("Baseline setup").font(semibold(15.0)).color(TEXT));
                 ui.label(RichText::new("What it runs before its first setup sheet. Later changes go on the session they were made for.").size(12.5).color(SECONDARY));
                 ui.add_space(8.0);
-                setup_ui::setup_fields(ui, "kart_baseline", &mut edit.baseline, &tyres, field_w, false);
+                setup_ui::setup_fields(ui, "kart_baseline", &mut edit.baseline, &tires, field_w, false);
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     if edit.id.is_some() {
@@ -953,7 +953,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(RichText::new("Pick a session to analyse").font(semibold(26.0)).color(TEXT));
+                ui.label(RichText::new("Pick a session to analyze").font(semibold(26.0)).color(TEXT));
                 ui.label(RichText::new("Your downloaded sessions, newest race day first.").font(regular(14.5)).color(SECONDARY));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1039,7 +1039,7 @@ impl App {
     }
 }
 
-/// "Changed in session 31 (10 Oct)", or where the setup comes from.
+/// "Changed in session 31 (Oct 10)", or where the setup comes from.
 fn setup_last_changed(lib: &Library, resolved: &[setup::Resolved], logger: &str) -> String {
     let changed = (0..lib.sessions.len())
         .filter(|&i| lib.sessions[i].logger == logger && !resolved[i].changes.is_empty())

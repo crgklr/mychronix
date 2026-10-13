@@ -21,7 +21,7 @@ fact came from, and how sure we are. **Observed** = seen in captures or bytes;
 | RS3 ignores aim-ka replies that don't come from the logger's address | reported | aim-racestudio3-mac `CLAUDE.md` |
 | Under Wine, RS3's per-interface broadcast resolves to `0.0.0.0`, so discovery goes to `0.0.0.0:36002` | reported (macOS Wine) | aim-racestudio3-mac wine-patch README |
 | Dash subnets seen: `10.0.0.0/24`, `11.0.0.0/24`, `12.0.0.0/24` | reported | aim-racestudio3-mac `CLAUDE.md` |
-| RS3 imports `wlanapi` (WlanScan/WlanConnect/WlanSetProfile/…) and recognises loggers by SSID prefix | observed (imports, strings) | RS3 `AiMRS3-64-ReleaseU.exe` |
+| RS3 imports `wlanapi` (WlanScan/WlanConnect/WlanSetProfile/…) and recognizes loggers by SSID prefix | observed (imports, strings) | RS3 `AiMRS3-64-ReleaseU.exe` |
 
 ### Why RS3 under Wine on Fedora sent nothing (Oct 5)
 
@@ -77,7 +77,7 @@ open in `mychronix info` (track, date, laps and channels all read correctly). `.
 zlib-compressed session (`78 01` header).
 
 **libxrk on MyChron 6 files (observed).** Channels and laps decode, but libxrk warns
-about hundreds of `(S…)`/`(M…)` records it doesn't recognise; MyChron 6 writes
+about hundreds of `(S…)`/`(M…)` records it doesn't recognize; MyChron 6 writes
 record types its MXP/MXm test data lacks. Worth reporting upstream with a sample.
 
 **Exchange shape (observed, interleaved by time).** PC `STNC` request → logger
@@ -97,7 +97,7 @@ records, each holding `TMD` (date, `MM/DD/YYYY`), `TMT` (`HH:MM:SS`), `SZ`
 `iMST` (ids), `iHW` (`WiFi=ESP32|Reg=usa|LSM6DSV16X|Led=PI33TB|MYC68B|M103`),
 `iUSR` (on-logger `pilota=`/`veicolo=`/`campionato=`, empty on ours), `iPTH` (the
 path table below), `iLCK` (locks), `iSST` (feature flags), `iLTS` (logger clock),
-`iPRL` (settings as CSV: date/time format, WiFi power, backlight colour, …). Path
+`iPRL` (settings as CSV: date/time format, WiFi power, backlight color, …). Path
 table excerpt: `settings=0:/set`, `channels=0:/ch`, `tracks=0:/gps`, `tkk=0:/tkk`,
 **`recorded=1:/mem`**, `lapinfo=1:/mem/linfo`, `logs=1:/logs`, `software=0:/sw`,
 `font=0:/font`, `languages=0:/lang`.

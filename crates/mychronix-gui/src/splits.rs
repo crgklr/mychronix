@@ -77,15 +77,15 @@ pub fn sector_times(times_ms: &[i64], points: &[LatLon], lap_start_ms: i64, lap_
 }
 
 /// The time the kart was closest to `target`, between sample `i` and its
-/// better neighbour, by projecting the target onto that segment.
+/// better neighbor, by projecting the target onto that segment.
 fn refine(times_ms: &[i64], points: &[LatLon], i: usize, target: &LatLon) -> f64 {
-    let neighbour = [i.checked_sub(1), (i + 1 < points.len()).then_some(i + 1)]
+    let neighbor = [i.checked_sub(1), (i + 1 < points.len()).then_some(i + 1)]
         .into_iter()
         .flatten()
         .min_by(|&a, &b| points[a].distance_m(target).total_cmp(&points[b].distance_m(target)));
-    let Some(j) = neighbour else { return times_ms[i] as f64 };
+    let Some(j) = neighbor else { return times_ms[i] as f64 };
     let (a, b) = if j < i { (j, i) } else { (i, j) };
-    // Flat local coordinates in metres around `a`.
+    // Flat local coordinates in meters around `a`.
     let kx = 111_320.0 * points[a].lat.to_radians().cos();
     let to_xy = |p: &LatLon| ((p.lon - points[a].lon) * kx, (p.lat - points[a].lat) * 110_540.0);
     let (bx, by) = to_xy(&points[b]);
@@ -99,7 +99,7 @@ fn refine(times_ms: &[i64], points: &[LatLon], i: usize, target: &LatLon) -> f64
 mod tests {
     use super::*;
 
-    /// A circle of radius ~100 m, `n` points, starting due east and going anticlockwise.
+    /// A circle of radius ~100 m, `n` points, starting due east and going counterclockwise.
     fn circle(n: usize) -> Vec<LatLon> {
         (0..n)
             .map(|k| {

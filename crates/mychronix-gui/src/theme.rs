@@ -1,6 +1,6 @@
-//! Visual design: colour tokens, type, icons and the egui style built from them.
+//! Visual design: color tokens, type, icons and the egui style built from them.
 //!
-//! Everything the UI draws takes its colours from the constants here, so the
+//! Everything the UI draws takes its colors from the constants here, so the
 //! look can be tuned (or a light theme added) in one place. Fonts, text
 //! rendering and the icon loader come from fastframe (github.com/crmne/fastframe),
 //! the shared foundation of Spotifast and friends.
@@ -21,15 +21,15 @@ pub const GRID: Color32 = Color32::from_rgb(0x27, 0x2c, 0x33);
 pub const TEXT: Color32 = Color32::from_rgb(0xf2, 0xf4, 0xf6);
 pub const SECONDARY: Color32 = Color32::from_rgb(0xa9, 0xb1, 0xbc);
 pub const DIM: Color32 = Color32::from_rgb(0x6e, 0x77, 0x84);
-/// Status "good" (best lap). Reserved: never a channel colour; always paired with a label.
+/// Status "good" (best lap). Reserved: never a channel color; always paired with a label.
 pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xc7, 0x59);
-/// Favourite stars. Not a channel colour.
+/// Favorite stars. Not a channel color.
 pub const FAVORITE: Color32 = Color32::from_rgb(0xf5, 0xb7, 0x2e);
 /// Text on a `TEXT`-filled control (selected chip, primary button).
 pub const ON_TEXT: Color32 = Color32::from_rgb(0x0f, 0x11, 0x14);
 
-/// Channel colours, assigned in this fixed order and kept with the channel.
-/// Validated for the `SURFACE` card colour (CVD-adjacent ΔE ≥ 8.4, contrast ≥ 3:1).
+/// Channel colors, assigned in this fixed order and kept with the channel.
+/// Validated for the `SURFACE` card color (CVD-adjacent ΔE ≥ 8.4, contrast ≥ 3:1).
 /// Selection and focus are drawn in neutral ink so they never look like data.
 pub const SERIES: [Color32; 8] = [
     Color32::from_rgb(0x39, 0x87, 0xe5), // blue
@@ -59,7 +59,7 @@ pub fn semibold(size: f32) -> FontId {
 }
 
 fastframe_icons::icons! {
-    /// Every icon the interface draws: Lucide (ISC), white so egui's tint colours them.
+    /// Every icon the interface draws: Lucide (ISC), white so egui's tint colors them.
     pub enum Icon {
         prefix: "mychronix-icon-",
         directory: "../assets/icons/",

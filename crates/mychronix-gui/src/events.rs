@@ -213,16 +213,39 @@ pub fn today() -> Date {
     from_days((secs / 86_400) as i64)
 }
 
-/// "2026-10-17" (also accepts "2026-10-7").
+/// "10/17/2026" as written in the US, or "2026-10-17" (also "2026-10-7").
 pub fn parse_date(s: &str) -> Option<Date> {
-    let mut p = s.trim().split('-').map(|x| x.trim().parse::<u16>().ok());
-    let (year, month, day) = (p.next()??, p.next()??, p.next()??);
+    let s = s.trim();
+    let (sep, us) = if s.contains('/') { ('/', true) } else { ('-', false) };
+    let mut p = s.split(sep).map(|x| x.trim().parse::<u16>().ok());
+    let (a, b, c) = (p.next()??, p.next()??, p.next()??);
+    let (year, month, day) = if us { (c, a, b) } else { (a, b, c) };
     if p.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1990 {
         return None;
     }
     let d = Date { year, month: month as u8, day: day as u8 };
     // Reject days the month doesn't have (e.g. 31 September).
     (from_days(days(d)) == d).then_some(d)
+}
+
+/// "10/17/2026", for date fields.
+pub fn us_numeric(d: Date) -> String {
+    format!("{}/{}/{}", d.month, d.day, d.year)
+}
+
+/// "Oct 17, 2026".
+pub fn us_short(d: Date) -> String {
+    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    format!("{} {}, {}", M[(d.month.clamp(1, 12) - 1) as usize], d.day, d.year)
+}
+
+/// "2:19 PM" from the logger's "14:19:05".
+pub fn us_time(t: &str) -> String {
+    let mut p = t.split(':');
+    let (Some(Ok(h)), Some(m)) = (p.next().map(|h| h.trim().parse::<u32>()), p.next()) else { return t.to_string() };
+    let m = m.get(..2).unwrap_or(m);
+    let (h12, ampm) = match h { 0 => (12, "AM"), 1..=11 => (h, "AM"), 12 => (12, "PM"), _ => (h - 12, "PM") };
+    format!("{h12}:{m} {ampm}")
 }
 
 pub fn iso(d: Date) -> String {
@@ -247,7 +270,7 @@ mod tests {
 
     #[test]
     fn weeks_start_on_monday() {
-        // Saturday 10 and Sunday 11 October 2026 share Monday 5 October.
+        // Saturday, October 10 and Sunday, October 11, 2026 share Monday, October 5.
         assert_eq!(week_start(d(2026, 10, 10)), d(2026, 10, 5));
         assert_eq!(week_start(d(2026, 10, 11)), d(2026, 10, 5));
         assert_eq!(week_start(d(2026, 10, 5)), d(2026, 10, 5));
@@ -260,6 +283,12 @@ mod tests {
         assert_eq!(parse_date(" 2026-1-7 "), Some(d(2026, 1, 7)));
         assert_eq!(parse_date("2026-09-31"), None);
         assert_eq!(parse_date("17/10/2026"), None);
+        assert_eq!(parse_date("10/17/2026"), Some(d(2026, 10, 17)));
+        assert_eq!(us_numeric(d(2026, 1, 7)), "1/7/2026");
+        assert_eq!(us_short(d(2026, 10, 17)), "Oct 17, 2026");
+        assert_eq!(us_time("14:19:05"), "2:19 PM");
+        assert_eq!(us_time("00:05:00"), "12:05 AM");
+        assert_eq!(us_time("12:30"), "12:30 PM");
     }
 
     #[test]

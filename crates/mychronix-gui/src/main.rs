@@ -84,7 +84,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Mychronix",
         eframe::NativeOptions {
-            // Open maximised (asked again once the window exists, see App::ui); the
+            // Open maximized (asked again once the window exists, see App::ui); the
             // size is a fallback that fits a 1366×768 laptop screen.
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([1280.0, 720.0])
