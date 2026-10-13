@@ -820,7 +820,7 @@ impl App {
                     ui.end_row();
                     label(ui, "Engine");
                     ui.vertical(|ui| {
-                        let shown = if edit.other_engine { "Other…".to_string() } else if edit.engine.is_empty() { "Choose an engine".to_string() } else { edit.engine.clone() };
+                        let shown = if edit.other_engine { "Other engine".to_string() } else if edit.engine.is_empty() { "Choose an engine".to_string() } else { edit.engine.clone() };
                         egui::ComboBox::from_id_salt("kart_engine")
                             .selected_text(RichText::new(shown).font(regular(15.0)).color(if edit.engine.is_empty() && !edit.other_engine { DIM } else { TEXT }))
                             .width(field_w)
@@ -837,13 +837,13 @@ impl App {
                                     }
                                 }
                                 ui.separator();
-                                if ui.selectable_label(edit.other_engine, RichText::new("Other…").font(regular(14.5))).clicked() {
+                                if ui.selectable_label(edit.other_engine, RichText::new("Other engine").font(regular(14.5))).clicked() {
                                     edit.other_engine = true;
                                     edit.engine.clear();
                                 }
                             });
                         if edit.other_engine {
-                            ui.add(egui::TextEdit::singleline(&mut edit.engine).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("Maker and model"));
+                            ui.add(egui::TextEdit::singleline(&mut edit.engine).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("Maker and model, e.g. TM KZ-R3"));
                         }
                     });
                     ui.end_row();

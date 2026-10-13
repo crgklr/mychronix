@@ -80,21 +80,17 @@ pub struct Kart {
     pub baseline: crate::setup::Setup,
 }
 
-/// Racing engines offered when adding a kart, by maker. Anything else can be typed.
-pub const ENGINES: [(&str, &[&str]); 10] = [
-    ("BRP-Rotax", &["Rotax 125 Micro MAX", "Rotax 125 Mini MAX", "Rotax 125 Junior MAX", "Rotax 125 Senior MAX", "Rotax 125 MAX DD2"]),
-    (
-        "IAME / Parilla",
-        &["IAME Micro Swift", "IAME Mini Swift", "IAME X30 Mini", "IAME X30 Junior", "IAME X30 Senior", "IAME KA100", "IAME X30 Super Shifter 175", "IAME OK", "IAME OK-J", "IAME KZ"],
-    ),
-    ("Vortex", &["Vortex Mini ROK", "Vortex ROK VLR", "Vortex ROK GP", "Vortex Shifter ROK", "Vortex VTS (OK)", "Vortex VTJ (OK-J)"]),
-    ("TM Racing", &["TM KZ-R3", "TM OK", "TM OK-J"]),
-    ("Modena Engines", &["Modena KK1", "Modena ME-K", "Modena ME-KJ"]),
-    ("Comer", &["Comer C50", "Comer C51", "Comer C52", "Comer W60"]),
+/// Racing engines offered when adding a kart, by maker: the ones with a
+/// picture. Anything else is entered as "Other engine".
+pub const ENGINES: [(&str, &[&str]); 8] = [
+    ("BRP-Rotax", &["Rotax 125 Micro MAX", "Rotax 125 Mini MAX", "Rotax 125 Junior MAX", "Rotax 125 Senior MAX"]),
+    ("IAME / Parilla", &["IAME Micro Swift", "IAME Mini Swift", "IAME X30 Mini", "IAME X30 Junior", "IAME X30 Senior", "IAME KA100", "IAME X30 Super Shifter 175"]),
+    ("Vortex", &["Vortex Mini ROK", "Vortex ROK VLR", "Vortex ROK GP", "Vortex Shifter ROK"]),
+    ("Comer", &["Comer C50", "Comer C51", "Comer C52"]),
     ("Briggs & Stratton", &["Briggs & Stratton LO206"]),
-    ("Tillotson", &["Tillotson T225RS", "Tillotson T4"]),
-    ("Honda", &["Honda GX200", "Honda GX270", "Honda GX390"]),
-    ("Predator", &["Predator 212"]),
+    ("Tillotson", &["Tillotson T225RS"]),
+    ("Honda", &["Honda GX200"]),
+    ("Predator", &["Predator 79", "Predator Ghost 212"]),
 ];
 
 /// Whether `engine` is one of [`ENGINES`].
@@ -131,7 +127,17 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
     const IAME_SHIFTER: &[u8] = include_bytes!("../assets/engines/iame-super-shifter-175.png");
     const VORTEX_MINI_ROK: &[u8] = include_bytes!("../assets/engines/vortex-mini-rok.png");
     const VORTEX_ROK_VLR: &[u8] = include_bytes!("../assets/engines/vortex-rok-vlr.png");
-    const BUNDLED: [(&str, &str, &[u8]); 13] = [
+    const VORTEX_SHIFTER: &[u8] = include_bytes!("../assets/engines/vortex-shifter-rok.png");
+    const TILLOTSON_225: &[u8] = include_bytes!("../assets/engines/tillotson-t225rs.png");
+    const PREDATOR_GHOST: &[u8] = include_bytes!("../assets/engines/predator-ghost-212.png");
+    const BRIGGS_LO206: &[u8] = include_bytes!("../assets/engines/briggs-lo206.png");
+    const PREDATOR_79: &[u8] = include_bytes!("../assets/engines/predator-79.png");
+    const VORTEX_ROK_GP: &[u8] = include_bytes!("../assets/engines/vortex-rok-gp.png");
+    const COMER_C50: &[u8] = include_bytes!("../assets/engines/comer-c50.png");
+    const COMER_C51: &[u8] = include_bytes!("../assets/engines/comer-c51.png");
+    const COMER_C52: &[u8] = include_bytes!("../assets/engines/comer-c52.png");
+    const HONDA_GX200: &[u8] = include_bytes!("../assets/engines/honda-gx200.png");
+    const BUNDLED: [(&str, &str, &[u8]); 23] = [
         ("iame-micro-swift", "iame-mini-swift", IAME_SWIFT),
         ("iame-mini-swift", "iame-mini-swift", IAME_SWIFT),
         ("iame-ka100", "iame-ka100", IAME_KA100),
@@ -145,6 +151,16 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
         ("rotax-125-senior-max", "rotax-max", ROTAX_MAX),
         ("vortex-mini-rok", "vortex-mini-rok", VORTEX_MINI_ROK),
         ("vortex-rok-vlr", "vortex-rok-vlr", VORTEX_ROK_VLR),
+        ("vortex-rok-gp", "vortex-rok-gp", VORTEX_ROK_GP),
+        ("vortex-shifter-rok", "vortex-shifter-rok", VORTEX_SHIFTER),
+        ("comer-c50", "comer-c50", COMER_C50),
+        ("comer-c51", "comer-c51", COMER_C51),
+        ("comer-c52", "comer-c52", COMER_C52),
+        ("tillotson-t225rs", "tillotson-t225rs", TILLOTSON_225),
+        ("predator-ghost-212", "predator-ghost-212", PREDATOR_GHOST),
+        ("predator-79", "predator-79", PREDATOR_79),
+        ("briggs-stratton-lo206", "briggs-lo206", BRIGGS_LO206),
+        ("honda-gx200", "honda-gx200", HONDA_GX200),
     ];
     let bundled = BUNDLED.iter().find(|(s, ..)| *s == slug);
     // Your own picture, under this engine's name or the one it shares a picture with.
@@ -360,6 +376,15 @@ mod tests {
     }
 
     #[test]
+    fn every_listed_engine_has_a_picture() {
+        for (_, engines) in ENGINES {
+            for e in engines {
+                assert!(engine_picture(e).is_some(), "{e}");
+            }
+        }
+    }
+
+    #[test]
     fn bundled_engine_pictures() {
         let uri = |e: &str| engine_picture(e).map(|(u, _)| u);
         assert_eq!(uri("Rotax 125 Micro MAX"), uri("Rotax 125 Mini MAX"));
@@ -373,6 +398,9 @@ mod tests {
         assert!(uri("IAME KA100").is_some_and(|u| u.ends_with("iame-ka100.png")));
         assert!(uri("Vortex Mini ROK").is_some_and(|u| u.ends_with("vortex-mini-rok.png")));
         assert!(uri("Vortex ROK VLR").is_some_and(|u| u.ends_with("vortex-rok-vlr.png")));
+        for (engine, file) in [("Vortex Shifter ROK", "vortex-shifter-rok.png"), ("Tillotson T225RS", "tillotson-t225rs.png"), ("Predator Ghost 212", "predator-ghost-212.png"), ("Predator 79", "predator-79.png"), ("Briggs & Stratton LO206", "briggs-lo206.png"), ("Vortex ROK GP", "vortex-rok-gp.png"), ("Comer C50", "comer-c50.png"), ("Comer C51", "comer-c51.png"), ("Comer C52", "comer-c52.png"), ("Honda GX200", "honda-gx200.png")] {
+            assert!(uri(engine).is_some_and(|u| u.ends_with(file)), "{engine}");
+        }
         assert!(uri("IAME X30 Super Shifter 175").is_some_and(|u| u.ends_with("iame-super-shifter-175.png")));
     }
 
