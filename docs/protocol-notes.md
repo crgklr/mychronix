@@ -163,3 +163,55 @@ came back short in the capture (capture loss vs. RS3 stopping early).
 `.xrk`/`.xrz` parsing uses [libxrk](https://github.com/m3rlin45/libxrk) (MIT),
 whose `spec/xrk_format.py` is an executable spec of the format. Its test data
 comes from MXP/MXm loggers; MyChron files still need checking against it.
+
+### GPS timing against the other channels (open question, Oct 13 2026)
+
+**Observed.** RaceStudio 3's "Race Studio 2 .csv" export was compared sample by
+sample with Mychronix (`cargo run -p aim-xrk --example vs_rs3 -- <file> <csv>`):
+
+- On AiM's sample `test.xrk` (Adria Kart, Jan 2016; an early MyChron 5 by its
+  channels: WiFi, backlight, internal battery, 6-axis IMU, two temperatures),
+  RaceStudio places GPS **70 ms differently relative to RPM and the IMU** than
+  libxrk's timestamps do. Every non-GPS channel lines up with RaceStudio at
+  0 ms; GPS lines up at 70 ms (RaceStudio's GPS later relative to RPM).
+- On a MyChron 6 session the offset is **0 ms** for all channels.
+
+**Why the loggers differ (measured with `--example gps_clock`).** Each GPS
+record holds the logger's timestamp and the receiver's own time of week
+(u-blox NAV-SOL iTOW/fTOW).
+
+- MyChron 6: logger time minus receiver time is constant to 0.3 ms over 18,411
+  fixes (25 Hz). Its clock is locked to GPS; fixes are stamped when measured.
+- The older logger: the same difference wanders. Fixes are stamped **when they
+  arrive**, 0–50 ms late (median 18 ms above the earliest arrivals), 8 Hz.
+
+**Partly tested hypothesis.** RaceStudio re-times GPS by the receiver's clock.
+Re-timing our GPS that way brings its speed closer to RaceStudio's export
+(0.279 → 0.249 km/h rms), which supports it. It does **not** explain the fixed
+70 ms, whose direction (GPS later against RPM) is the opposite of removing a
+delay.
+
+**Leads in RaceStudio (Ghidra project `rs3`, read-only scripts).**
+- `FUN_141d8c780` builds a channel named **"GPS CLOCK SYNCH"** from (time × 1000,
+  integer) pairs and registers it with the other channels: the most likely
+  place the logger and GPS clocks are tied together.
+- `FUN_141f8bb30` registers `ChanLatency` / `ChanAvgLatency` by name among many
+  classes; it looks like the math-channel function catalog rather than an
+  automatic correction (unconfirmed).
+- `FID_SPEC_GPS_AIM_TIME` exists as a string; its reference wasn't inside a
+  function Ghidra had defined.
+
+**Not conclusive.** GPS speed vs RPM (`--example gps_vs_rpm`) trails by ~105 ms
+even on the MyChron 6, where RaceStudio applies no shift. That measures the
+receiver's own speed filtering, so it can't isolate RaceStudio's correction.
+
+**Other loggers checked (Oct 14).** Three more public sessions all stamp GPS
+when it's measured (logger minus receiver time steady to about 1 ms): a 2026
+MyChron 6 (25 Hz), a 2022 AiM car logger (25 Hz) and a 2021 AiM car logger
+(10 Hz). So far only the 2016 early-MyChron-5 sample stamps GPS on arrival.
+
+**To close it.** (1) RaceStudio CSV exports from a second older (pre-MyChron 6)
+logger, to see whether the 70 ms is fixed or varies; (2) trace how
+`FUN_141d8c780`'s "GPS CLOCK SYNCH" channel is consumed when GPS samples are
+placed. Until then Mychronix uses libxrk's timestamps unchanged; this only
+matters for loggers that stamp GPS on arrival (not the MyChron 6).

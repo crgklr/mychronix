@@ -22,6 +22,9 @@ pub enum Stat {
     OnThrottle,
     Cornering,
     Coasting,
+    /// Times the wheel changes direction by 5° or more: how often the driver
+    /// corrects. Fewer is smoother.
+    Corrections,
 }
 
 impl Stat {
@@ -37,6 +40,7 @@ impl Stat {
             Stat::OnThrottle => "on throttle",
             Stat::Cornering => "cornering",
             Stat::Coasting => "coasting",
+            Stat::Corrections => "corrections",
         }
     }
 
@@ -57,8 +61,11 @@ impl Column {
         Self { channel: channel.into(), stat }
     }
 
-    /// "RPM max", "EGT avg", "Lateral g peak", "Braking".
+    /// "RPM max", "EGT avg", "Lateral g peak", "Braking", "Steering corrections".
     pub fn title(&self) -> String {
+        if self.stat == Stat::Corrections {
+            return format!("{} corrections", short_name(&self.channel));
+        }
         if self.stat.is_share() {
             let l = self.stat.label();
             return format!("{}{}", l[..1].to_uppercase(), &l[1..]);
@@ -76,6 +83,7 @@ pub fn short_name(channel: &str) -> &str {
         "AccelerometerY" => "Lateral g",
         "GPS LonAcc" => "Long. g",
         "GPS LatAcc" => "Lat. g",
+        "Steering Angle" => "Steering",
         other => other,
     }
 }
@@ -160,6 +168,10 @@ impl Preset {
                 ("GPS LonAcc", Coasting),
                 ("GPS Speed", Min),
                 ("GPS LonAcc", Min),
+                ("Steering Angle", Corrections),
+                ("Steering", Corrections),
+                ("Steering Angle", Peak),
+                ("Steering", Peak),
             ],
         };
         wanted
@@ -177,6 +189,11 @@ const LATERAL: [&str; 2] = ["GPS LatAcc", "AccelerometerY"];
 /// A report cell: `column` over [start_ms, end_ms].
 pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> Option<f64> {
     let channel = session.channels.iter().find(|c| c.name == column.channel)?;
+    if column.stat == Stat::Corrections {
+        let lo = channel.times_ms.partition_point(|&t| t < start_ms);
+        let hi = channel.times_ms.partition_point(|&t| t <= end_ms);
+        return (hi > lo + 1).then(|| reversals(&channel.values[lo..hi], 5.0) as f64);
+    }
     if !column.stat.is_share() {
         return value(channel, start_ms, end_ms, column.stat);
     }
@@ -217,6 +234,35 @@ fn share(channel: &Channel, start_ms: i64, end_ms: i64, condition: impl Fn(i64, 
         }
     }
     (total > 0).then(|| on as f64 * 100.0 / total as f64)
+}
+
+/// Direction changes of at least `threshold` (hysteresis), e.g. steering
+/// corrections of 5° or more. Counts changes in direction rather than the
+/// angle itself, so a drifting zero doesn't affect it.
+pub fn reversals(values: &[f64], threshold: f64) -> usize {
+    let (mut n, mut extreme, mut dir) = (0, values.first().copied().unwrap_or(0.0), 0i8);
+    for &x in values {
+        match dir {
+            1 if x > extreme => extreme = x,
+            -1 if x < extreme => extreme = x,
+            1 if x < extreme - threshold => {
+                n += 1;
+                dir = -1;
+                extreme = x;
+            }
+            -1 if x > extreme + threshold => {
+                n += 1;
+                dir = 1;
+                extreme = x;
+            }
+            0 if (x - extreme).abs() >= threshold => {
+                dir = if x > extreme { 1 } else { -1 };
+                extreme = x;
+            }
+            _ => {}
+        }
+    }
+    n
 }
 
 /// The latest sample at or before `t_ms`.
@@ -293,6 +339,15 @@ mod tests {
         assert_eq!(pct(col("GPS LatAcc", Stat::Cornering)), 17.0);
         assert_eq!(pct(col("GPS LonAcc", Stat::Coasting)), 17.0);
         assert_eq!(col("GPS LonAcc", Stat::Braking).title(), "Braking");
+    }
+
+    #[test]
+    fn steering_corrections() {
+        // Turn in, unwind, a 2° wobble (not counted), then a correction back and forth.
+        let v = [0.0, 10.0, 20.0, 10.0, 0.0, 2.0, 0.0, 8.0, 1.0, 9.0];
+        assert_eq!(reversals(&v, 5.0), 4);
+        assert_eq!(reversals(&[0.0, 1.0, 0.0, 1.0], 5.0), 0);
+        assert_eq!(Column::new("Steering Angle", Stat::Corrections).title(), "Steering corrections");
     }
 
     #[test]

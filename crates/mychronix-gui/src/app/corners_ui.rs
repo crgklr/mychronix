@@ -47,7 +47,9 @@ impl App {
 
         let gap = 12.0;
         let height = ui.available_height();
-        let map_w = (ui.available_width() * 0.27).clamp(240.0, 480.0);
+        // A steering column needs a little more of the width.
+        let steering = reference.iter().any(|z| z.steering.is_some());
+        let map_w = (ui.available_width() * if steering { 0.21 } else { 0.27 }).clamp(220.0, 480.0);
         let table_w = ui.available_width() - map_w - gap;
         let mut hovered = None;
         ui.horizontal_top(|ui| {
@@ -101,7 +103,8 @@ fn corners_table(
         }
     };
     let mut hovered = None;
-    let headers = [
+    let has_steering = reference.iter().any(|z| z.steering.is_some());
+    let mut headers = vec![
         ("Corner", "Numbered from the start line, on the best lap"),
         ("Brake point", "Where braking starts: later than the best lap means braking deeper into the corner"),
         ("Entry", "Highest speed before the corner"),
@@ -112,6 +115,12 @@ fn corners_table(
         ("On brakes", "Time actually braking (harder than −0.15 g, RaceStudio's threshold): the rest of the slowing is lifting or scrubbing speed"),
         ("Time", "Time from the highest speed to the lowest"),
     ];
+    if has_steering {
+        headers.push((
+            "Steering · corr.",
+            "Largest steering angle from braking to the corner's exit, and how many times the wheel changed direction by 5° or more (fewer is smoother). The MyChron 6 works steering out from its motion sensor, so the angle can settle over the first laps; the count is steadier.",
+        ));
+    }
     let scale = ref_profile.length() / profile.length();
     let max_h = (ui.available_height() - 20.0).max(120.0);
     egui_extras::TableBuilder::new(ui)
@@ -157,7 +166,7 @@ fn corners_table(
                         cell(&mut row, &mut |ui| {
                             ui.label(RichText::new("No braking found here on this lap").size(13.0).color(DIM));
                         });
-                        for _ in 0..7 {
+                        for _ in 0..(7 + has_steering as usize) {
                             cell(&mut row, &mut |_| {});
                         }
                         row.col(|_| {});
@@ -204,6 +213,19 @@ fn corners_table(
                         let d = z.time_s() - r.time_s();
                         delta(ui, d, format!("{d:+.2}"), false);
                     });
+                    if has_steering {
+                        cell(&mut row, &mut |ui| match z.steering {
+                            Some((peak, corr)) => {
+                                ui.label(text(format!("{peak:.0}° · {corr}")));
+                                if let Some((_, rc)) = r.steering {
+                                    neutral(ui, format!("{:+}", corr as i64 - rc as i64));
+                                }
+                            }
+                            None => {
+                                ui.label(text("—".into()));
+                            }
+                        });
+                    }
                     row.col(|_| {});
                 });
             }

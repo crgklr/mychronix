@@ -26,6 +26,10 @@ pub struct Zone {
     pub brake_s: f64,
     /// Hardest deceleration in the zone (GPS LonAcc), g, as a positive number.
     pub peak_g: f64,
+    /// With a steering channel, from the start of braking to the corner's
+    /// exit (the next corner's braking or the lap's end): the largest angle
+    /// either way and how many times the wheel changed direction by 5°+.
+    pub steering: Option<(f64, usize)>,
 }
 
 impl Zone {
@@ -55,6 +59,18 @@ pub fn lap_zones(session: &Session, lap: &Lap) -> Option<(Vec<Zone>, DistancePro
     if let Some(lon) = session.channel("GPS LonAcc") {
         for z in &mut zones {
             (z.brake_s, z.peak_g) = braking_in(lon, z.start_ms, z.apex_ms);
+        }
+    }
+    let steer = session.channels.iter().find(|c| c.name.to_lowercase().contains("steer") && c.values.len() > 1);
+    if let Some(st) = steer {
+        let ends: Vec<i64> = zones.iter().skip(1).map(|z| z.start_ms).chain(std::iter::once(lap.end_ms)).collect();
+        for (z, end) in zones.iter_mut().zip(ends) {
+            let lo = st.times_ms.partition_point(|&t| t < z.start_ms);
+            let hi = st.times_ms.partition_point(|&t| t <= end);
+            if hi > lo + 1 {
+                let v = &st.values[lo..hi];
+                z.steering = Some((v.iter().fold(0.0f64, |m, x| m.max(x.abs())), crate::report::reversals(v, 5.0)));
+            }
         }
     }
     Some((zones, profile))
@@ -93,6 +109,7 @@ pub fn find_zones(times_ms: &[i64], speed_kmh: &[f64], dist_at: impl Fn(i64) -> 
         min_kmh: speed_kmh[lo],
         brake_s: 0.0,
         peak_g: 0.0,
+        steering: None,
     };
     let mut peak = 0;
     let mut low: Option<usize> = None;
@@ -197,7 +214,7 @@ mod tests {
 
     #[test]
     fn matches_corners_by_where_they_fall() {
-        let at = |m: f64| Zone { start_ms: 0, apex_ms: 0, start_m: m - 20.0, apex_m: m, entry_kmh: 0.0, min_kmh: 0.0, brake_s: 0.0, peak_g: 0.0 };
+        let at = |m: f64| Zone { start_ms: 0, apex_ms: 0, start_m: m - 20.0, apex_m: m, entry_kmh: 0.0, min_kmh: 0.0, brake_s: 0.0, peak_g: 0.0, steering: None };
         let reference = [at(50.0), at(150.0), at(250.0)];
         // A slightly longer lap that missed the middle corner's dip.
         let lap = [at(52.0), at(262.0)];

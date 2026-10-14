@@ -11,6 +11,7 @@ use egui_plot::{Line, Plot, PlotPoints, VLine};
 mod analysis_ui;
 mod charts_ui;
 mod corners_ui;
+mod sensor_ui;
 mod events_page;
 mod garage_ui;
 mod report_ui;
@@ -121,6 +122,7 @@ pub struct App {
     report: report_ui::ReportState,
     splits: splits_ui::SplitsState,
     corners: corners_ui::CornersState,
+    sensors: sensor_ui::SensorState,
     charts: charts_ui::ChartsState,
     /// Shared cursor on the compare tab, meters along the reference lap.
     compare_cursor_m: Option<f64>,
@@ -493,6 +495,15 @@ impl eframe::App for App {
             });
 
         self.rail(&ui.ctx().clone(), rail_space);
+        // MYCHRONIX_SENSOR_CHECK=<logger id> checks that logger's downloaded sessions
+        // as if just downloaded (development only).
+        if self.frames == 3 {
+            if let Ok(id) = std::env::var("MYCHRONIX_SENSOR_CHECK") {
+                let paths: Vec<PathBuf> = self.library.get_or_insert_with(Library::load).sessions.iter().filter(|s| s.logger == id).map(|s| s.path.clone()).collect();
+                self.check_downloaded(paths, &id, &ui.ctx().clone());
+            }
+        }
+        self.sensor_dialog(&ui.ctx().clone());
 
         // Put the session back, unless the page opened another one this frame.
         if self.session.is_none() {
@@ -1922,6 +1933,11 @@ impl App {
                     self.dev_busy = None;
                     self.dev_progress = None;
                     self.dev_message = Some((true, format!("Downloaded {saved} session{}. They're on the Sessions page.", if saved == 1 { "" } else { "s" })));
+                    // Check the new sessions' sensors in the background.
+                    if let (Some(dir), Some(id)) = (self.logger_dir(), self.dev_logger.as_ref().and_then(|b| b.logger_id)) {
+                        let paths = self.dev_selected.iter().map(|n| dir.join(n)).filter(|p| p.exists()).collect();
+                        self.check_downloaded(paths, &id.to_string(), &ctx);
+                    }
                     self.library = None; // reload sessions and tracks
                     self.dev_selected.clear();
                 }
@@ -3262,8 +3278,9 @@ impl App {
         let Some(gps) = &session.gps else { return };
         let lo = gps.times_ms.partition_point(|&t| t < start_ms);
         let hi = gps.times_ms.partition_point(|&t| t <= end_ms);
-        let rpm = session.channels.iter().position(|c| c.name == "RPM");
-        let color_ch = self.map_channel.or(rpm).or_else(|| self.selected.keys().next().copied());
+        // RPM by default, or speed when the session has no RPM recorded.
+        let default = ["RPM", "GPS Speed"].iter().find_map(|n| session.channels.iter().position(|c| c.name == *n && !is_dead(c)));
+        let color_ch = self.map_channel.filter(|&i| session.channels.get(i).is_some_and(|c| !is_dead(c))).or(default).or_else(|| self.selected.keys().next().copied());
         let slot = color_ch.and_then(|i| self.selected.get(&i).copied()).unwrap_or(0);
         let hue = SERIES[slot];
         let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
@@ -3303,7 +3320,7 @@ impl App {
                                     self.map_time_compare = true;
                                 }
                                 for (i, c) in session.channels.iter().enumerate() {
-                                    if c.values.len() > 1 {
+                                    if !is_dead(c) {
                                         if ui.selectable_label(gain.is_none() && color_ch == Some(i), &c.name).clicked() {
                                             self.map_channel = Some(i);
                                             self.map_time_compare = false;
