@@ -30,6 +30,7 @@ mod splits;
 mod storage;
 mod theme;
 mod units;
+mod update;
 mod weather;
 mod tracks;
 

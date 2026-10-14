@@ -149,6 +149,10 @@ pub struct App {
     kart_edit: Option<garage_ui::KartEdit>,
     /// Which page of drivers the Garage shows (two drivers to a page).
     kart_page: usize,
+    /// The update check, a newer release found, and its notes window.
+    update_rx: Option<std::sync::mpsc::Receiver<crate::update::Release>>,
+    update: Option<crate::update::Release>,
+    update_notes: bool,
     measured_ratio: Option<f64>,
     pending_setup: Option<(PathBuf, crate::setup::Setup)>,
     /// Channel that colors the track map (None: RPM if present).
@@ -473,6 +477,7 @@ impl eframe::App for App {
         let window = session.as_ref().map(|s| self.window(s));
 
         self.status_bar(ui, session.as_deref());
+        self.update_bar(ui);
 
         // The icon rail's space; the rail itself is drawn over the page (it slides out on hover).
         let rail_space = egui::Panel::left("rail")
@@ -519,6 +524,74 @@ impl eframe::App for App {
 // Chrome: sidebar navigation, status bar, empty states
 
 impl App {
+
+    /// A thin bar at the top when a newer release is out: what's new, download, dismiss.
+    fn update_bar(&mut self, ui: &mut Ui) {
+        if self.frames == 1 && self.update_rx.is_none() {
+            self.update_rx = Some(crate::update::spawn(ui.ctx().clone()));
+        }
+        if let Some(r) = self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.update = Some(r);
+        }
+        let Some(r) = self.update.clone() else { return };
+        let mut dismiss = false;
+        egui::Panel::top("update")
+            .exact_size(38.0)
+            .show_separator_line(false)
+            .frame(Frame::new().fill(SURFACE).inner_margin(Margin::symmetric(16, 0)))
+            .show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.add(Icon::Check.image(theme::GOOD, 15.0));
+                    ui.label(RichText::new(format!("Mychronix {} is available", r.version)).font(medium(13.5)).color(TEXT));
+                    ui.label(RichText::new(format!("You have {}.", env!("CARGO_PKG_VERSION"))).size(12.5).color(DIM));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let x = ui.add(Icon::X.image(DIM, 13.0).sense(Sense::click())).on_hover_text("Not now (you'll hear about the next one)");
+                        if x.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if x.clicked() {
+                            dismiss = true;
+                        }
+                        if chip(ui, "Download", false).on_hover_text("Open the release page in your browser").clicked() {
+                            crate::update::open_url(&r.url);
+                        }
+                        if !r.notes.trim().is_empty() && chip(ui, "What's new", self.update_notes).clicked() {
+                            self.update_notes = !self.update_notes;
+                        }
+                    });
+                });
+            });
+        if dismiss {
+            crate::update::dismiss(&r.version);
+            self.update = None;
+            self.update_notes = false;
+            return;
+        }
+        if self.update_notes {
+            let mut open = true;
+            egui::Window::new(RichText::new(format!("What's new in {}", r.version)).font(semibold(18.0)))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(560.0);
+                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                        for line in r.notes.lines() {
+                            let t = line.trim_start_matches('#').trim();
+                            let heading = line.starts_with('#');
+                            ui.label(if heading { RichText::new(t).font(semibold(15.0)).color(TEXT) } else { RichText::new(line.replace("**", "")).size(13.5).color(SECONDARY) });
+                        }
+                    });
+                    ui.add_space(10.0);
+                    if button(ui, None, "Download", true).clicked() {
+                        crate::update::open_url(&r.url);
+                    }
+                });
+            self.update_notes = open;
+        }
+    }
 
     fn status_bar(&self, ui: &mut Ui, session: Option<&Session>) {
         egui::Panel::bottom("status")

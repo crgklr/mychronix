@@ -61,6 +61,9 @@ works today:
   each session started, shown with its setup, from
   [Open-Meteo](https://open-meteo.com) (only the track position and date are
   sent; `"weather": false` in `~/Mychronix/settings.json` turns it off).
+- **Update check:** once a day Mychronix asks GitHub whether a newer release
+  is out and, if so, offers what's new and a download link. Nothing installs
+  by itself; `"update_check": false` in `~/Mychronix/settings.json` turns it off.
 - **Setup sheets:** gearing, tires and pressures, weight and ballast, jetting
   and notes per session, as RaceStudio's log sheets. A session without its own
   sheet uses the previous one (the first uses the kart's baseline), changes are flagged on the session and the
