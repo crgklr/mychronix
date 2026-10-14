@@ -54,6 +54,15 @@ pub fn speed_unit() -> &'static str {
     if imperial() { "mph" } else { "km/h" }
 }
 
+/// Short distances (braking zones): feet or meters.
+pub fn distance(m: f64) -> f64 {
+    if imperial() { m * 3.280_84 } else { m }
+}
+
+pub fn distance_unit() -> &'static str {
+    if imperial() { "ft" } else { "m" }
+}
+
 pub fn temp(celsius: f64) -> f64 {
     if imperial() { celsius * 9.0 / 5.0 + 32.0 } else { celsius }
 }

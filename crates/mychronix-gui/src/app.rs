@@ -10,6 +10,7 @@ use egui_plot::{Line, Plot, PlotPoints, VLine};
 
 mod analysis_ui;
 mod charts_ui;
+mod corners_ui;
 mod events_page;
 mod garage_ui;
 mod report_ui;
@@ -59,6 +60,7 @@ enum AnalysisView {
     Session,
     Report,
     Splits,
+    Corners,
     Histogram,
     Scatter,
     Compare,
@@ -118,6 +120,7 @@ pub struct App {
     analysis_view: AnalysisView,
     report: report_ui::ReportState,
     splits: splits_ui::SplitsState,
+    corners: corners_ui::CornersState,
     charts: charts_ui::ChartsState,
     /// Shared cursor on the compare tab, meters along the reference lap.
     compare_cursor_m: Option<f64>,
@@ -146,6 +149,8 @@ pub struct App {
     pending_setup: Option<(PathBuf, crate::setup::Setup)>,
     /// Channel that colors the track map (None: RPM if present).
     map_channel: Option<usize>,
+    /// Color the Graphs map by where the open lap gains and loses time against the best lap.
+    map_time_compare: bool,
     pub screenshot_to: Option<PathBuf>,
     frames: u32,
 
@@ -2985,6 +2990,10 @@ impl App {
                 self.report_view(ui, session);
                 return;
             }
+            AnalysisView::Corners => {
+                self.corners_view(ui, session);
+                return;
+            }
             AnalysisView::Splits => {
                 self.splits_view(ui, session);
                 return;
@@ -3043,13 +3052,7 @@ impl App {
         let gap = 10.0;
         // RaceStudio's Time Compare: time gained or lost against the best lap,
         // along this lap (shown when a lap other than the best is open).
-        let best = session.best_lap(MIN_LAP_MS).copied();
-        let reference = self
-            .lap
-            .and_then(|i| session.laps.get(i))
-            .filter(|l| l.start_ms == start_ms && Some(**l) != best)
-            .and(best)
-            .filter(|b| b.end_ms - b.start_ms >= MIN_LAP_MS);
+        let reference = self.time_compare_reference(session, start_ms);
         let compare_h = 120.0;
         let n = selected.len() as f32;
         let reserved = if reference.is_some() { compare_h + gap } else { 0.0 };
@@ -3069,9 +3072,7 @@ impl App {
         let x_max = profile.as_ref().map(|p| p.length()).unwrap_or((end_ms - start_ms) as f64 / 1000.0).max(0.001);
         // Seconds behind the best lap at each point of this one, on this graph's x axis.
         let time_compare: Option<(aim_xrk::Lap, Vec<[f64; 2]>)> = reference.and_then(|best| {
-            let lap = crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })?;
-            let reference = crate::compare::DistanceProfile::from_gps(session, &best)?;
-            let points = crate::compare::gap_along(&lap, &reference, 600)
+            let points = time_compare_curve(session, best, start_ms, end_ms)?
                 .into_iter()
                 .map(|(t_ms, d, gap_s)| [if profile.is_some() { d } else { (t_ms - start_ms as f64) / 1000.0 }, gap_s])
                 .collect();
@@ -3245,9 +3246,28 @@ impl App {
     }
 }
 
+/// Along the lap from `start_ms` to `end_ms`: (logger time ms, meters into
+/// the lap, seconds behind `best` there).
+fn time_compare_curve(session: &Session, best: aim_xrk::Lap, start_ms: i64, end_ms: i64) -> Option<Vec<(f64, f64, f64)>> {
+    let lap = crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })?;
+    let reference = crate::compare::DistanceProfile::from_gps(session, &best)?;
+    Some(crate::compare::gap_along(&lap, &reference, 600))
+}
+
 impl App {
-    /// The GPS path for the current window, colored by a channel, with a dot
-    /// at the shared cursor. Hovering the map moves the cursor.
+    /// The best lap, when the open lap is another one (what Time Compare measures against).
+    fn time_compare_reference(&self, session: &Session, start_ms: i64) -> Option<aim_xrk::Lap> {
+        let best = session.best_lap(MIN_LAP_MS).copied();
+        self.lap
+            .and_then(|i| session.laps.get(i))
+            .filter(|l| l.start_ms == start_ms && Some(**l) != best)
+            .and(best)
+            .filter(|b| b.end_ms - b.start_ms >= MIN_LAP_MS)
+    }
+
+    /// The GPS path for the current window, colored by a channel (or by where
+    /// time is gained and lost against the best lap), with a dot at the shared
+    /// cursor. Hovering the map moves the cursor.
     fn track_map(&mut self, ui: &mut Ui, session: &Session, start_ms: i64, end_ms: i64) {
         let Some(gps) = &session.gps else { return };
         let lo = gps.times_ms.partition_point(|&t| t < start_ms);
@@ -3257,6 +3277,19 @@ impl App {
         let slot = color_ch.and_then(|i| self.selected.get(&i).copied()).unwrap_or(0);
         let hue = SERIES[slot];
         let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
+        // Time compare coloring: how fast the gap to the best lap grows (losing)
+        // or shrinks (gaining), per meter, at each point.
+        let reference = self.time_compare_reference(session, start_ms);
+        let gap_curve = reference.filter(|_| self.map_time_compare).and_then(|best| time_compare_curve(session, best, start_ms, end_ms));
+        let gain = gap_curve.as_ref().map(|c| {
+            let rate = |k: usize| {
+                let (a, b) = (c[k.saturating_sub(1)], c[(k + 1).min(c.len() - 1)]);
+                (b.2 - a.2) / (b.1 - a.1).max(1e-6)
+            };
+            let rates: Vec<(f64, f64)> = (0..c.len()).map(|k| (c[k].0, rate(k))).collect();
+            let scale = rates.iter().map(|r| r.1.abs()).fold(0.0_f64, f64::max).max(1e-9) * 0.6;
+            (rates, scale)
+        });
 
         Frame::new()
             .fill(SURFACE)
@@ -3271,14 +3304,20 @@ impl App {
                     ui.add(Icon::MapPin.image(DIM, 16.0));
                     ui.label(RichText::new("Track").font(medium(14.5)).color(TEXT));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let name = color_ch.map(|i| session.channels[i].name.as_str()).unwrap_or("—");
+                        let name = if gain.is_some() { "Time compare" } else { color_ch.map(|i| session.channels[i].name.as_str()).unwrap_or("—") };
                         egui::ComboBox::from_id_salt("map_channel")
                             .selected_text(RichText::new(name).size(13.0))
                             .width(118.0)
                             .show_ui(ui, |ui| {
+                                if reference.is_some() && ui.selectable_label(gain.is_some(), "Time compare").on_hover_text("Where this lap gains and loses time against the best lap").clicked() {
+                                    self.map_time_compare = true;
+                                }
                                 for (i, c) in session.channels.iter().enumerate() {
                                     if c.values.len() > 1 {
-                                        ui.selectable_value(&mut self.map_channel, Some(i), &c.name);
+                                        if ui.selectable_label(gain.is_none() && color_ch == Some(i), &c.name).clicked() {
+                                            self.map_channel = Some(i);
+                                            self.map_time_compare = false;
+                                        }
                                     }
                                 }
                             })
@@ -3341,7 +3380,14 @@ impl App {
                     if gps.times_ms[j] - gps.times_ms[i] > 1000 {
                         continue;
                     }
-                    let color = values[k].map(ramp).unwrap_or(DIM);
+                    let color = match &gain {
+                        Some((rates, scale)) => {
+                            let t = gps.times_ms[i] as f64;
+                            let r = rates[rates.partition_point(|p| p.0 < t).min(rates.len() - 1)].1;
+                            gain_color((r / scale) as f32)
+                        }
+                        None => values[k].map(ramp).unwrap_or(DIM),
+                    };
                     painter.line_segment([pts[k], pts[k + 1]], Stroke::new(3.5, color));
                 }
                 // Where the window starts.
@@ -3369,7 +3415,10 @@ impl App {
                     }
                     // Readout in the map's top-left corner.
                     let mut line = String::new();
-                    if let Some(v) = channel.and_then(|c| value_at(c, t)) {
+                    if let Some(c) = &gap_curve {
+                        let g = c[c.partition_point(|p| p.0 < t as f64).min(c.len() - 1)].2;
+                        line = if g >= 0.0 { format!("+{g:.3} s") } else { format!("−{:.3} s", -g) };
+                    } else if let Some(v) = channel.and_then(|c| value_at(c, t)) {
                         line = format!("{} {units}", format_value(v, dec));
                     }
                     if let Some(i) = gps.index_at(t) {
@@ -3383,6 +3432,18 @@ impl App {
 
                 // Legend: the color ramp and the range it covers.
                 ui.add_space(6.0);
+                if gain.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Gaining").size(12.0).color(DIM));
+                        let (bar, _) = ui.allocate_exact_size(vec2(140.0, 6.0), Sense::hover());
+                        for j in 0..40 {
+                            let r = Rect::from_min_size(pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
+                            ui.painter().rect_filled(r, 0.0, gain_color(-1.0 + 2.0 * j as f32 / 39.0));
+                        }
+                        ui.label(RichText::new("Losing time  ·  vs best lap").size(12.0).color(DIM));
+                    });
+                    return;
+                }
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format_value(vmin, dec)).size(12.0).color(DIM));
                     let bar_w = (ui.available_width() - 110.0).clamp(60.0, 200.0);
