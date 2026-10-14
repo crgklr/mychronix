@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+pub mod checks;
 pub mod summary;
 
 pub use libxrk;
@@ -170,14 +171,9 @@ impl From<libxrk::XrkFile> for Session {
         let channels: Vec<Channel> = file
             .channels
             .into_iter()
-            .map(|c| Channel {
-                name: c.name,
-                group: c.group,
-                units: c.units,
-                decimals: c.dec_pts,
-                interpolate: c.interpolate,
-                times_ms: c.timecodes,
-                values: to_f64(c.values),
+            .map(|c| {
+                let (times_ms, values) = without_placeholders(c.timecodes, to_f64(c.values));
+                Channel { name: c.name, group: c.group, units: c.units, decimals: c.dec_pts, interpolate: c.interpolate, times_ms, values }
             })
             .collect();
         let gps = file.gps.as_ref().and_then(GpsTrack::from_libxrk);
@@ -219,6 +215,16 @@ impl From<libxrk::XrkFile> for Session {
             .collect();
         Session { info, channels, laps, gps }
     }
+}
+
+/// Drops samples that aren't readings: loggers fill inputs with nothing
+/// connected with the largest float (about 1.8 × 10³⁰⁸), and the odd value
+/// may be NaN. A channel that's all placeholder ends up empty.
+fn without_placeholders(times_ms: Vec<i64>, values: Vec<f64>) -> (Vec<i64>, Vec<f64>) {
+    if values.iter().all(|v| v.is_finite() && v.abs() < 1e30) {
+        return (times_ms, values);
+    }
+    times_ms.into_iter().zip(values).filter(|(_, v)| v.is_finite() && v.abs() < 1e30).unzip()
 }
 
 fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
@@ -303,6 +309,17 @@ pub fn lateral_g(times_ms: &[i64], speed_kmh: &[f64], yaw_rate_dps: &[f64]) -> V
             if speed_kmh[i] < GPS_ACC_MIN_KMH { 0.0 } else { speed_kmh[i] / 3.6 * yaw.to_radians() / 9.81 }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod placeholder_tests {
+    #[test]
+    fn placeholder_samples_are_dropped() {
+        let (t, v) = super::without_placeholders(vec![0, 10, 20, 30], vec![1.0, f64::MAX, f64::NAN, 2.0]);
+        assert_eq!((t, v), (vec![0, 30], vec![1.0, 2.0]));
+        let (t, v) = super::without_placeholders(vec![0, 10], vec![f64::MAX, f64::MAX]);
+        assert!(t.is_empty() && v.is_empty());
+    }
 }
 
 #[cfg(test)]

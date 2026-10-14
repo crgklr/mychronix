@@ -111,6 +111,18 @@ impl App {
                     ui.label(RichText::new(format_lap_time(best.duration_ms())).font(semibold(17.0)).color(theme::GOOD));
                     ui.label(RichText::new("Best").size(12.5).color(DIM));
                 }
+                // Sensors that stopped recording in this session.
+                if let Some(checked) = self.open_session_check(session) {
+                    let names: Vec<&str> = checked.issues.iter().map(|i| i.channel.as_str()).collect();
+                    let text = format!("{}: no data", names.join(", "));
+                    let r = ui.add(egui::Button::image_and_text(Icon::TriangleAlert.image(theme::FAVORITE, 14.0), RichText::new(text).size(13.0).color(theme::FAVORITE)).frame(false));
+                    if r.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if r.on_hover_text("What happened, and what to check").clicked() {
+                        self.sensors.report = Some(vec![checked]);
+                    }
+                }
             });
         });
         if self.session_details {
@@ -297,6 +309,18 @@ impl App {
     pub(super) fn channel_picker(&mut self, ui: &mut Ui, session: &Session, start_ms: i64) {
         let resp = ui.horizontal(|ui| {
             let r = button(ui, None, "+ Add channel", false);
+            let inputs = driver_inputs(session);
+            if inputs.len() > 1
+                && button(ui, Some(Icon::Activity), "Driver inputs", false)
+                    .on_hover_text("Graph steering, speed and braking/acceleration (and throttle and brake pressure when recorded)")
+                    .clicked()
+            {
+                self.selected.clear();
+                self.graph_order.clear();
+                for i in inputs {
+                    self.select(i);
+                }
+            }
             let n = self.selected.len();
             ui.label(RichText::new(format!("{n} graphed  ·  ✕ on a graph removes it")).size(12.5).color(DIM));
             // Time or distance along the bottom axis (distance needs GPS).
@@ -345,4 +369,20 @@ impl App {
             self.channel_picker_open = false;
         }
     }
+}
+
+/// The channels that show what the driver is doing, in graph order: steering,
+/// throttle, brake, then speed and longitudinal g. Only those recorded with data.
+pub(super) fn driver_inputs(session: &Session) -> Vec<usize> {
+    let find = |pred: &dyn Fn(&str) -> bool| session.channels.iter().position(|c| !is_dead(c) && pred(&c.name.to_lowercase()));
+    [
+        find(&|n| n.contains("steer")),
+        find(&|n| n.contains("throttle") || n == "tps" || n.ends_with(" tps") || n.contains("pedal")),
+        find(&|n| n.contains("brake") || n.contains("brk")),
+        find(&|n| n == "gps speed"),
+        find(&|n| n == "gps lonacc"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }

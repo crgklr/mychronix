@@ -24,6 +24,7 @@ mod profiles;
 mod report;
 mod setup;
 mod split_report;
+mod sensor_check;
 mod splits;
 mod storage;
 mod theme;

@@ -86,6 +86,7 @@ fastframe_icons::icons! {
         Settings => lucide "settings",
         Plus => lucide "plus",
         Pencil => lucide "pencil",
+        TriangleAlert => "triangle-alert",
         House => "house",
         /// A MyChron: its case, screen and two buttons (Mychronix's own, in Lucide's style).
         Mychron => "mychron",

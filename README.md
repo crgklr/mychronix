@@ -95,6 +95,10 @@ Roughly in priority order.
 - [ ] **Writing to the logger** (custom tracks, settings), only once that part
       of the protocol is properly understood. Firmware updates are out of scope.
 - [ ] **MyChron 5:** confirm it works the same as the 6 over WiFi.
+- [ ] **GPS timing on older loggers:** RaceStudio places GPS ~70 ms apart from
+      the other channels on an early MyChron 5 sample (0 ms on a MyChron 6).
+      Probably re-timing by the GPS receiver's clock; see "GPS timing against
+      the other channels" in `docs/protocol-notes.md`.
 - [ ] **Packaging:** a Flatpak or similar so installing doesn't need Rust.
 
 ## Install (Linux)
