@@ -173,7 +173,8 @@ impl App {
             ui.allocate_ui_with_layout(vec2(table_w, height), column, |ui| {
                 ui.set_width(table_w);
                 card(ui, |ui| {
-                    egui::ScrollArea::both().id_salt("splits_table").max_height(height - 70.0).auto_shrink([false, true]).show(ui, |ui| {
+                    // The header stays put while the laps scroll; both scroll sideways together.
+                    egui::ScrollArea::horizontal().id_salt("splits_table_x").auto_shrink([false, true]).show(ui, |ui| {
                         let lap_w = 112.0;
                         let cell_w = 86.0;
                         let row_h = 26.0;
@@ -200,6 +201,7 @@ impl App {
                             }
                         });
                         ui.add_space(4.0);
+                        egui::ScrollArea::vertical().id_salt("splits_table").max_height(height - 70.0 - 38.0).auto_shrink([false, true]).show(ui, |ui| {
                         // Columns' ranges, for coloring.
                         let ranges: Vec<Option<(i64, i64)>> = (0..n)
                             .map(|k| {
@@ -288,6 +290,7 @@ impl App {
                                 }
                             });
                         }
+                        });
                     });
                     ui.add_space(8.0);
                     // The two laps you could have done.
