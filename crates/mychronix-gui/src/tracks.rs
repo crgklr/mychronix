@@ -89,6 +89,8 @@ pub struct LocalSession {
     pub meta: Option<crate::device::SessionMeta>,
     /// Its own setup sheet, when one was written for it.
     pub setup: Option<crate::setup::Setup>,
+    /// The weather when it started, once fetched (see `crate::weather`).
+    pub weather: Option<crate::weather::Weather>,
 }
 
 #[derive(Debug, Default)]
@@ -241,7 +243,8 @@ impl Library {
                 lib.tracks[i].sessions.push(session);
             }
             let setup = crate::setup::Setup::load(&xrz);
-            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup });
+            let weather = crate::weather::Weather::load(&xrz);
+            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup, weather });
         }
         for t in &mut lib.tracks {
             t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));

@@ -17,6 +17,7 @@ mod charts;
 mod compare;
 mod countries;
 mod device;
+mod digest;
 mod logging;
 mod paths;
 mod events;
@@ -29,6 +30,7 @@ mod splits;
 mod storage;
 mod theme;
 mod units;
+mod weather;
 mod tracks;
 
 use std::path::PathBuf;

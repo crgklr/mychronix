@@ -1,10 +1,9 @@
 //! Sensor checks after a download or when a session opens (see
 //! `aim_xrk::checks`). A sensor is only reported when it has recorded real
 //! readings in another session from the same MyChron (or it's RPM), so
-//! sensors that were never fitted stay quiet. Which sensors have worked is
-//! cached per session file in `sensor-history.json` in the cache folder; the
-//! channels you've asked not to hear about again are in
-//! `~/Mychronix/sensor-check.json`.
+//! sensors that were never fitted stay quiet. Which sensors have worked comes
+//! from the session digests (`crate::digest`); the channels you've asked not
+//! to hear about again are in `~/Mychronix/sensor-check.json`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -44,35 +43,6 @@ impl Ignored {
         } else {
             set.remove(channel);
         }
-    }
-}
-
-/// Sensor channels with real readings, per session file, by logger.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct History {
-    /// Session path → (logger id, sensor channels that worked).
-    #[serde(default)]
-    pub sessions: BTreeMap<String, (String, Vec<String>)>,
-}
-
-impl History {
-    fn path() -> Option<PathBuf> {
-        crate::paths::cache_dir().map(|d| d.join("sensor-history.json"))
-    }
-
-    pub fn load() -> Self {
-        crate::storage::load_or_default(Self::path())
-    }
-
-    fn save(&self) {
-        if let Some(p) = Self::path() {
-            let _ = crate::storage::save(&p, self);
-        }
-    }
-
-    /// Whether `channel` recorded real readings in any session from `logger`.
-    pub fn worked(&self, logger: &str, channel: &str) -> bool {
-        self.sessions.values().any(|(l, chans)| l == logger && chans.iter().any(|c| c == channel))
     }
 }
 
@@ -148,41 +118,27 @@ pub fn summary(p: &Problem) -> String {
 }
 
 /// Checks `paths` in the background, learning first which sensors have worked
-/// in `known` (the same loggers' other sessions; files already in the history
-/// aren't read again). The result arrives once, with the sessions that have an
+/// in `known` (the same loggers' other sessions; digests already cached aren't
+/// worked out again). The result arrives once, with the sessions that have an
 /// issue worth reporting.
 pub fn spawn(paths: Vec<PathBuf>, known: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<Vec<Checked>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut history = History::load();
-        let mut opened: BTreeMap<PathBuf, aim_xrk::Session> = BTreeMap::new();
+        let mut digests = crate::digest::Digests::load();
         for path in known.iter().chain(&paths) {
-            let key = path.to_string_lossy().into_owned();
-            if history.sessions.contains_key(&key) && !paths.contains(path) {
-                continue;
-            }
-            let Ok(session) = aim_xrk::Session::open(path) else { continue };
-            let logger = session.info.logger_id.map(|i| i.to_string()).unwrap_or_default();
-            history.sessions.insert(key, (logger, aim_xrk::checks::working_sensors(&session)));
-            if paths.contains(path) {
-                opened.insert(path.clone(), session);
-            }
+            digests.ensure(path);
         }
-        history.save();
+        digests.save();
         let mut out = Vec::new();
         for path in paths {
-            let Some(session) = opened.get(&path) else { continue };
-            let logger = session.info.logger_id.map(|i| i.to_string()).unwrap_or_default();
-            let issues: Vec<Issue> = aim_xrk::checks::sensor_issues(session)
-                .into_iter()
-                .filter(|i| aim_xrk::checks::worth_reporting(i, |c| history.worked(&logger, c)))
-                .collect();
+            let Some(d) = digests.get(&path) else { continue };
+            let issues = digests.reportable(d);
             if issues.is_empty() {
                 continue;
             }
             let number = path.file_name().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
             log::info!("sensor check {}: {}", path.display(), issues.iter().map(|i| format!("{} {:?}", i.channel, i.kind)).collect::<Vec<_>>().join(", "));
-            out.push(Checked { logger, number, issues });
+            out.push(Checked { logger: d.logger.clone(), number, issues });
         }
         let _ = tx.send(out);
         ctx.request_repaint();

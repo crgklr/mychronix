@@ -147,6 +147,8 @@ pub struct App {
     /// The Garage's driver and kart dialogs.
     driver_edit: Option<garage_ui::DriverEdit>,
     kart_edit: Option<garage_ui::KartEdit>,
+    /// Which page of drivers the Garage shows (two drivers to a page).
+    kart_page: usize,
     measured_ratio: Option<f64>,
     pending_setup: Option<(PathBuf, crate::setup::Setup)>,
     /// Channel that colors the track map (None: RPM if present).
@@ -586,6 +588,7 @@ impl App {
         let lib = self.library.take().unwrap_or_else(Library::load);
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let mut go_garage = false;
+        let mut shown_rows: Vec<usize> = Vec::new();
         let loggers: Vec<String> = {
             let mut l: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
             l.sort();
@@ -697,6 +700,8 @@ impl App {
                     let s = &lib.sessions[i].summary;
                     std::cmp::Reverse((s.date, s.start_time.clone(), s.number))
                 });
+                let extras = self.row_extras(&lib, &shown, &ui.ctx().clone());
+                shown_rows = shown.clone();
 
                 egui::ScrollArea::vertical().id_salt("sessions_list").auto_shrink([false, false]).show(ui, |ui| {
                     let mut k = 0;
@@ -731,7 +736,7 @@ impl App {
                         for &i in day {
                             let s = &lib.sessions[i];
                             let driver = s.meta.as_ref().map(|m| m.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| driver_name(&s.logger, &profiles));
-                            if session_row(ui, &lib, i, &driver, best, !setups[i].changes.is_empty()).clicked() {
+                            if session_row_with(ui, &lib, i, &driver, best, !setups[i].changes.is_empty(), extras.get(&i)).clicked() {
                                 open = Some(lib.sessions[i].path.clone());
                             }
                         }
@@ -774,6 +779,7 @@ impl App {
         }
         self.library = Some(lib);
         self.profiles = Some(profiles);
+        self.want_weather(&shown_rows, &ui.ctx().clone());
         if go_garage {
             self.page = Page::Garage;
         }
@@ -783,8 +789,84 @@ impl App {
     }
 }
 
+/// What a session list knows about a session beyond its summary: its racing
+/// laps (for the sparkline) and badges.
+#[derive(Default)]
+pub(super) struct RowExtras {
+    pub laps: Vec<(i32, i64)>,
+    /// (label, color, explanation).
+    pub badges: Vec<(String, Color32, String)>,
+}
+
+impl App {
+    /// Sparkline laps and badges for each of `rows` (library indices); digests
+    /// not yet known are asked for in the background.
+    pub(super) fn row_extras(&mut self, lib: &Library, rows: &[usize], ctx: &egui::Context) -> std::collections::HashMap<usize, RowExtras> {
+        self.want_digests(rows.iter().map(|&i| lib.sessions[i].path.clone()), ctx);
+        let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
+        let ignored = self.sensors.ignored.get_or_insert_with(crate::sensor_check::Ignored::load);
+        // Personal best: the best lap at a track from this MyChron, among two or more sessions there.
+        let mut best_at: std::collections::HashMap<(String, String), (u64, usize)> = std::collections::HashMap::new();
+        for s in &lib.sessions {
+            if let (Some(b), Some(t)) = (s.summary.best_lap_ms, s.summary.track.clone()) {
+                let e = best_at.entry((s.logger.clone(), t)).or_insert((u64::MAX, 0));
+                e.0 = e.0.min(b);
+                e.1 += 1;
+            }
+        }
+        rows.iter()
+            .map(|&i| {
+                let s = &lib.sessions[i];
+                let sum = &s.summary;
+                let mut x = RowExtras::default();
+                if let Some(d) = digests.get(&s.path) {
+                    x.laps = d.laps.clone();
+                    let issues: Vec<String> = digests.reportable(d).into_iter().filter(|i| !ignored.contains(&d.logger, &i.channel)).map(|i| i.channel).collect();
+                    if !issues.is_empty() {
+                        x.badges.push((format!("⚠ {}", issues.join(", ")), theme::FAVORITE, "A sensor didn't record properly; open the session for what to check".into()));
+                    }
+                }
+                let pb = sum.best_lap_ms.zip(sum.track.clone()).is_some_and(|(b, t)| best_at.get(&(s.logger.clone(), t)).is_some_and(|&(m, n)| n > 1 && b == m));
+                if pb {
+                    x.badges.insert(0, ("PB".into(), theme::GOOD, "Personal best: the fastest lap from this MyChron at this track".into()));
+                }
+                if crate::events::is_warm_up(sum) {
+                    x.badges.push(("Warm-up".into(), DIM, "The kart never left the stand".into()));
+                } else if sum.laps.unwrap_or(0) <= 1 {
+                    x.badges.push(("No laps timed".into(), DIM, "Driven without crossing a start/finish line, e.g. practice in a parking lot".into()));
+                }
+                (i, x)
+            })
+            .collect()
+    }
+}
+
+/// A lap-time sparkline in `rect`: one point per racing lap, slower laps
+/// higher and faster ones lower (the fastest, at the bottom, dotted green).
+fn sparkline(p: &egui::Painter, rect: Rect, laps: &[(i32, i64)]) {
+    if laps.len() < 3 {
+        return;
+    }
+    let (lo, hi) = laps.iter().fold((i64::MAX, i64::MIN), |a, l| (a.0.min(l.1), a.1.max(l.1)));
+    let span = (hi - lo).max(1) as f32;
+    let pts: Vec<egui::Pos2> = laps
+        .iter()
+        .enumerate()
+        .map(|(k, l)| pos2(rect.left() + rect.width() * k as f32 / (laps.len() - 1) as f32, rect.bottom() - rect.height() * (l.1 - lo) as f32 / span))
+        .collect();
+    p.add(egui::Shape::line(pts.clone(), Stroke::new(1.5, SECONDARY)));
+    if let Some(k) = laps.iter().position(|l| l.1 == lo) {
+        p.circle_filled(pts[k], 2.5, theme::GOOD);
+    }
+}
+
 /// One session in the list: number, time, driver; laps and best lap on the right.
 fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>, setup_changed: bool) -> egui::Response {
+    session_row_with(ui, lib, i, driver, day_best, setup_changed, None)
+}
+
+/// [`session_row`] with a sparkline and badges.
+fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>, setup_changed: bool, extras: Option<&RowExtras>) -> egui::Response {
     let s = &lib.sessions[i];
     let sum = &s.summary;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
@@ -799,11 +881,38 @@ fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Opt
         let (l, r) = (rect.left() + 14.0, rect.right() - 14.0);
         let (top, bottom) = (rect.top() + 17.0, rect.top() + 35.0);
         let title = p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.5), TEXT);
+        // Badges after the title.
+        let mut badges: Vec<(String, Color32, String)> = Vec::new();
         if setup_changed {
-            let galley = p.layout_no_wrap("Setup changed".into(), medium(11.5), theme::FAVORITE);
-            let tag = Rect::from_min_size(pos2(title.right() + 10.0, top - galley.size().y / 2.0 - 3.0), galley.size() + vec2(14.0, 6.0));
-            p.rect_filled(tag, CornerRadius::same(255), theme::FAVORITE.gamma_multiply(0.16));
-            p.galley(tag.min + vec2(7.0, 3.0), galley, theme::FAVORITE);
+            badges.push(("Setup changed".into(), theme::FAVORITE, "This session's setup sheet changed something".into()));
+        }
+        if let Some(x) = extras {
+            badges.extend(x.badges.iter().cloned());
+        }
+        let mut bx = title.right() + 10.0;
+        let mut tips = Vec::new();
+        for (text, color, tip) in &badges {
+            let galley = p.layout_no_wrap(text.clone(), medium(11.5), *color);
+            let tag = Rect::from_min_size(pos2(bx, top - galley.size().y / 2.0 - 3.0), galley.size() + vec2(14.0, 6.0));
+            p.rect_filled(tag, CornerRadius::same(255), color.gamma_multiply(0.16));
+            p.galley(tag.min + vec2(7.0, 3.0), galley, *color);
+            tips.push((tag, tip.clone()));
+            bx = tag.right() + 6.0;
+        }
+        if let Some(pos) = response.hover_pos() {
+            if let Some((_, tip)) = tips.iter().find(|(r, _)| r.contains(pos)) {
+                egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), response.id.with("badge"), egui::PopupAnchor::Pointer).show(|ui| {
+                    ui.label(tip);
+                });
+            }
+        }
+        // Lap times, first to last, left of the numbers.
+        if let Some(x) = extras {
+            let w = 110.0;
+            let spark = Rect::from_min_size(pos2(r - 300.0 - w, rect.top() + 12.0), vec2(w, rect.height() - 24.0));
+            if spark.left() > bx + 20.0 {
+                sparkline(p, spark, &x.laps);
+            }
         }
         let track = s.track.map(|t| lib.tracks[t].name.clone()).or(sum.track.clone()).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
@@ -1885,6 +1994,18 @@ impl App {
                     self.dev_current_wifi = current;
                     if self.dev_busy.as_deref() == Some("Looking for your MyChron…") {
                         self.dev_busy = None;
+                    }
+                    // Remember which MyChron model this logger is, from its WiFi name.
+                    if let (Some(id), Some(ssid)) = (self.dev_logger.as_ref().and_then(|b| b.logger_id), self.dev_current_wifi.as_deref()) {
+                        let model = model_from_ssid(ssid);
+                        if model.starts_with("MyChron") {
+                            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+                            let entry = profiles.loggers.entry(id.to_string()).or_default();
+                            if entry.model != model {
+                                entry.model = model.to_string();
+                                let _ = profiles.save();
+                            }
+                        }
                     }
                     if newly {
                         self.dev_busy = Some("Reading the session list…".into());

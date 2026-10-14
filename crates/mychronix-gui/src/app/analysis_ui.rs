@@ -134,6 +134,21 @@ impl App {
             ui.add_space(2.0);
             self.setup_line(ui);
         }
+        // Session notes: what stands out across the racing laps.
+        let notes = self.open_session_notes(session);
+        if !notes.is_empty() {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.add(Icon::Activity.image(DIM, 14.0));
+                for (k, (text, why, attention)) in notes.into_iter().enumerate() {
+                    if k > 0 {
+                        ui.label(RichText::new("·").size(13.0).color(DIM));
+                    }
+                    ui.label(RichText::new(text).size(13.0).color(if attention { theme::FAVORITE } else { SECONDARY })).on_hover_text(why);
+                }
+            });
+        }
     }
 
     /// The analysis views as tabs.
