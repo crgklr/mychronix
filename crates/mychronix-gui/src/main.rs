@@ -12,6 +12,7 @@
 //! (`MYCHRONIX_FAKE_DIALOG=1` also opens the download dialog).
 
 mod app;
+mod braking;
 mod charts;
 mod compare;
 mod countries;
