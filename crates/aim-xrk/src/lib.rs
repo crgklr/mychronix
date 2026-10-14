@@ -41,6 +41,9 @@ pub struct GpsTrack {
     /// Degrees.
     pub longitude: Vec<f64>,
     pub speed_kmh: Vec<f64>,
+    /// Rate of change of the GPS heading (from the receiver's own velocity),
+    /// degrees per second, clockwise positive: turning right.
+    pub yaw_rate_dps: Vec<f64>,
 }
 
 impl GpsTrack {
@@ -67,6 +70,7 @@ impl GpsTrack {
                 track.latitude.push(lat);
                 track.longitude.push(lon);
                 track.speed_kmh.push(g.speed.get(i).copied().unwrap_or(0.0) * 3.6);
+                track.yaw_rate_dps.push(g.yaw_rate.get(i).map(|&v| v as f64).filter(|v| v.is_finite()).unwrap_or(0.0));
             }
         }
         (!track.is_empty()).then_some(track)
@@ -197,6 +201,15 @@ impl From<libxrk::XrkFile> for Session {
                 times_ms: g.times_ms.clone(),
                 values: longitudinal_g(&g.times_ms, &g.speed_kmh),
             });
+            channels.push(Channel {
+                name: "GPS LatAcc".into(),
+                group: Some("GPS".into()),
+                units: "g".into(),
+                decimals: 2,
+                interpolate: true,
+                times_ms: g.times_ms.clone(),
+                values: lateral_g(&g.times_ms, &g.speed_kmh, &g.yaw_rate_dps),
+            });
         }
         let laps = file
             .laps
@@ -251,17 +264,42 @@ mod tests {
     }
 }
 
-/// Longitudinal acceleration in g from GPS speed: the slope over about ±160 ms,
-/// as RaceStudio's "GPS LonAcc" (negative when braking).
+/// Smoothing for the GPS accelerations: ±250 ms matches RaceStudio's own
+/// "GPS LonAcc" and "GPS LatAcc" most closely (compared against its CSV export).
+const GPS_ACC_HALF_MS: i64 = 250;
+/// Below this RaceStudio reports both GPS accelerations as 0, so a kart
+/// standing still doesn't pick up GPS jitter.
+const GPS_ACC_MIN_KMH: f64 = 1.0;
+
+/// Longitudinal acceleration in g from GPS speed: the slope over
+/// [`GPS_ACC_HALF_MS`] either side, as RaceStudio's "GPS LonAcc" (negative
+/// when braking).
 pub fn longitudinal_g(times_ms: &[i64], speed_kmh: &[f64]) -> Vec<f64> {
-    const HALF_MS: i64 = 160;
+    const HALF_MS: i64 = GPS_ACC_HALF_MS;
     let n = times_ms.len();
     (0..n)
         .map(|i| {
             let a = times_ms[..i].partition_point(|&t| t < times_ms[i] - HALF_MS);
             let b = (i + times_ms[i..].partition_point(|&t| t <= times_ms[i] + HALF_MS)).saturating_sub(1).max(i);
             let dt = (times_ms[b] - times_ms[a]) as f64 / 1000.0;
-            if dt <= 0.0 { 0.0 } else { (speed_kmh[b] - speed_kmh[a]) / 3.6 / dt / 9.81 }
+            if dt <= 0.0 || speed_kmh[i] < GPS_ACC_MIN_KMH { 0.0 } else { (speed_kmh[b] - speed_kmh[a]) / 3.6 / dt / 9.81 }
+        })
+        .collect()
+}
+
+/// Lateral acceleration in g from GPS: speed × heading turn rate, the turn
+/// rate averaged over [`GPS_ACC_HALF_MS`] either side as for
+/// [`longitudinal_g`]. RaceStudio's "GPS LatAcc"; positive in right-hand turns.
+pub fn lateral_g(times_ms: &[i64], speed_kmh: &[f64], yaw_rate_dps: &[f64]) -> Vec<f64> {
+    const HALF_MS: i64 = GPS_ACC_HALF_MS;
+    let n = times_ms.len().min(speed_kmh.len()).min(yaw_rate_dps.len());
+    (0..n)
+        .map(|i| {
+            let a = times_ms[..i].partition_point(|&t| t < times_ms[i] - HALF_MS);
+            let b = (i + times_ms[i..n].partition_point(|&t| t <= times_ms[i] + HALF_MS)).max(i + 1).min(n);
+            let rates = &yaw_rate_dps[a..b];
+            let yaw = rates.iter().sum::<f64>() / rates.len() as f64;
+            if speed_kmh[i] < GPS_ACC_MIN_KMH { 0.0 } else { speed_kmh[i] / 3.6 * yaw.to_radians() / 9.81 }
         })
         .collect()
 }
@@ -275,5 +313,15 @@ mod lon_g_tests {
         let speeds: Vec<f64> = times.iter().map(|&t| 60.0 - 35.316 * t as f64 / 1000.0).collect();
         let g = super::longitudinal_g(&times, &speeds);
         assert!((g[25] + 1.0).abs() < 0.01, "{}", g[25]);
+    }
+
+    #[test]
+    fn steady_circle_reads_v_squared_over_r() {
+        // 20 m/s round a 40 m radius to the right: 10 m/s² ≈ 1.02 g, turning 28.6°/s.
+        let times: Vec<i64> = (0..50).map(|k| k * 40).collect();
+        let speeds = vec![72.0; 50];
+        let yaw = vec![(20.0f64 / 40.0).to_degrees(); 50];
+        let g = super::lateral_g(&times, &speeds, &yaw);
+        assert!((g[25] - 1.019).abs() < 0.01, "{}", g[25]);
     }
 }

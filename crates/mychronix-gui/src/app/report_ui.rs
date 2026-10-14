@@ -91,7 +91,7 @@ impl App {
         for lap in laps {
             let mut row = vec![Some(lap.duration_ms() as f64 / 1000.0)];
             for c in &columns {
-                row.push(session.channels.iter().find(|ch| ch.name == c.channel).and_then(|ch| report::value(ch, lap.start_ms, lap.end_ms, c.stat)));
+                row.push(report::cell(session, c, lap.start_ms, lap.end_ms));
             }
             cells.push(row);
         }
@@ -100,12 +100,16 @@ impl App {
         let summaries: Vec<Option<[f64; 4]>> =
             (0..n_cols).map(|k| report::summary(&included.iter().filter_map(|&i| cells[i][k]).collect::<Vec<_>>())).collect();
         let decimals: Vec<usize> = std::iter::once(3)
-            .chain(columns.iter().map(|c| session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| ch.decimals.min(2) as usize).unwrap_or(1)))
+            .chain(columns.iter().map(|c| if c.stat.is_share() { 0 } else { session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| ch.decimals.min(2) as usize).unwrap_or(1) }))
             .collect();
         let units: Vec<String> = std::iter::once("s".to_string())
-            .chain(columns.iter().map(|c| session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| pretty_units(&ch.units).to_string()).unwrap_or_default()))
+            .chain(columns.iter().map(|c| if c.stat.is_share() { "% of lap".to_string() } else { session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| pretty_units(&ch.units).to_string()).unwrap_or_default() }))
             .collect();
-        let fmt = |k: usize, v: f64| if k == 0 { format_lap_time((v * 1000.0).round() as i64) } else { format!("{v:.*}", decimals[k]) };
+        let fmt = |k: usize, v: f64| match k {
+            0 => format_lap_time((v * 1000.0).round() as i64),
+            _ if columns[k - 1].stat.is_share() => format!("{v:.0}%"),
+            _ => format!("{v:.*}", decimals[k]),
+        };
 
         let mut remove = None;
         let mut toggle = None;
