@@ -374,16 +374,34 @@ impl App {
 }
 
 impl eframe::App for App {
-    /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames (for testing).
+    /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames;
+    /// "frame:x,y:dy" scrolls the wheel there by dy points instead (for testing).
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.input_frames += 1;
         let Ok(spec) = std::env::var("MYCHRONIX_CLICKS") else { return };
         for item in spec.split(';') {
             let Some((f, xy)) = item.split_once(':') else { continue };
+            let (xy, scroll) = match xy.split_once(':') {
+                Some((xy, dy)) => (xy, dy.trim().parse::<f32>().ok()),
+                None => (xy, None),
+            };
             let (Ok(f), Some((x, y))) = (f.trim().parse::<u32>(), xy.split_once(',')) else { continue };
             let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>()) else { continue };
             let pos = pos2(x, y);
             let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+            if let Some(dy) = scroll {
+                match self.input_frames.checked_sub(f) {
+                    Some(0) => raw.events.push(egui::Event::PointerMoved(pos)),
+                    Some(1) => raw.events.push(egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: vec2(0.0, dy),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: Default::default(),
+                    }),
+                    _ => {}
+                }
+                continue;
+            }
             match self.input_frames.checked_sub(f) {
                 Some(0) => raw.events.push(egui::Event::PointerMoved(pos)),
                 Some(1) => raw.events.push(button(true)),
@@ -1363,10 +1381,10 @@ impl App {
                     }
                     ui.label(RichText::new(format!("{:.0} {}", crate::units::speed(lap.max_kmh), crate::units::speed_unit())).size(12.0).color(DIM));
                     ui.add_space(14.0);
-                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                    ui.painter().circle_filled(dot.center(), 6.0, Color32::from_black_alpha(170));
-                    ui.painter().circle_filled(dot.center(), 4.0, TEXT);
-                    ui.label(RichText::new("Braking point (peak deceleration)").size(12.0).color(DIM));
+                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 8.0, TEXT);
+                    ui.painter().text(dot.center(), egui::Align2::CENTER_CENTER, "1", semibold(10.5), ON_TEXT);
+                    ui.label(RichText::new("Corners, at their slowest point (numbered as in Analysis → Corners)").size(12.0).color(DIM));
                 });
                 ui.label(RichText::new(format!("{}  {credit}", lap.source)).size(11.5).color(DIM));
             }
@@ -1434,7 +1452,8 @@ impl App {
                 return;
             }
             let track_best = t.best_lap_ms(lib);
-            egui::ScrollArea::vertical().id_salt("track_sessions").max_height(420.0).show(ui, |ui| {
+            // Part of the page (no scroll box of its own), so scrolling the page reaches every session.
+            ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for &si in &t.sessions {
                     let s = &lib.sessions[si];
@@ -1527,12 +1546,12 @@ struct SpeedLap {
     session_points: Vec<aim_track::LatLon>,
 }
 
+/// A corner on the speed map, numbered as on Analysis → Corners.
 #[derive(Clone, Copy)]
 struct Brake {
-    /// Index into `points` where braking starts.
+    /// Index into `points` of the corner's slowest point.
     at: usize,
-    /// Peak deceleration in g.
-    peak_g: f64,
+    number: usize,
 }
 
 /// The best lap of your best session at `t`; if the logger timed no laps
@@ -1568,7 +1587,7 @@ fn speed_lap(lib: &Library, t: &tracks::Track) -> Option<SpeedLap> {
     let (min_kmh, max_kmh) = robust_range(kmh.iter().copied());
     Some(SpeedLap {
         points: lap.iter().map(|p| p.1).collect(),
-        brakes: braking_points(&times, &kmh),
+        brakes: corner_points(&times, &lap.iter().map(|p| p.2).collect::<Vec<_>>()),
         kmh,
         min_kmh,
         max_kmh,
@@ -1590,40 +1609,14 @@ fn smooth(v: &[f64], half: usize) -> Vec<f64> {
         .collect()
 }
 
-/// Where the hardest braking starts: runs of deceleration above 0.3 g, kept
-/// when their peak is at least half the lap's hardest, strongest first (max 8).
-fn braking_points(times_ms: &[i64], kmh: &[f64]) -> Vec<Brake> {
-    let k = 5; // about 0.2 s either side at the logger's 25 Hz GPS
-    let n = kmh.len();
-    if n < 2 * k + 2 {
-        return Vec::new();
-    }
-    let decel: Vec<f64> = (0..n)
-        .map(|i| {
-            let (a, b) = (i.saturating_sub(k), (i + k).min(n - 1));
-            let dt = (times_ms[b] - times_ms[a]) as f64 / 1000.0;
-            if dt <= 0.0 { 0.0 } else { (kmh[a] - kmh[b]) / 3.6 / dt / 9.81 }
-        })
-        .collect();
-    let mut runs: Vec<Brake> = Vec::new();
-    let mut i = 0;
-    while i < n {
-        if decel[i] > 0.3 {
-            let start = i;
-            let mut peak = decel[i];
-            while i < n && decel[i] > 0.3 {
-                peak = peak.max(decel[i]);
-                i += 1;
-            }
-            runs.push(Brake { at: start, peak_g: peak });
-        }
-        i += 1;
-    }
-    let hardest = runs.iter().map(|b| b.peak_g).fold(0.0, f64::max);
-    runs.retain(|b| b.peak_g >= hardest * 0.5);
-    runs.sort_by(|a, b| b.peak_g.total_cmp(&a.peak_g));
-    runs.truncate(8);
-    runs
+/// Each corner's slowest point, found and numbered the same way as on
+/// Analysis → Corners (braking from the highest speed to the lowest).
+fn corner_points(times_ms: &[i64], kmh: &[f64]) -> Vec<Brake> {
+    crate::braking::find_zones(times_ms, kmh, |_| 0.0)
+        .iter()
+        .enumerate()
+        .map(|(n, z)| Brake { at: times_ms.partition_point(|&t| t < z.apex_ms).min(times_ms.len() - 1), number: n + 1 })
+        .collect()
 }
 
 /// Sector times for every complete lap of the session, best per sector in
@@ -1789,15 +1782,12 @@ impl walkers::Plugin for TrackOverlay {
                 let t = ((lap.kmh[k] - lap.min_kmh) / span) as f32;
                 painter.line_segment([pts[k], pts[k + 1]], Stroke::new(5.0, speed_color(t)));
             }
+            // Corner numbers at each corner's slowest point, as on Analysis → Corners.
             for b in &lap.brakes {
                 let c = pts[b.at];
-                painter.circle_filled(c, 8.0, Color32::from_black_alpha(170));
-                painter.circle_filled(c, 5.5, TEXT);
-                let label = format!("{:.1} g", b.peak_g);
-                let galley = painter.layout_no_wrap(label, semibold(11.5), TEXT);
-                let r = Rect::from_min_size(c + vec2(10.0, -galley.size().y / 2.0 - 3.0), galley.size() + vec2(10.0, 6.0));
-                painter.rect_filled(r, CornerRadius::same(4), Color32::from_black_alpha(190));
-                painter.galley(r.min + vec2(5.0, 3.0), galley, TEXT);
+                painter.circle_filled(c, 12.0, Color32::from_black_alpha(170));
+                painter.circle_filled(c, 10.0, TEXT);
+                painter.text(c, egui::Align2::CENTER_CENTER, b.number.to_string(), semibold(12.0), ON_TEXT);
             }
         } else if let Some((path, heights)) = &self.elevation {
             let pts: Vec<_> = path.iter().map(to_screen).collect();

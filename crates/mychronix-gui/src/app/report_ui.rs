@@ -119,71 +119,95 @@ impl App {
         let graph_h = 230.0;
         let table_h = (height - graph_h - 70.0).max(220.0);
         card(ui, |ui| {
-            egui::ScrollArea::both().id_salt("report_table").max_height(table_h).auto_shrink([false, true]).show(ui, |ui| {
-                egui::Grid::new("report_grid").striped(false).spacing([22.0, 6.0]).min_col_width(64.0).show(ui, |ui| {
-                    // Header: click to plot; × to remove.
-                    ui.label(RichText::new("Lap").font(medium(13.0)).color(DIM));
-                    for k in 0..n_cols {
-                        let title = if k == 0 { "Lap time".to_string() } else { columns[k - 1].title() };
-                        ui.horizontal(|ui| {
-                            let color = if st.plotted == k { TEXT } else { SECONDARY };
-                            let r = ui.add(egui::Label::new(RichText::new(&title).font(medium(13.0)).color(color)).sense(Sense::click()));
-                            if r.on_hover_text(format!("Plot {title} by lap ({})", units[k])).clicked() {
-                                st.plotted = k;
-                            }
-                            if k > 0 && ui.add(Icon::X.image(DIM, 10.0).sense(Sense::click())).on_hover_text("Remove column").clicked() {
-                                remove = Some(k - 1);
-                            }
+            // Headers stay put while the laps scroll; wide tables scroll sideways as a whole.
+            egui::ScrollArea::horizontal().id_salt("report_table_x").auto_shrink([false, true]).show(ui, |ui| {
+                egui_extras::TableBuilder::new(ui)
+                    .id_salt("report_table")
+                    .striped(false)
+                    .resizable(false)
+                    .cell_layout(Layout::left_to_right(Align::Center))
+                    .column(egui_extras::Column::auto().at_least(56.0))
+                    .columns(egui_extras::Column::auto().at_least(64.0), n_cols)
+                    // Fills the rest of the card, so the scrollbar sits at its edge.
+                    .column(egui_extras::Column::remainder())
+                    .min_scrolled_height(0.0)
+                    .max_scroll_height(table_h)
+                    .header(26.0, |mut header| {
+                        // Click a title to plot it; × to remove.
+                        header.col(|ui| {
+                            ui.label(RichText::new("Lap").font(medium(13.0)).color(DIM));
                         });
-                    }
-                    ui.end_row();
-                    // Statistics over the included laps.
-                    for (j, name) in ["Max", "Min", "Average", "Std dev"].iter().enumerate() {
-                        ui.label(RichText::new(*name).font(medium(12.5)).color(DIM));
                         for k in 0..n_cols {
-                            let text = summaries[k]
-                                .map(|s| if j == 3 && k == 0 { format!("{:.3}", s[3]) } else if j == 3 { format!("{:.*}", decimals[k] + 1, s[3]) } else { fmt(k, s[j]) })
-                                .unwrap_or_else(|| "—".into());
-                            ui.label(RichText::new(text).size(12.5).color(SECONDARY));
-                        }
-                        ui.end_row();
-                    }
-                    for (i, lap) in laps.iter().enumerate() {
-                        let on = !st.excluded.contains(&lap.number);
-                        let is_best = Some(*lap) == best;
-                        let r = ui
-                            .horizontal(|ui| {
-                                let (cb, resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
-                                ui.painter().rect_stroke(cb, CornerRadius::same(4), Stroke::new(1.3, if on { TEXT } else { DIM }), egui::StrokeKind::Inside);
-                                if on {
-                                    Icon::Check.image(TEXT, 12.0).paint_at(ui, cb.shrink(2.0));
+                            header.col(|ui| {
+                                let title = if k == 0 { "Lap time".to_string() } else { columns[k - 1].title() };
+                                let color = if st.plotted == k { TEXT } else { SECONDARY };
+                                let r = ui.add(egui::Label::new(RichText::new(&title).font(medium(13.0)).color(color)).sense(Sense::click()));
+                                if r.on_hover_text(format!("Plot {title} by lap ({})", units[k])).clicked() {
+                                    st.plotted = k;
                                 }
-                                if resp.on_hover_text(if on { "Leave out of the statistics" } else { "Include in the statistics" }).clicked() {
-                                    toggle = Some(lap.number);
+                                if k > 0 && ui.add(Icon::X.image(DIM, 10.0).sense(Sense::click())).on_hover_text("Remove column").clicked() {
+                                    remove = Some(k - 1);
                                 }
-                                ui.label(RichText::new(lap.number.to_string()).font(medium(13.5)).color(if on { TEXT } else { DIM }))
-                            })
-                            .response;
-                        if r.hovered() {
-                            hovered = Some(lap.number);
+                                ui.add_space(14.0);
+                            });
                         }
-                        for k in 0..n_cols {
-                            let text = cells[i][k].map(|v| fmt(k, v)).unwrap_or_else(|| "—".into());
-                            let color = if !on {
-                                DIM
-                            } else if k == 0 && is_best {
-                                theme::GOOD
-                            } else {
-                                TEXT
-                            };
-                            let rt = RichText::new(text).font(if st.hovered_lap == Some(lap.number) { semibold(13.5) } else { regular(13.5) }).color(color);
-                            if ui.label(rt).hovered() {
-                                hovered = Some(lap.number);
-                            }
+                        header.col(|_| {});
+                    })
+                    .body(|mut body| {
+                        // Statistics over the included laps.
+                        for (j, name) in ["Max", "Min", "Average", "Std dev"].iter().enumerate() {
+                            body.row(24.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.label(RichText::new(*name).font(medium(12.5)).color(DIM));
+                                });
+                                for k in 0..n_cols {
+                                    row.col(|ui| {
+                                        let text = summaries[k]
+                                            .map(|s| if j == 3 && k == 0 { format!("{:.3}", s[3]) } else if j == 3 { format!("{:.*}", decimals[k] + 1, s[3]) } else { fmt(k, s[j]) })
+                                            .unwrap_or_else(|| "—".into());
+                                        ui.label(RichText::new(text).size(12.5).color(SECONDARY));
+                                    });
+                                }
+                                row.col(|_| {});
+                            });
                         }
-                        ui.end_row();
-                    }
-                });
+                        for (i, lap) in laps.iter().enumerate() {
+                            let on = !st.excluded.contains(&lap.number);
+                            let is_best = Some(*lap) == best;
+                            body.row(26.0, |mut row| {
+                                row.col(|ui| {
+                                    let (cb, resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
+                                    ui.painter().rect_stroke(cb, CornerRadius::same(4), Stroke::new(1.3, if on { TEXT } else { DIM }), egui::StrokeKind::Inside);
+                                    if on {
+                                        Icon::Check.image(TEXT, 12.0).paint_at(ui, cb.shrink(2.0));
+                                    }
+                                    if resp.on_hover_text(if on { "Leave out of the statistics" } else { "Include in the statistics" }).clicked() {
+                                        toggle = Some(lap.number);
+                                    }
+                                    if ui.label(RichText::new(lap.number.to_string()).font(medium(13.5)).color(if on { TEXT } else { DIM })).hovered() {
+                                        hovered = Some(lap.number);
+                                    }
+                                });
+                                for k in 0..n_cols {
+                                    row.col(|ui| {
+                                        let text = cells[i][k].map(|v| fmt(k, v)).unwrap_or_else(|| "—".into());
+                                        let color = if !on {
+                                            DIM
+                                        } else if k == 0 && is_best {
+                                            theme::GOOD
+                                        } else {
+                                            TEXT
+                                        };
+                                        let rt = RichText::new(text).font(if st.hovered_lap == Some(lap.number) { semibold(13.5) } else { regular(13.5) }).color(color);
+                                        if ui.label(rt).hovered() {
+                                            hovered = Some(lap.number);
+                                        }
+                                    });
+                                }
+                                row.col(|_| {});
+                            });
+                        }
+                    });
             });
             ui.label(
                 RichText::new(format!(

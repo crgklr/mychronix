@@ -56,7 +56,8 @@ impl App {
             ui.allocate_ui_with_layout(vec2(table_w, height), column, |ui| {
                 ui.set_width(table_w);
                 card(ui, |ui| {
-                    egui::ScrollArea::both().id_salt("corners_table").auto_shrink([false, true]).show(ui, |ui| {
+                    // The header stays put while long tracks' corners scroll; both scroll sideways together.
+                    egui::ScrollArea::horizontal().id_salt("corners_table_x").auto_shrink([false, true]).show(ui, |ui| {
                         hovered = corners_table(ui, &reference, &ref_profile, &zones, &profile, &matched, is_best, self.corners.hovered);
                     });
                 });
@@ -111,78 +112,102 @@ fn corners_table(
         ("On brakes", "Time actually braking (harder than −0.15 g, RaceStudio's threshold): the rest of the slowing is lifting or scrubbing speed"),
         ("Time", "Time from the highest speed to the lowest"),
     ];
-    egui::Grid::new("corners_grid").spacing([14.0, 10.0]).min_col_width(52.0).show(ui, |ui| {
-        for (h, tip) in headers {
-            ui.label(RichText::new(h).font(medium(13.0)).color(DIM)).on_hover_text(tip);
-        }
-        ui.end_row();
-        let scale = ref_profile.length() / profile.length();
-        for (k, r) in reference.iter().enumerate() {
-            let z = matched[k].map(|i| &zones[i]);
-            let strong = highlighted == Some(k);
-            let text = |s: String| RichText::new(s).size(14.0).color(if strong { TEXT } else { SECONDARY });
-            let row_top = ui.cursor().top();
-            ui.label(RichText::new(format!("{}", k + 1)).font(semibold(15.0)).color(TEXT));
-            match z {
-                None => {
-                    ui.label(RichText::new("No braking found here on this lap").size(13.0).color(DIM));
-                    for _ in 0..7 {
-                        ui.label("");
-                    }
-                }
-                Some(z) => {
+    let scale = ref_profile.length() / profile.length();
+    let max_h = (ui.available_height() - 20.0).max(120.0);
+    egui_extras::TableBuilder::new(ui)
+        .id_salt("corners_table")
+        .striped(false)
+        .resizable(false)
+        .cell_layout(Layout::left_to_right(Align::Center))
+        .column(egui_extras::Column::auto().at_least(52.0))
+        .columns(egui_extras::Column::auto().at_least(52.0), headers.len() - 1)
+        // Fills the rest of the card, so the scrollbar sits at its edge.
+        .column(egui_extras::Column::remainder())
+        .min_scrolled_height(0.0)
+        .max_scroll_height(max_h)
+        .header(28.0, |mut header| {
+            for (h, tip) in headers {
+                header.col(|ui| {
+                    ui.label(RichText::new(h).font(medium(13.0)).color(DIM)).on_hover_text(tip);
+                    ui.add_space(4.0);
+                });
+            }
+            header.col(|_| {});
+        })
+        .body(|mut body| {
+            for (k, r) in reference.iter().enumerate() {
+                let z = matched[k].map(|i| &zones[i]);
+                let strong = highlighted == Some(k);
+                let text = |s: String| RichText::new(s).size(14.0).color(if strong { TEXT } else { SECONDARY });
+                body.row(34.0, |mut row| {
+                    let mut cell = |row: &mut egui_extras::TableRow, add: &mut dyn FnMut(&mut Ui)| {
+                        row.col(|ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            add(ui);
+                            ui.add_space(4.0);
+                            if ui.rect_contains_pointer(ui.max_rect()) {
+                                hovered = Some(k);
+                            }
+                        });
+                    };
+                    cell(&mut row, &mut |ui| {
+                        ui.label(RichText::new(format!("{}", k + 1)).font(semibold(15.0)).color(TEXT));
+                    });
+                    let Some(z) = z else {
+                        cell(&mut row, &mut |ui| {
+                            ui.label(RichText::new("No braking found here on this lap").size(13.0).color(DIM));
+                        });
+                        for _ in 0..7 {
+                            cell(&mut row, &mut |_| {});
+                        }
+                        row.col(|_| {});
+                        return;
+                    };
                     // Brake point: meters into the lap on the best lap's scale, against the best.
                     let point = z.start_m * scale;
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{} {du}", dist(point))));
                         let d = point - r.start_m;
                         let words = if d > 0.0 { "later" } else { "earlier" };
                         delta(ui, d, format!("{} {du} {words}", dist(d.abs())), true);
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{} {su}", speed(z.entry_kmh))));
                         let d = crate::units::speed(z.entry_kmh) - crate::units::speed(r.entry_kmh);
                         delta(ui, d, format!("{d:+.1}"), true);
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{} {su}", speed(z.min_kmh))));
                         let d = crate::units::speed(z.min_kmh) - crate::units::speed(r.min_kmh);
                         delta(ui, d, format!("{d:+.1}"), true);
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{} {du}", dist(z.distance_m()))));
                         let d = crate::units::distance(z.distance_m() * scale) - crate::units::distance(r.distance_m());
                         delta(ui, d, format!("{d:+.0}"), false);
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{:.2} g", z.decel_g())));
                         let d = z.decel_g() - r.decel_g();
                         delta(ui, d, format!("{d:+.2}"), true);
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{:.2} g", z.peak_g)));
-                        let d = z.peak_g - r.peak_g;
-                        neutral(ui, format!("{d:+.2}"));
+                        neutral(ui, format!("{:+.2}", z.peak_g - r.peak_g));
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{:.2} s", z.brake_s)));
-                        let d = z.brake_s - r.brake_s;
-                        neutral(ui, format!("{d:+.2}"));
+                        neutral(ui, format!("{:+.2}", z.brake_s - r.brake_s));
                     });
-                    ui.horizontal(|ui| {
+                    cell(&mut row, &mut |ui| {
                         ui.label(text(format!("{:.2} s", z.time_s())));
                         let d = z.time_s() - r.time_s();
                         delta(ui, d, format!("{d:+.2}"), false);
                     });
-                }
+                    row.col(|_| {});
+                });
             }
-            ui.end_row();
-            let row = Rect::from_min_max(pos2(ui.min_rect().left(), row_top), pos2(ui.min_rect().right(), ui.cursor().top()));
-            if ui.rect_contains_pointer(row) {
-                hovered = Some(k);
-            }
-        }
-    });
+        });
     if reference.is_empty() {
         ui.label(RichText::new("No corners found: speed never drops enough to brake for one.").color(SECONDARY));
     }
