@@ -3041,8 +3041,19 @@ impl App {
         // In the order they were added; newest at the bottom.
         let selected: Vec<(usize, usize)> = self.graph_order.iter().filter_map(|c| self.selected.get(c).map(|&s| (*c, s))).collect();
         let gap = 10.0;
+        // RaceStudio's Time Compare: time gained or lost against the best lap,
+        // along this lap (shown when a lap other than the best is open).
+        let best = session.best_lap(MIN_LAP_MS).copied();
+        let reference = self
+            .lap
+            .and_then(|i| session.laps.get(i))
+            .filter(|l| l.start_ms == start_ms && Some(**l) != best)
+            .and(best)
+            .filter(|b| b.end_ms - b.start_ms >= MIN_LAP_MS);
+        let compare_h = 120.0;
         let n = selected.len() as f32;
-        let card_h = ((ui.available_height() - gap * (n - 1.0)) / n).max(110.0);
+        let reserved = if reference.is_some() { compare_h + gap } else { 0.0 };
+        let card_h = ((ui.available_height() - reserved - gap * (n - 1.0)) / n).max(110.0);
         let scroll_to = self.scroll_to_graph.take();
         let mut remove = None;
         // Distance mode: meters along the lap from GPS speed (time mode without GPS).
@@ -3056,6 +3067,16 @@ impl App {
             None => (t_ms - start_ms as f64) / 1000.0,
         };
         let x_max = profile.as_ref().map(|p| p.length()).unwrap_or((end_ms - start_ms) as f64 / 1000.0).max(0.001);
+        // Seconds behind the best lap at each point of this one, on this graph's x axis.
+        let time_compare: Option<(aim_xrk::Lap, Vec<[f64; 2]>)> = reference.and_then(|best| {
+            let lap = crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })?;
+            let reference = crate::compare::DistanceProfile::from_gps(session, &best)?;
+            let points = crate::compare::gap_along(&lap, &reference, 600)
+                .into_iter()
+                .map(|(t_ms, d, gap_s)| [if profile.is_some() { d } else { (t_ms - start_ms as f64) / 1000.0 }, gap_s])
+                .collect();
+            Some((best, points))
+        });
         // A new lap (or the whole session, or axis) starts the graphs at its full length.
         let key = (start_ms, end_ms, profile.is_some());
         let window_changed = self.graph_window != Some(key);
@@ -3070,7 +3091,7 @@ impl App {
             for (k, &(i, slot)) in selected.iter().enumerate() {
                 let c = &session.channels[i];
                 let color = SERIES[slot];
-                let last = k + 1 == selected.len();
+                let last = k + 1 == selected.len() && time_compare.is_none();
                 let top = ui.cursor().top();
                 graph_card(ui, card_h, |ui| {
                     ui.horizontal(|ui| {
@@ -3146,6 +3167,72 @@ impl App {
                     let rect = Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top()));
                     ui.scroll_to_rect(rect, Some(Align::Max));
                 }
+            }
+            if let Some((best, points)) = &time_compare {
+                graph_card(ui, compare_h, |ui| {
+                    // The gap at the cursor: above zero, behind the best lap there.
+                    let at_cursor = self.cursor_s.and_then(|s| {
+                        let x = to_x(start_ms as f64 + s * 1000.0);
+                        let i = points.partition_point(|p| p[0] < x);
+                        points.get(i.min(points.len().saturating_sub(1))).map(|p| p[1])
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(Icon::Timer.image(DIM, 14.0));
+                        ui.label(RichText::new("Time compare").font(medium(14.5)).color(TEXT));
+                        let n = session.laps.iter().position(|l| *l == *best).map(|i| i + 1).unwrap_or(0);
+                        ui.label(RichText::new(format!("vs best lap {n}  ·  {}", format_lap_time(best.end_ms - best.start_ms))).size(13.0).color(DIM))
+                            .on_hover_text("Above the line: behind the best lap at that point. Below: ahead of it.");
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if let Some(g) = at_cursor {
+                                let (text, color) = if g > 0.0005 {
+                                    (format!("+{g:.3} s"), theme::FAVORITE)
+                                } else if g < -0.0005 {
+                                    (format!("−{:.3} s", -g), theme::GOOD)
+                                } else {
+                                    ("0.000 s".to_string(), TEXT)
+                                };
+                                ui.label(RichText::new(text).font(semibold(16.0)).color(color));
+                            }
+                        });
+                    });
+                    let mut plot = Plot::new("time_compare");
+                    if window_changed {
+                        plot = plot.reset();
+                    }
+                    let response = plot
+                        .height(ui.available_height())
+                        .show_background(false)
+                        .grid_color(GRID)
+                        .show_axes([true, true])
+                        .y_axis_min_width(46.0)
+                        .show_x(false)
+                        .show_y(false)
+                        .cursor_color(DIM)
+                        .link_axis(link, [true, false])
+                        .link_cursor(link, [true, false])
+                        .allow_zoom([true, false])
+                        .allow_drag([true, false])
+                        .allow_scroll(false)
+                        .auto_bounds([false, true])
+                        .default_x_bounds(0.0, x_max)
+                        .include_y(0.0)
+                        .x_axis_formatter(move |mark, _| if mark.step_size < 1.0 { format!("{:.1} {unit}", mark.value) } else { format!("{:.0} {unit}", mark.value) })
+                        .y_axis_formatter(|mark, _| format!("{:+.1} s", mark.value))
+                        .show(ui, |plot| {
+                            plot.hline(egui_plot::HLine::new("even", 0.0).color(DIM).width(1.0));
+                            plot.line(Line::new("Time compare", PlotPoints::from(points.clone())).color(SECONDARY).width(2.0));
+                            if let Some(s) = self.cursor_s {
+                                plot.vline(VLine::new("cursor", to_x(start_ms as f64 + s * 1000.0)).color(SECONDARY).width(1.0));
+                            }
+                            plot.pointer_coordinate()
+                        });
+                    if let Some(p) = response.inner {
+                        hovered = Some(match &profile {
+                            Some(pr) => ((pr.time_at(p.x.clamp(0.0, x_max)) - start_ms as f64) / 1000.0).max(0.0),
+                            None => p.x.max(0.0),
+                        });
+                    }
+                });
             }
         });
         if hovered.is_some() {

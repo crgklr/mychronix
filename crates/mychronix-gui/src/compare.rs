@@ -123,6 +123,30 @@ pub fn time_gap(lap: &DistanceProfile, reference: &DistanceProfile, n: usize) ->
         .collect()
 }
 
+/// Along `lap`, about `n` points of (logger time ms, meters into the lap,
+/// seconds behind `reference` there). The two laps are matched by fraction of
+/// their length, so a slightly longer line doesn't count as lost time.
+pub fn gap_along(lap: &DistanceProfile, reference: &DistanceProfile, n: usize) -> Vec<(f64, f64, f64)> {
+    let (ref_len, lap_len) = (reference.length(), lap.length());
+    let (ref_t0, lap_t0) = (reference.times_ms[0] as f64, lap.times_ms[0] as f64);
+    let step = (lap.times_ms.len() / n.max(1)).max(1);
+    let mut out: Vec<(f64, f64, f64)> = (0..lap.times_ms.len())
+        .step_by(step)
+        .map(|i| {
+            let (t, d) = (lap.times_ms[i] as f64, lap.dist_m[i]);
+            let ref_t = reference.time_at(d / lap_len * ref_len) - ref_t0;
+            (t, d, ((t - lap_t0) - ref_t) / 1000.0)
+        })
+        .collect();
+    // Always end on the lap's last point: the gap there is the lap time difference.
+    let last = lap.times_ms.len() - 1;
+    if out.last().is_none_or(|p| p.0 != lap.times_ms[last] as f64) {
+        let (t, d) = (lap.times_ms[last] as f64, lap.dist_m[last]);
+        out.push((t, d, ((t - lap_t0) - (reference.time_at(ref_len) - ref_t0)) / 1000.0));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +158,18 @@ mod tests {
         let times: Vec<i64> = (0..=n).map(|k| k * 40).collect();
         let speeds = vec![kmh; times.len()];
         DistanceProfile::integrate(&times, &speeds, 0, *times.last().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn gap_along_ends_at_the_lap_time_difference() {
+        // 300 m at 36 km/h (30 s) against 300 m at 40 km/h (27 s): 3 s behind at the end, growing evenly.
+        let (slow, fast) = (constant(36.0), constant(40.0));
+        let g = gap_along(&slow, &fast, 100);
+        let end = g.last().unwrap().2;
+        assert!((end - 3.0).abs() < 0.05, "{end}");
+        let mid = g[g.len() / 2].2;
+        assert!((mid - 1.5).abs() < 0.1, "{mid}");
+        assert!(gap_along(&fast, &fast, 100).iter().all(|p| p.2.abs() < 0.01));
     }
 
     #[test]
