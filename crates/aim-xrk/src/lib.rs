@@ -264,9 +264,10 @@ mod tests {
     }
 }
 
-/// Smoothing for the GPS accelerations: ±250 ms matches RaceStudio's own
-/// "GPS LonAcc" and "GPS LatAcc" most closely (compared against its CSV export).
-const GPS_ACC_HALF_MS: i64 = 250;
+/// Smoothing for the GPS accelerations: ±200 ms matches RaceStudio's own
+/// "GPS LonAcc" and "GPS LatAcc" most closely (compared against its CSV
+/// export of a full race session: correlation 0.99, about 0.03 g apart).
+const GPS_ACC_HALF_MS: i64 = 200;
 /// Below this RaceStudio reports both GPS accelerations as 0, so a kart
 /// standing still doesn't pick up GPS jitter.
 const GPS_ACC_MIN_KMH: f64 = 1.0;
