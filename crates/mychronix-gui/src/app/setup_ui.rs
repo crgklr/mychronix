@@ -85,11 +85,15 @@ impl App {
     /// The setup in one line under the session title: summary, any change, Edit.
     pub(super) fn setup_line(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };
+        if let Some(i) = self.library.get_or_insert_with(Library::load).sessions.iter().position(|s| s.path == path) {
+            self.want_weather(&[i], &ui.ctx().clone());
+        }
         let lib = self.library.get_or_insert_with(Library::load);
         let Some(i) = lib.sessions.iter().position(|s| s.path == path) else { return };
         let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
         let resolved = setup::resolve(lib, baselines);
         let r = &resolved[i];
+        let weather = lib.sessions[i].weather;
         let check = gearing_check(&r.setup, self.measured_ratio);
         let mut edit = false;
         ui.horizontal(|ui| {
@@ -108,6 +112,17 @@ impl App {
             }
             if link.clicked() {
                 edit = true;
+            }
+            if let Some(w) = weather {
+                ui.add_space(8.0);
+                ui.label(RichText::new(format!("·  {}", w.summary())).size(13.0).color(DIM)).on_hover_text(format!(
+                    "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
+                    crate::units::temp(w.air_c),
+                    w.humidity_pct,
+                    w.pressure_hpa,
+                    crate::units::temp(w.dew_point_c),
+                    u = crate::units::temp_unit()
+                ));
             }
         });
         if edit {

@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 log.workspace = true
+reqwest.workspace = true
 aim-xrk.workspace = true
 eframe.workspace = true
 egui_plot.workspace = true

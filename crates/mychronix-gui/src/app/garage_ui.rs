@@ -14,7 +14,6 @@ struct DriverRow {
     /// None for a MyChron that isn't on a driver's kart.
     id: Option<u32>,
     name: String,
-    kart: String,
     engine: String,
     loggers: Vec<String>,
     seat_ms: u64,
@@ -48,7 +47,6 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
     groups
         .into_iter()
         .map(|(id, name, karts, loggers)| {
-            let kart = karts.iter().map(|k| k.name.clone()).collect::<Vec<_>>().join(", ");
             let engine = karts.iter().map(|k| k.engine.clone()).find(|e| !e.trim().is_empty()).unwrap_or_default();
             let on: Vec<usize> = (0..lib.sessions.len()).filter(|&i| loggers.contains(&lib.sessions[i].logger) && !events::is_warm_up(&lib.sessions[i].summary)).collect();
             let seat_ms = on.iter().map(|&i| lib.sessions[i].summary.duration_ms.unwrap_or(0)).sum();
@@ -84,7 +82,7 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
                         .filter_map(|&i| lib.sessions[i].summary.best_lap_ms.map(|b| (t.clone(), b, i)))
                         .min_by_key(|x| x.1)
                 });
-            DriverRow { id, name, kart, engine, loggers, seat_ms, laps, days, per_day, best }
+            DriverRow { id, name, engine, loggers, seat_ms, laps, days, per_day, best }
         })
         .collect()
 }
@@ -179,34 +177,6 @@ fn hours(ms: u64) -> String {
     if m >= 60 { format!("{}h {:02}m", m / 60, m % 60) } else { format!("{m}m") }
 }
 
-/// A section of a fixed size on the page background (no box), with a small
-/// uppercase heading and, on the right, an optional pill and an optional
-/// button (true when clicked). Fixed sizes keep rows even.
-fn panel(ui: &mut Ui, size: Vec2, title: &str, pill: Option<(&str, Color32)>, action: Option<(Icon, &str)>, add: impl FnOnce(&mut Ui)) -> (egui::Response, bool) {
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let inner = rect.shrink2(vec2(0.0, 4.0));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
-    child.set_clip_rect(rect);
-    // The page's wide gaps are between sections, not inside them.
-    child.spacing_mut().item_spacing = vec2(8.0, 6.0);
-    let mut clicked = false;
-    child.horizontal(|ui| {
-        ui.set_min_height(28.0);
-        ui.label(RichText::new(title.to_uppercase()).font(semibold(12.0)).color(DIM).extra_letter_spacing(0.8));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if let Some((icon, label)) = action {
-                clicked = small_button(ui, icon, label).clicked();
-            }
-            if let Some((text, color)) = pill {
-                pill_label(ui, text, color);
-            }
-        });
-    });
-    child.add_space(6.0);
-    add(&mut child);
-    (resp, clicked)
-}
-
 /// A quiet text button with an icon, for panel headings.
 fn small_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(label.into(), medium(13.0), SECONDARY);
@@ -219,14 +189,6 @@ fn small_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     icon.image(color, 14.0).paint_at(ui, Rect::from_min_size(pos2(rect.left() + 10.0, rect.center().y - 7.0), Vec2::splat(14.0)));
     ui.painter().text(pos2(rect.left() + 30.0, rect.center().y), egui::Align2::LEFT_CENTER, label, medium(13.0), color);
     resp
-}
-
-/// A small rounded status label.
-fn pill_label(ui: &mut Ui, text: &str, color: Color32) {
-    let galley = ui.painter().layout_no_wrap(text.into(), medium(12.0), color);
-    let (rect, _) = ui.allocate_exact_size(galley.size() + vec2(18.0, 8.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(255), color.gamma_multiply(0.16));
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
 }
 
 /// A round avatar with the driver's initial.
@@ -259,16 +221,17 @@ impl App {
         let all_events = events::group(&lib, &profiles, &defs);
         let today = events::today();
         let connected_logger = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
-        let model = self.dev_current_wifi.as_deref().map(model_from_ssid).unwrap_or("MyChron");
         let new_count = self.new_on_logger().len();
-        // Each MyChron and whose it is.
-        let mychrons: Vec<(String, String)> = drivers.iter().flat_map(|d| d.loggers.iter().map(|l| (l.clone(), d.name.clone()))).collect();
-        let mut go: Option<Page> = None;
-        let mut open_event: Option<String> = None;
-        let mut plan = false;
-        let mut edit_setup: Option<usize> = None;
-        let mut edit_driver: Option<DriverEdit> = None;
-        let mut edit_kart: Option<KartEdit> = None;
+        // MyChron models come from session digests (and the WiFi name once connected).
+        let kart_sessions: Vec<PathBuf> = lib.sessions.iter().map(|s| s.path.clone()).collect();
+        self.want_digests(kart_sessions.into_iter(), &ui.ctx().clone());
+        let digests = self.sensors.digests.take().unwrap_or_default();
+        let model_of = |logger: &str| -> String {
+            let p = profiles.for_logger(logger).model;
+            if !p.is_empty() { p } else { digests.model(logger).unwrap_or_else(|| "MyChron".into()) }
+        };
+        let status = GarageStatus { connected: connected_logger.clone(), reading: self.dev_files.is_empty(), new_count };
+        let mut act = Actions::default();
 
         // Header.
         ui.horizontal(|ui| {
@@ -285,320 +248,51 @@ impl App {
                 ui.label(RichText::new(format!("{n} driver{}  ·  {k} kart{}  ·  {days} race day{} this season", if n == 1 { "" } else { "s" }, if k == 1 { "" } else { "s" }, if days == 1 { "" } else { "s" })).font(regular(14.5)).color(SECONDARY));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
                 if connected_logger.is_some() && new_count > 0 && button(ui, Some(Icon::FolderOpen), &format!("Download {new_count} new session{}", if new_count == 1 { "" } else { "s" }), true).clicked() {
-                    go = Some(Page::Device);
+                    act.go = Some(Page::Device);
+                }
+                if button(ui, Some(Icon::Plus), "Add driver", false).clicked() {
+                    act.edit_driver = Some(DriverEdit { driver: Driver::default(), confirm_delete: false });
                 }
             });
         });
         ui.add_space(18.0);
 
-        // Three rows sized to the window: status, drivers, karts and race days.
+        if drivers.is_empty() {
+            ui.label(RichText::new("No drivers yet. Add one, then add their kart and MyChron.").color(SECONDARY));
+        }
+
+        // One column per driver, two at a time; with more, a carousel of pages.
         let gap = 28.0;
-        let w = ui.available_width();
-        let avail = ui.available_height();
-        let row1 = (avail * 0.27).clamp(176.0, 236.0);
-        let row2 = 136.0;
-        let row3 = (avail - row1 - row2 - gap * 2.0 - 2.0).max(260.0);
-        egui::ScrollArea::vertical().id_salt("garage").auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(gap, gap);
-            let half = (w - gap) / 2.0;
-
-            // Row 1: MyChrons and seat time.
-            ui.horizontal_top(|ui| {
-                let any = mychrons.iter().any(|(l, _)| Some(l) == connected_logger.as_ref());
-                let pill = if any { ("Connected", theme::GOOD) } else { ("Not connected", DIM) };
-                panel(ui, vec2(half, row1), "MyChrons", Some(pill), None, |ui| {
-                    ui.spacing_mut().item_spacing.y = 14.0;
-                    for (logger, owner) in &mychrons {
-                        let on = Some(logger) == connected_logger.as_ref();
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 14.0;
-                            ui.add(Icon::Mychron.image(if on { theme::GOOD } else { SECONDARY }, 40.0));
-                            ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 2.0;
-                                ui.label(RichText::new(format!("{owner}'s {}", if on { model } else { "MyChron" })).font(semibold(17.0)).color(TEXT));
-                                let line = match (on, self.dev_files.is_empty(), new_count) {
-                                    (true, true, _) => "On its WiFi · reading its sessions…".to_string(),
-                                    (true, false, 0) => "On its WiFi · everything downloaded".to_string(),
-                                    (true, false, n) => format!("On its WiFi · {n} new session{} to download", if n == 1 { "" } else { "s" }),
-                                    (false, ..) => "Off or out of range. Turn on its WiFi to connect.".to_string(),
-                                };
-                                ui.label(RichText::new(line).size(13.0).color(if on { theme::GOOD } else { SECONDARY }));
-                                // What's already here from it.
-                                let mine: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| &s.logger == logger).collect();
-                                let newest = mine.iter().filter_map(|s| s.summary.date).max();
-                                ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
-                            });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
-                                    go = Some(Page::Device);
-                                }
-                            });
-                        });
-                    }
-                    if mychrons.is_empty() {
-                        ui.label(RichText::new("No MyChron yet. Turn on its WiFi and open Device to download your first sessions.").color(SECONDARY));
-                    }
+        let pages = drivers.len().div_ceil(2).max(1);
+        let page = self.kart_page.min(pages - 1);
+        let footer_h = if pages > 1 { 40.0 } else { 0.0 };
+        let col_w = (ui.available_width() - gap) / 2.0;
+        let col_h = ui.available_height() - footer_h;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (k, d) in drivers.iter().enumerate().skip(page * 2).take(2) {
+                ui.allocate_ui_with_layout(vec2(col_w, col_h), Layout::top_down(Align::Min), |ui| {
+                    ui.set_width(col_w);
+                    egui::ScrollArea::vertical().id_salt(("garage_col", k)).auto_shrink([false, false]).show(ui, |ui| {
+                        ui.set_width(col_w - 12.0);
+                        driver_column(ui, k, d, &lib, &profiles, &karts, &resolved, &all_events, today, &status, &model_of, &mut act);
+                    });
                 });
-                panel(ui, vec2(half, row1), "Seat time this season", None, None, |ui| {
-                    // One row per driver: the total, then a bar per race day at full height.
-                    let max = drivers.iter().flat_map(|d| d.per_day.iter().map(|x| x.1)).max().unwrap_or(1).max(1) as f32;
-                    let row_h = ((ui.available_height() - 8.0 * (drivers.len().max(1) - 1) as f32) / drivers.len().max(1) as f32).max(60.0);
-                    for (k, d) in drivers.iter().enumerate() {
-                        ui.allocate_ui_with_layout(vec2(ui.available_width(), row_h), Layout::left_to_right(Align::Max), |ui| {
-                            ui.spacing_mut().item_spacing.x = 24.0;
-                            ui.vertical(|ui| {
-                                ui.set_width(170.0);
-                                ui.spacing_mut().item_spacing.y = 0.0;
-                                ui.label(RichText::new(&d.name).size(13.0).color(SECONDARY));
-                                ui.label(RichText::new(hours(d.seat_ms)).font(semibold(34.0)).color(TEXT));
-                                ui.label(RichText::new(format!("on track  ·  {} laps  ·  {} day{}", d.laps, d.days.len(), if d.days.len() == 1 { "" } else { "s" })).size(12.5).color(DIM));
-                            });
-                            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::hover());
-                            if d.per_day.is_empty() {
-                                ui.painter().text(pos2(rect.left(), rect.bottom() - 14.0), egui::Align2::LEFT_CENTER, "No sessions yet", regular(12.5), DIM);
-                            }
-                            let n = d.per_day.len().max(1) as f32;
-                            let slot = (rect.width() / n).min(84.0);
-                            let label_h = 18.0;
-                            for (j, (date, ms)) in d.per_day.iter().enumerate() {
-                                let h = ((*ms as f32 / max) * (rect.height() - label_h - 18.0)).max(2.0);
-                                let x = rect.left() + j as f32 * slot;
-                                let bar = Rect::from_min_max(pos2(x + 6.0, rect.bottom() - label_h - h), pos2(x + slot - 6.0, rect.bottom() - label_h));
-                                ui.painter().rect_filled(bar, CornerRadius::same(4), SERIES[k % SERIES.len()].gamma_multiply(0.9));
-                                ui.painter().text(pos2(bar.center().x, bar.top() - 8.0), egui::Align2::CENTER_CENTER, format!("{}m", ms / 60_000), regular(11.0), SECONDARY);
-                                ui.painter().text(pos2(bar.center().x, rect.bottom() - 6.0), egui::Align2::CENTER_CENTER, short_date(*date), regular(11.0), DIM);
-                            }
-                        });
-                    }
-                });
-            });
-
-            // Row 2: drivers as tiles.
-            let (_, add_driver) = panel(ui, vec2(w, row2), "Drivers", None, Some((Icon::Plus, "Add driver")), |ui| {
-                let cols = drivers.len().clamp(2, 4) as f32;
-                let tile_w = (ui.available_width() - gap * (cols - 1.0)) / cols;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for (k, d) in drivers.iter().enumerate() {
-                        let tile_h = 84.0;
-                        let (rect, resp) = ui.allocate_exact_size(vec2(tile_w, tile_h), Sense::click());
-                        // The best lap opens on its own; the rest of the tile edits the driver.
-                        let lap_rect = Rect::from_min_max(pos2(rect.right() - 150.0, rect.top()), rect.max);
-                        let lap = d.best.as_ref().map(|_| ui.interact(lap_rect, ui.id().with(("best_lap", k)), Sense::click()));
-                        let lap_hovered = lap.as_ref().is_some_and(|l| l.hovered());
-                        let corner = CornerRadius::same(theme::RADIUS);
-                        // An outline, not a fill; brighter on hover.
-                        ui.painter().rect_stroke(rect, corner, Stroke::new(1.0, if resp.hovered() || lap_hovered { SECONDARY } else { theme::OUTLINE }), egui::StrokeKind::Inside);
-                        // The engine, about a third bigger than the tile and nudged left,
-                        // so the tile's edges crop it.
-                        let text_left = match crate::profiles::engine_picture(&d.engine) {
-                            Some((uri, bytes)) => {
-                                let size = tile_h * 1.3;
-                                let img = Rect::from_min_size(pos2(rect.left() - 30.0, rect.top() - 2.0), Vec2::splat(size));
-                                let mut pic = ui.new_child(egui::UiBuilder::new().max_rect(img));
-                                pic.set_clip_rect(rect.shrink(1.0));
-                                egui::Image::from_bytes(uri, bytes).paint_at(&pic, img);
-                                img.right() + 10.0
-                            }
-                            None => {
-                                let mut a = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(rect.left_top() + vec2(16.0, (tile_h - 48.0) / 2.0), Vec2::splat(48.0))));
-                                avatar(&mut a, &d.name, 48.0, SERIES[k % SERIES.len()]);
-                                rect.left() + 78.0
-                            }
-                        };
-                        // Name and kart on the left, best lap on the right, both centered on the tile.
-                        let p = ui.painter_at(rect);
-                        let mid = rect.center().y;
-                        let person = d.id.and_then(|id| profiles.drivers.iter().find(|p| p.id == id));
-                        let kart = [
-                            person.map(|p| p.class.trim().to_string()).unwrap_or_default(),
-                            person.and_then(|p| p.age(today)).map(|a| format!("age {a}")).unwrap_or_default(),
-                            d.kart.clone(),
-                        ]
-                        .into_iter()
-                        .filter(|x| !x.trim().is_empty())
-                        .collect::<Vec<_>>()
-                        .join("  ·  ");
-                        p.text(pos2(text_left, mid - 11.0), egui::Align2::LEFT_CENTER, &d.name, semibold(18.0), TEXT);
-                        p.text(pos2(text_left, mid + 12.0), egui::Align2::LEFT_CENTER, if kart.is_empty() { "No kart yet".to_string() } else { kart }, regular(13.0), SECONDARY);
-                        if let Some((track, ms, i)) = &d.best {
-                            let right = rect.right() - 18.0;
-                            p.text(pos2(right, mid - 12.0), egui::Align2::RIGHT_CENTER, format!("Best at {track}"), regular(12.5), DIM);
-                            p.text(pos2(right, mid + 10.0), egui::Align2::RIGHT_CENTER, format_lap_time(*ms as i64), semibold(22.0), if lap_hovered { TEXT } else { theme::GOOD });
-                            if let Some(lap) = lap {
-                                if lap.hovered() {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                }
-                                if lap.on_hover_text("Open the best lap").clicked() {
-                                    self.pending_open = Some(lib.sessions[*i].path.clone());
-                                }
-                            }
-                        }
-                        if resp.hovered() && !lap_hovered {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        let hint = if d.id.is_some() { "Edit this driver" } else { "Put this MyChron on a kart" };
-                        if resp.on_hover_text(hint).clicked() && !lap_hovered {
-                            match d.id {
-                                Some(id) => edit_driver = profiles.drivers.iter().find(|p| p.id == id).map(|p| DriverEdit { driver: p.clone(), confirm_delete: false }),
-                                None => edit_kart = Some(KartEdit::new(&profiles, None, &d.loggers[0])),
-                            }
-                        }
-                    }
-                    if drivers.is_empty() {
-                        ui.label(RichText::new("No drivers yet. Add one, then add their kart.").color(SECONDARY));
-                    }
-                });
-            });
-            if add_driver {
-                edit_driver = Some(DriverEdit { driver: Driver::default(), confirm_delete: false });
             }
-
-            // Row 3: karts with their setup, the last race day, what's coming up.
-            let third = (w - gap * 2.0) / 3.0;
-            ui.horizontal_top(|ui| {
-                let (_, add_kart) = panel(ui, vec2(third, row3), "Karts", None, Some((Icon::Plus, "Add kart")), |ui| {
-                    egui::ScrollArea::vertical().id_salt("garage_karts").auto_shrink([false, false]).show(ui, |ui| {
-                        for (n, row) in karts.iter().enumerate() {
-                            let name = row.kart.as_ref().map(|k| k.name.clone()).unwrap_or_else(|| "Not on a kart yet".into());
-                            let sub = match &row.kart {
-                                Some(k) => [
-                                    profiles.driver_name(k.driver).map(str::to_string),
-                                    (!k.engine.trim().is_empty()).then(|| k.engine.clone()),
-                                    Some(if k.logger.is_empty() { "no MyChron".to_string() } else { "MyChron on it".to_string() }),
-                                ]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join("  ·  "),
-                                None => format!("Logger {}", row.logger),
-                            };
-                            ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 1.0;
-                                    ui.label(RichText::new(&name).font(semibold(16.0)).color(TEXT));
-                                    ui.label(RichText::new(sub).size(12.5).color(DIM));
-                                });
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if small_button(ui, Icon::Pencil, "Edit").on_hover_text("Name, engine, driver, MyChron and baseline setup").clicked() {
-                                        edit_kart = Some(KartEdit::new(&profiles, row.kart.as_ref(), &row.logger));
-                                    }
-                                    if let Some(newest) = row.newest {
-                                        if small_button(ui, Icon::Settings, "Setup").on_hover_text("Change the setup from the newest session on").clicked() {
-                                            edit_setup = Some(newest);
-                                        }
-                                    }
-                                });
-                            });
-                            ui.add_space(6.0);
-                            let s = match (row.newest, &row.kart) {
-                                (Some(i), _) => resolved[i].setup.clone(),
-                                (None, Some(k)) => k.baseline.clone(),
-                                (None, None) => Setup::default(),
-                            };
-                            let rows: Vec<(&str, String)> = [
-                                ("Gearing", if s.drive_teeth.trim().is_empty() && s.driven_teeth.trim().is_empty() { String::new() } else { format!("{} / {}", s.drive_teeth.trim(), s.driven_teeth.trim()) }),
-                                ("Tires", s.tires.trim().to_string()),
-                                ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} psi"), (f, r) => format!("{f} / {r} psi") }),
-                                ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} lb with driver", s.weight_lb.trim()) }),
-                                ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} lb", s.ballast_lb.trim()) }),
-                                ("Jetting", s.jetting.trim().to_string()),
-                            ]
-                            .into_iter()
-                            .filter(|(_, v)| !v.is_empty())
-                            .collect();
-                            egui::Grid::new(("kart_setup", n)).num_columns(2).spacing([14.0, 4.0]).show(ui, |ui| {
-                                for (k, v) in &rows {
-                                    ui.label(RichText::new(*k).size(13.0).color(DIM));
-                                    ui.label(RichText::new(v).size(13.5).color(TEXT));
-                                    ui.end_row();
-                                }
-                            });
-                            if rows.is_empty() {
-                                ui.label(RichText::new("No setup recorded yet.").color(SECONDARY));
-                            }
-                            ui.add_space(6.0);
-                            let when = if row.newest.is_some() { setup_last_changed(&lib, &resolved, &row.logger) } else { "Baseline, before its first session".to_string() };
-                            ui.label(RichText::new(when).size(12.5).color(DIM));
-                            ui.add_space(14.0);
-                        }
-                        if karts.is_empty() {
-                            ui.label(RichText::new("No karts yet. Add one with its engine and the setup it runs.").color(SECONDARY));
-                        }
-                    });
-                });
-                if add_kart {
-                    if profiles.drivers.is_empty() {
-                        // A kart needs a driver: add one first, then their kart from there.
-                        edit_driver = Some(DriverEdit { driver: Driver::default(), confirm_delete: false });
-                    } else {
-                        edit_kart = Some(KartEdit::new(&profiles, None, ""));
-                    }
-                }
-
-                let last = all_events.iter().find(|e| !e.sessions.is_empty());
-                let date_pill = last.map(|e| short_date(e.start));
-                let (resp, _) = panel(ui, vec2(third, row3), "Last race day", date_pill.as_deref().map(|d| (d, SECONDARY)), None, |ui| {
-                    let Some(e) = last else {
-                        ui.label(RichText::new("No race days yet.").color(SECONDARY));
-                        return;
-                    };
-                    let on: Vec<usize> = e.sessions.iter().copied().filter(|&i| !events::is_warm_up(&lib.sessions[i].summary)).collect();
-                    let best = on.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
-                    // The track's outline, when the library has it.
-                    let outline = lib.tracks.iter().find(|t| t.name.eq_ignore_ascii_case(&e.track)).map(|t| t.outline.clone()).unwrap_or_default();
-                    let map_h = (ui.available_height() - 64.0).max(80.0);
-                    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), map_h), Sense::hover());
-                    outline_thumbnail(ui.painter(), rect, &outline, TEXT.gamma_multiply(0.85));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 1.0;
-                            ui.label(RichText::new(e.title()).font(semibold(16.0)).color(TEXT));
-                            ui.label(RichText::new(format!("{} sessions on track", on.len())).size(12.5).color(DIM));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if let Some(b) = best {
-                                ui.label(RichText::new(format_lap_time(b as i64)).font(semibold(20.0)).color(theme::GOOD));
-                            }
-                        });
-                    });
-                });
-                if resp.hovered() && last.is_some() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if resp.on_hover_text("Open this race day").clicked() {
-                    open_event = last.map(|e| e.key());
-                }
-
-                panel(ui, vec2(third, row3), "Coming up", None, None, |ui| {
-                    let upcoming: Vec<&events::Event> = all_events.iter().filter(|e| e.start > today || (e.sessions.is_empty() && e.end >= today)).collect();
-                    for e in upcoming.iter().rev().take(4) {
-                        let r = row(ui, false, |ui| {
-                            ui.label(RichText::new(e.title()).font(medium(14.5)).color(TEXT));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let n = events::days(e.start) - events::days(today);
-                                ui.label(RichText::new(if n > 1 { format!("in {n} days") } else if n == 1 { "tomorrow".into() } else { "today".into() }).size(12.5).color(DIM));
-                            });
-                        });
-                        if r.clicked() {
-                            open_event = Some(e.key());
-                        }
-                    }
-                    if upcoming.is_empty() {
-                        ui.label(RichText::new("Nothing planned").font(medium(15.0)).color(TEXT));
-                        ui.label(RichText::new("Plan your next race, and the sessions you download there file themselves under it.").size(13.0).color(SECONDARY));
-                    }
-                    ui.add_space(8.0);
-                    if button(ui, Some(Icon::Calendar), "Plan an event", false).clicked() {
-                        plan = true;
-                    }
-                });
-            });
         });
+        if pages > 1 {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let names: Vec<String> = drivers.chunks(2).map(|c| c.iter().map(|d| d.name.clone()).collect::<Vec<_>>().join(" & ")).collect();
+                if let Some(p) = carousel_nav(ui, page, &names) {
+                    self.kart_page = p;
+                }
+            });
+        }
 
-        if let Some(i) = edit_setup {
+        if let Some(i) = act.edit_setup {
             let path = lib.sessions[i].path.clone();
             self.setup_edit = Some(setup_ui::SetupEdit {
                 path,
@@ -607,12 +301,16 @@ impl App {
                 has_own: resolved[i].source == setup::Source::Own,
             });
         }
-        if edit_driver.is_some() {
-            self.driver_edit = edit_driver;
+        if act.edit_driver.is_some() {
+            self.driver_edit = act.edit_driver.take();
         }
-        if edit_kart.is_some() {
-            self.kart_edit = edit_kart;
+        if act.edit_kart.is_some() {
+            self.kart_edit = act.edit_kart.take();
         }
+        if let Some(p) = act.open_lap.take() {
+            self.pending_open = Some(p);
+        }
+        self.sensors.digests = Some(digests);
         self.library = Some(lib);
         self.profiles = Some(profiles);
         self.setup_baselines = Some(baselines);
@@ -620,15 +318,11 @@ impl App {
         self.setup_dialog(ui.ctx());
         self.driver_dialog(ui.ctx());
         self.kart_dialog(ui.ctx());
-        if let Some(key) = open_event {
+        if let Some(key) = act.open_event {
             self.event_sel = Some(key);
             self.page = Page::Events;
         }
-        if plan {
-            self.page = Page::Events;
-            self.plan_on_open = true;
-        }
-        if let Some(p) = go {
+        if let Some(p) = act.go {
             self.page = p;
         }
         if let Some(path) = self.pending_open.take() {
@@ -1037,6 +731,332 @@ impl App {
             self.load(p);
         }
     }
+}
+
+/// What the Garage's columns asked for this frame.
+#[derive(Default)]
+struct Actions {
+    go: Option<Page>,
+    open_event: Option<String>,
+    open_lap: Option<PathBuf>,
+    edit_setup: Option<usize>,
+    edit_driver: Option<DriverEdit>,
+    edit_kart: Option<KartEdit>,
+}
+
+/// The connected MyChron, if any.
+struct GarageStatus {
+    connected: Option<String>,
+    /// Connected, but its session list hasn't arrived yet.
+    reading: bool,
+    new_count: usize,
+}
+
+/// A small uppercase section heading, with an optional button on the right (true when clicked).
+fn heading(ui: &mut Ui, title: &str, action: Option<(Icon, &str)>) -> bool {
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.set_min_height(28.0);
+        ui.label(RichText::new(title.to_uppercase()).font(semibold(12.0)).color(DIM).extra_letter_spacing(0.8));
+        if let Some((icon, label)) = action {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| clicked = small_button(ui, icon, label).clicked());
+        }
+    });
+    clicked
+}
+
+/// ‹ dots › page picker; returns the page clicked.
+fn carousel_nav(ui: &mut Ui, page: usize, labels: &[String]) -> Option<usize> {
+    let mut to = None;
+    let arrow = |ui: &mut Ui, icon: Icon, enabled: bool| {
+        let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), if enabled { Sense::click() } else { Sense::hover() });
+        if enabled && resp.hovered() {
+            ui.painter().rect_filled(r, CornerRadius::same(13), SURFACE_HOVER);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        icon.image(if enabled { TEXT } else { DIM.gamma_multiply(0.5) }, 16.0).paint_at(ui, r.shrink(5.0));
+        enabled && resp.clicked()
+    };
+    if arrow(ui, Icon::ChevronLeft, page > 0) {
+        to = Some(page - 1);
+    }
+    for (k, label) in labels.iter().enumerate() {
+        let (r, resp) = ui.allocate_exact_size(vec2(14.0, 26.0), Sense::click());
+        let on = k == page;
+        ui.painter().circle_filled(r.center(), if on { 4.0 } else { 3.0 }, if on { TEXT } else if resp.hovered() { SECONDARY } else { DIM });
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if resp.on_hover_text(label).clicked() {
+            to = Some(k);
+        }
+    }
+    if arrow(ui, Icon::ChevronRight, page + 1 < labels.len()) {
+        to = Some(page + 1);
+    }
+    ui.label(RichText::new(format!("{} of {}", page + 1, labels.len())).size(12.5).color(DIM));
+    to
+}
+
+/// One driver's column: who, their MyChron, seat time, kart and last race day.
+#[allow(clippy::too_many_arguments)]
+fn driver_column(
+    ui: &mut Ui,
+    k: usize,
+    d: &DriverRow,
+    lib: &Library,
+    profiles: &Profiles,
+    karts: &[KartRow],
+    resolved: &[setup::Resolved],
+    all_events: &[events::Event],
+    today: aim_xrk::summary::Date,
+    status: &GarageStatus,
+    model_of: &dyn Fn(&str) -> String,
+    act: &mut Actions,
+) {
+    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+    driver_tile(ui, k, d, lib, profiles, today, act);
+    ui.add_space(10.0);
+
+    // MyChron.
+    heading(ui, "MyChron", None);
+    for logger in &d.loggers {
+        let on = status.connected.as_deref() == Some(logger.as_str());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.add(Icon::Mychron.image(if on { theme::GOOD } else { SECONDARY }, 34.0));
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new(model_of(logger)).font(semibold(16.0)).color(TEXT));
+                let line = match (on, status.reading, status.new_count) {
+                    (true, true, _) => "On its WiFi · reading its sessions…".to_string(),
+                    (true, false, 0) => "On its WiFi · everything downloaded".to_string(),
+                    (true, false, n) => format!("On its WiFi · {n} new session{} to download", if n == 1 { "" } else { "s" }),
+                    (false, ..) => "Off or out of range".to_string(),
+                };
+                ui.label(RichText::new(line).size(13.0).color(if on { theme::GOOD } else { SECONDARY }));
+                let mine: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| &s.logger == logger).collect();
+                let newest = mine.iter().filter_map(|s| s.summary.date).max();
+                ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
+                    act.go = Some(Page::Device);
+                }
+            });
+        });
+    }
+    if d.loggers.is_empty() {
+        ui.label(RichText::new("No MyChron yet. Put one on their kart (Edit on the kart) once it's been connected.").size(13.0).color(SECONDARY));
+    }
+    ui.add_space(10.0);
+
+    // Seat time.
+    heading(ui, "Seat time this season", None);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 24.0;
+        ui.vertical(|ui| {
+            ui.set_width(230.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.label(RichText::new(hours(d.seat_ms)).font(semibold(30.0)).color(TEXT));
+            ui.label(RichText::new(format!("on track  ·  {} laps  ·  {} day{}", d.laps, d.days.len(), if d.days.len() == 1 { "" } else { "s" })).size(12.5).color(DIM));
+        });
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 60.0), Sense::hover());
+        if d.per_day.is_empty() {
+            ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, "No sessions yet", regular(12.5), DIM);
+        }
+        let max = d.per_day.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f32;
+        let slot = (rect.width() / d.per_day.len().max(1) as f32).min(70.0);
+        let label_h = 16.0;
+        for (j, (date, ms)) in d.per_day.iter().enumerate() {
+            let h = ((*ms as f32 / max) * (rect.height() - label_h - 16.0)).max(2.0);
+            let x = rect.left() + j as f32 * slot;
+            let bar = Rect::from_min_max(pos2(x + 5.0, rect.bottom() - label_h - h), pos2(x + slot - 5.0, rect.bottom() - label_h));
+            ui.painter().rect_filled(bar, CornerRadius::same(4), SERIES[k % SERIES.len()].gamma_multiply(0.9));
+            ui.painter().text(pos2(bar.center().x, bar.top() - 7.0), egui::Align2::CENTER_CENTER, format!("{}m", ms / 60_000), regular(11.0), SECONDARY);
+            ui.painter().text(pos2(bar.center().x, rect.bottom() - 5.0), egui::Align2::CENTER_CENTER, short_date(*date), regular(11.0), DIM);
+        }
+    });
+    ui.add_space(10.0);
+
+    // Kart(s).
+    let mine: Vec<(usize, &KartRow)> = karts
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| match (&r.kart, d.id) {
+            (Some(kart), Some(id)) => kart.driver == Some(id),
+            (None, None) => d.loggers.contains(&r.logger),
+            _ => false,
+        })
+        .collect();
+    let add = d.id.map(|_| (Icon::Plus, "Add kart"));
+    if heading(ui, if mine.len() > 1 { "Karts" } else { "Kart" }, add) {
+        act.edit_kart = Some(KartEdit::for_driver(profiles, None, "", d.id));
+    }
+    for (n, row) in &mine {
+        kart_card(ui, *n, row, lib, profiles, resolved, model_of, act);
+        ui.add_space(8.0);
+    }
+    if mine.is_empty() {
+        ui.label(RichText::new("No kart yet.").size(13.0).color(SECONDARY));
+    }
+    ui.add_space(10.0);
+
+    // Last race day: the newest event with this driver's sessions.
+    heading(ui, "Last race day", None);
+    let last = all_events.iter().find(|e| e.sessions.iter().any(|&i| d.loggers.contains(&lib.sessions[i].logger)));
+    match last {
+        Some(e) => {
+            let theirs: Vec<usize> = e.sessions.iter().copied().filter(|&i| d.loggers.contains(&lib.sessions[i].logger) && !events::is_warm_up(&lib.sessions[i].summary)).collect();
+            let best = theirs.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
+            let r = row(ui, false, |ui| {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(RichText::new(e.title()).font(semibold(15.5)).color(TEXT));
+                    ui.label(RichText::new(format!("{}  ·  {} session{} on track", long_date(e.start), theirs.len(), if theirs.len() == 1 { "" } else { "s" })).size(12.5).color(DIM));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(b) = best {
+                        ui.label(RichText::new(format_lap_time(b as i64)).font(semibold(18.0)).color(theme::GOOD));
+                    }
+                });
+            });
+            if r.on_hover_text("Open this race day").clicked() {
+                act.open_event = Some(e.key());
+            }
+        }
+        None => {
+            ui.label(RichText::new("No race days yet.").size(13.0).color(SECONDARY));
+        }
+    }
+}
+
+/// The driver's tile: engine picture, name, class and age, best lap (click to open it).
+fn driver_tile(ui: &mut Ui, k: usize, d: &DriverRow, lib: &Library, profiles: &Profiles, today: aim_xrk::summary::Date, act: &mut Actions) {
+    let tile_h = 84.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), tile_h), Sense::click());
+    // The best lap opens on its own; the rest of the tile edits the driver.
+    let lap_rect = Rect::from_min_max(pos2(rect.right() - 150.0, rect.top()), rect.max);
+    let lap = d.best.as_ref().map(|_| ui.interact(lap_rect, ui.id().with(("best_lap", k)), Sense::click()));
+    let lap_hovered = lap.as_ref().is_some_and(|l| l.hovered());
+    ui.painter().rect_stroke(rect, CornerRadius::same(theme::RADIUS), Stroke::new(1.0, if resp.hovered() || lap_hovered { SECONDARY } else { theme::OUTLINE }), egui::StrokeKind::Inside);
+    // The engine, about a third bigger than the tile and nudged left, so the tile's edges crop it.
+    let text_left = match crate::profiles::engine_picture(&d.engine) {
+        Some((uri, bytes)) => {
+            let size = tile_h * 1.3;
+            let img = Rect::from_min_size(pos2(rect.left() - 30.0, rect.top() - 2.0), Vec2::splat(size));
+            let mut pic = ui.new_child(egui::UiBuilder::new().max_rect(img));
+            pic.set_clip_rect(rect.shrink(1.0));
+            egui::Image::from_bytes(uri, bytes).paint_at(&pic, img);
+            img.right() + 10.0
+        }
+        None => {
+            let mut a = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(rect.left_top() + vec2(16.0, (tile_h - 48.0) / 2.0), Vec2::splat(48.0))));
+            avatar(&mut a, &d.name, 48.0, SERIES[k % SERIES.len()]);
+            rect.left() + 78.0
+        }
+    };
+    let p = ui.painter_at(rect);
+    let mid = rect.center().y;
+    let person = d.id.and_then(|id| profiles.drivers.iter().find(|p| p.id == id));
+    let sub = [person.map(|p| p.class.trim().to_string()).unwrap_or_default(), person.and_then(|p| p.age(today)).map(|a| format!("age {a}")).unwrap_or_default()]
+        .into_iter()
+        .filter(|x| !x.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("  ·  ");
+    p.text(pos2(text_left, mid - 11.0), egui::Align2::LEFT_CENTER, &d.name, semibold(20.0), TEXT);
+    p.text(pos2(text_left, mid + 13.0), egui::Align2::LEFT_CENTER, if sub.is_empty() { "Add class and age with Edit".to_string() } else { sub }, regular(13.0), SECONDARY);
+    if let Some((track, ms, i)) = &d.best {
+        let right = rect.right() - 18.0;
+        p.text(pos2(right, mid - 12.0), egui::Align2::RIGHT_CENTER, format!("Best at {track}"), regular(12.5), DIM);
+        p.text(pos2(right, mid + 10.0), egui::Align2::RIGHT_CENTER, format_lap_time(*ms as i64), semibold(22.0), if lap_hovered { TEXT } else { theme::GOOD });
+        if let Some(lap) = lap {
+            if lap.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if lap.on_hover_text("Open the best lap").clicked() {
+                act.open_lap = Some(lib.sessions[*i].path.clone());
+            }
+        }
+    }
+    if resp.hovered() && !lap_hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let hint = if d.id.is_some() { "Edit this driver" } else { "Put this MyChron on a kart" };
+    if resp.on_hover_text(hint).clicked() && !lap_hovered {
+        match d.id {
+            Some(id) => act.edit_driver = profiles.drivers.iter().find(|p| p.id == id).map(|p| DriverEdit { driver: p.clone(), confirm_delete: false }),
+            None => act.edit_kart = Some(KartEdit::new(profiles, None, &d.loggers[0])),
+        }
+    }
+}
+
+/// A kart's card: name, Setup and Edit; engine and MyChron beside the setup in use.
+#[allow(clippy::too_many_arguments)]
+fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Profiles, resolved: &[setup::Resolved], model_of: &dyn Fn(&str) -> String, act: &mut Actions) {
+    Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin::symmetric(20, 16)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        ui.spacing_mut().interact_size.y = 20.0;
+        let name = row.kart.as_ref().map(|k| k.name.clone()).unwrap_or_else(|| "Not on a kart yet".into());
+        let about: Vec<(&str, String)> = match &row.kart {
+            Some(k) => vec![
+                ("Engine", if k.engine.trim().is_empty() { "—".into() } else { k.engine.clone() }),
+                ("MyChron", if k.logger.is_empty() { "None".into() } else { model_of(&k.logger) }),
+            ],
+            None => vec![("MyChron", format!("{} (logger {})", model_of(&row.logger), row.logger))],
+        };
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&name).font(semibold(18.0)).color(TEXT));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if small_button(ui, Icon::Pencil, "Edit").on_hover_text("Name, engine, driver, MyChron and baseline setup").clicked() {
+                    act.edit_kart = Some(KartEdit::new(profiles, row.kart.as_ref(), &row.logger));
+                }
+                if let Some(newest) = row.newest {
+                    if small_button(ui, Icon::Settings, "Setup").on_hover_text("Change the setup from the newest session on").clicked() {
+                        act.edit_setup = Some(newest);
+                    }
+                }
+            });
+        });
+        ui.add_space(6.0);
+        let s = match (row.newest, &row.kart) {
+            (Some(i), _) => resolved[i].setup.clone(),
+            (None, Some(k)) => k.baseline.clone(),
+            (None, None) => Setup::default(),
+        };
+        let rows: Vec<(&str, String)> = [
+            ("Gearing", if s.drive_teeth.trim().is_empty() && s.driven_teeth.trim().is_empty() { String::new() } else { format!("{} / {}", s.drive_teeth.trim(), s.driven_teeth.trim()) }),
+            ("Tires", s.tires.trim().to_string()),
+            ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} psi"), (f, r) => format!("{f} / {r} psi") }),
+            ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} lb with driver", s.weight_lb.trim()) }),
+            ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} lb", s.ballast_lb.trim()) }),
+            ("Jetting", s.jetting.trim().to_string()),
+        ]
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
+        let grid = |ui: &mut Ui, id: (&str, usize), rows: &[(&str, String)]| {
+            egui::Grid::new(id).num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
+                for (k, v) in rows {
+                    ui.label(RichText::new(*k).size(13.0).color(DIM));
+                    ui.label(RichText::new(v).size(13.5).color(TEXT));
+                    ui.end_row();
+                }
+            });
+        };
+        ui.columns(2, |cols| {
+            grid(&mut cols[0], ("kart_about", n), &about);
+            if rows.is_empty() {
+                cols[1].label(RichText::new("No setup recorded yet.").color(SECONDARY));
+            } else {
+                grid(&mut cols[1], ("kart_setup", n), &rows);
+            }
+        });
+        ui.add_space(10.0);
+        let when = if row.newest.is_some() { setup_last_changed(lib, resolved, &row.logger) } else { "Baseline, before its first session".to_string() };
+        ui.label(RichText::new(when).size(12.5).color(DIM));
+    });
 }
 
 /// "Changed in session 31 (Oct 10)", or where the setup comes from.

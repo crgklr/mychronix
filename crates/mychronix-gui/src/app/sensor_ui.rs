@@ -2,7 +2,8 @@
 //! session header) listing sensors that stopped recording, with what to check.
 
 use super::*;
-use crate::sensor_check::{self, Checked, History, Ignored};
+use crate::digest::{Digest, Digests};
+use crate::sensor_check::{self, Checked, Ignored};
 
 /// Sensor check state.
 #[derive(Default)]
@@ -12,9 +13,17 @@ pub(super) struct SensorState {
     /// The report window, when open.
     pub report: Option<Vec<Checked>>,
     pub ignored: Option<Ignored>,
-    pub history: Option<History>,
+    /// Session digests (lap times, sensors), loaded once and filled in the background.
+    pub digests: Option<Digests>,
+    pub digest_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Digest)>>,
+    pub digests_asked: std::collections::HashSet<PathBuf>,
+    /// Weather being fetched, and the sessions already asked about this run.
+    pub weather_rx: Option<std::sync::mpsc::Receiver<(PathBuf, crate::weather::Weather)>>,
+    pub weather_asked: std::collections::HashSet<PathBuf>,
     /// The open session's reportable issues, computed once per session.
     pub open: Option<(PathBuf, Checked)>,
+    /// The open session's notes (lap trend, consistency, temperatures).
+    pub notes: Option<(PathBuf, Vec<aim_xrk::notes::Note>)>,
 }
 
 impl App {
@@ -22,19 +31,19 @@ impl App {
     pub(super) fn check_downloaded(&mut self, paths: Vec<PathBuf>, logger: &str, ctx: &egui::Context) {
         let known: Vec<PathBuf> = self.library.as_ref().map(|l| l.sessions.iter().filter(|s| s.logger == logger).map(|s| s.path.clone()).collect()).unwrap_or_default();
         self.sensors.rx = Some(sensor_check::spawn(paths, known, ctx.clone()));
-        self.sensors.history = None;
+        // Reload the digests once the check has added the new sessions.
+        self.sensors.digests = None;
+        self.sensors.digests_asked.clear();
     }
 
     /// The open session's sensor problems (worth reporting and not ignored).
     pub(super) fn open_session_check(&mut self, session: &Session) -> Option<Checked> {
         let path = self.path.clone()?;
         if self.sensors.open.as_ref().is_none_or(|(p, _)| *p != path) {
-            let logger = session.info.logger_id.map(|i| i.to_string()).unwrap_or_default();
-            let history = self.sensors.history.get_or_insert_with(History::load);
-            let issues = aim_xrk::checks::sensor_issues(session)
-                .into_iter()
-                .filter(|i| aim_xrk::checks::worth_reporting(i, |c| history.worked(&logger, c)))
-                .collect();
+            let digests = self.sensors.digests.get_or_insert_with(Digests::load);
+            let digest = digests.get(&path).cloned().unwrap_or_else(|| Digest::of(session));
+            let logger = digest.logger.clone();
+            let issues = digests.reportable(&digest);
             let number = path.file_name().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
             self.sensors.open = Some((path, Checked { logger, number, issues }));
         }
@@ -42,6 +51,119 @@ impl App {
         let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);
         let issues: Vec<_> = checked.issues.iter().filter(|i| !ignored.contains(&checked.logger, &i.channel)).cloned().collect();
         (!issues.is_empty()).then_some(Checked { issues, ..checked })
+    }
+
+    /// Fetches the weather for library sessions `rows` that don't have it yet,
+    /// and puts arrived weather into the library.
+    pub(super) fn want_weather(&mut self, rows: &[usize], ctx: &egui::Context) {
+        let Some(lib) = self.library.as_mut() else { return };
+        if let Some(rx) = &self.sensors.weather_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok((p, w)) => {
+                        if let Some(s) = lib.sessions.iter_mut().find(|s| s.path == p) {
+                            s.weather = Some(w);
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.sensors.weather_rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+        if self.sensors.weather_rx.is_some() || !crate::weather::enabled() {
+            return;
+        }
+        let wants: Vec<crate::weather::Want> = rows
+            .iter()
+            .filter_map(|&i| {
+                let s = lib.sessions.get(i)?;
+                if s.weather.is_some() || self.sensors.weather_asked.contains(&s.path) {
+                    return None;
+                }
+                let pos = s.summary.start_finish.or_else(|| s.track.and_then(|t| lib.tracks[t].start_finish).map(|p| (p.lat, p.lon)))?;
+                let date = s.summary.date.map(crate::events::iso)?;
+                let hour = s.summary.start_time.as_deref().and_then(|t| t.get(..2)).and_then(|h| h.parse().ok()).unwrap_or(12usize).min(23);
+                Some(crate::weather::Want { session: s.path.clone(), lat: pos.0, lon: pos.1, date, hour })
+            })
+            .collect();
+        if !wants.is_empty() {
+            self.sensors.weather_asked.extend(wants.iter().map(|w| w.session.clone()));
+            self.sensors.weather_rx = Some(crate::weather::spawn(wants, ctx.clone()));
+        }
+    }
+
+    /// Asks for the digests of `paths` not yet known; picks up finished ones.
+    pub(super) fn want_digests(&mut self, paths: impl Iterator<Item = PathBuf>, ctx: &egui::Context) {
+        let digests = self.sensors.digests.get_or_insert_with(Digests::load);
+        if let Some(rx) = &self.sensors.digest_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok((p, d)) => digests.insert(&p, d),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.sensors.digest_rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+        let need: Vec<PathBuf> = paths.filter(|p| digests.get(p).is_none() && !self.sensors.digests_asked.contains(p)).collect();
+        if !need.is_empty() && self.sensors.digest_rx.is_none() {
+            self.sensors.digests_asked.extend(need.iter().cloned());
+            self.sensors.digest_rx = Some(crate::digest::spawn(need, ctx.clone()));
+        }
+    }
+
+    /// The open session's notes, as (short text, explanation, needs attention).
+    pub(super) fn open_session_notes(&mut self, session: &Session) -> Vec<(String, String, bool)> {
+        use aim_xrk::notes::Note;
+        let Some(path) = self.path.clone() else { return Vec::new() };
+        if self.sensors.notes.as_ref().is_none_or(|(p, _)| *p != path) {
+            self.sensors.notes = Some((path, aim_xrk::notes::session_notes(session)));
+        }
+        let notes = self.sensors.notes.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+        // The open session's channels are already in display units.
+        let deg = |u: &str| if u.to_uppercase().contains('F') { "°F" } else { "°C" };
+        notes
+            .iter()
+            .map(|n| match n {
+                Note::LapTrend { per_lap_s, first_lap, last_lap } if *per_lap_s > 0.0 => (
+                    format!("Laps slowed ~{per_lap_s:.2} s each"),
+                    format!("Over the racing laps ({first_lap}–{last_lap}), lap times rose steadily by about {per_lap_s:.2} s a lap. Tires going off, the driver tiring, traffic, or a change in conditions."),
+                    true,
+                ),
+                Note::LapTrend { per_lap_s, first_lap, last_lap } => (
+                    format!("Laps got faster ~{:.2} s each", -per_lap_s),
+                    format!("Over the racing laps ({first_lap}–{last_lap}), lap times fell steadily by about {:.2} s a lap: finding speed as the session went on.", -per_lap_s),
+                    false,
+                ),
+                Note::Consistency { sd_s, laps } => (
+                    format!("Lap times ±{sd_s:.2} s"),
+                    format!("How much the {laps} racing laps varied (standard deviation; out/in laps and laps over 115% of the median left out). Smaller is more consistent."),
+                    false,
+                ),
+                Note::TempTrend { channel, units, from, to, per_lap } => {
+                    let name = crate::report::short_name(channel);
+                    let word = if *per_lap > 0.0 { "rose" } else { "fell" };
+                    let u = deg(units);
+                    (
+                        format!("{name} {word} {:.0}{u} over the session", (to - from).abs()),
+                        format!(
+                            "{name}'s peak each lap {word} steadily, from about {from:.0}{u} to {to:.0}{u} across the racing laps. {}",
+                            if name == "EGT" {
+                                "Rising exhaust temperature can come from a leaner mixture, warmer air, or the engine still coming up to temperature; worth comparing with the jetting on the setup sheet."
+                            } else {
+                                "Normal while warming up; if it keeps climbing late in a session, check cooling."
+                            }
+                        ),
+                        *per_lap > 0.0 && name == "EGT",
+                    )
+                }
+            })
+            .collect()
     }
 
     /// The report window; also picks up a finished background check.

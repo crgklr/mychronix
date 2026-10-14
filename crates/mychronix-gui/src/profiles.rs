@@ -26,6 +26,9 @@ pub struct LoggerProfile {
     pub track: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub engine: String,
+    /// The logger's model, e.g. "MyChron 6", learned from its WiFi name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -268,6 +271,7 @@ impl Profiles {
             engine: kart.map(|k| k.engine.clone()).unwrap_or_default(),
             championship: defaults.championship,
             track: defaults.track,
+            model: defaults.model,
         }
     }
 
@@ -362,7 +366,7 @@ mod tests {
         let mut p = Profiles::default();
         p.loggers.insert(
             "1".into(),
-            LoggerProfile { driver: "Ann".into(), kart: "Cadet".into(), engine: "IAME Mini Swift".into(), championship: "Club".into(), track: "Club Circuit".into() },
+            LoggerProfile { driver: "Ann".into(), kart: "Cadet".into(), engine: "IAME Mini Swift".into(), championship: "Club".into(), track: "Club Circuit".into(), ..Default::default() },
         );
         let mut baselines = BTreeMap::new();
         baselines.insert("1".to_string(), crate::setup::Setup { driven_teeth: "80".into(), ..Default::default() });

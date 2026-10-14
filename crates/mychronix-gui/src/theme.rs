@@ -82,6 +82,7 @@ fastframe_icons::icons! {
         Check => lucide "check",
         ChevronDown => lucide "chevron-down",
         ChevronRight => lucide "chevron-right",
+        ChevronLeft => lucide "chevron-left",
         Clock => lucide "clock",
         Settings => lucide "settings",
         Plus => lucide "plus",

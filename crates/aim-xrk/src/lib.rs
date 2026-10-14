@@ -7,6 +7,7 @@
 use std::path::Path;
 
 pub mod checks;
+pub mod notes;
 pub mod summary;
 
 pub use libxrk;
@@ -89,6 +90,10 @@ pub struct SessionInfo {
     pub session: Option<String>,
     pub device: Option<String>,
     pub logger_id: Option<u32>,
+    /// The logger's model as recorded in the file, e.g. "MyChron 6".
+    pub logger_model: Option<String>,
+    /// AiM's number for that model.
+    pub logger_model_id: Option<u16>,
 }
 
 /// A recorded channel. `times_ms` and `values` have the same length.
@@ -167,6 +172,8 @@ impl From<libxrk::XrkFile> for Session {
             session: m.session,
             device: m.device_name,
             logger_id: m.logger_id,
+            logger_model: m.logger_model,
+            logger_model_id: m.logger_model_id,
         };
         let channels: Vec<Channel> = file
             .channels
@@ -237,6 +244,15 @@ fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
         V::UInt32(v) => v.into_iter().map(f64::from).collect(),
         V::Float32(v) => v.into_iter().map(f64::from).collect(),
         V::Float64(v) => v,
+    }
+}
+
+/// A MyChron's model from the number AiM records in its files, for the
+/// numbers confirmed so far (others: None).
+pub fn mychron_model(model_id: u16) -> Option<&'static str> {
+    match model_id {
+        720 => Some("MyChron 6"),
+        _ => None,
     }
 }
 

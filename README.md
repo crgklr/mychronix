@@ -52,6 +52,15 @@ works today:
   laps, time on track, fastest lap, peak RPM and EGT and top speed, best lap
   through the event, and a season summary per championship. Engine warm-ups
   are listed but left out of the numbers.
+- **Session notes and sensor check:** each session opens with what stands out
+  across its racing laps (lap times trending up or down, consistency,
+  temperatures climbing), and after a download Mychronix warns about sensors
+  that stopped recording (an RPM wire left off), only for sensors that have
+  worked before on that MyChron.
+- **Weather:** the air temperature, humidity and pressure at the track when
+  each session started, shown with its setup, from
+  [Open-Meteo](https://open-meteo.com) (only the track position and date are
+  sent; `"weather": false` in `~/Mychronix/settings.json` turns it off).
 - **Setup sheets:** gearing, tires and pressures, weight and ballast, jetting
   and notes per session, as RaceStudio's log sheets. A session without its own
   sheet uses the previous one (the first uses the kart's baseline), changes are flagged on the session and the
