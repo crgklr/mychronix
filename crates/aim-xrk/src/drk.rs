@@ -148,7 +148,14 @@ pub fn read(data: &[u8]) -> Result<Session> {
         }
         None => (None, None),
     };
+    // The logger's serial number is at 0x10 of the II block (and repeated in
+    // RD); AiM's model code is the u16 at 0x04 (106 on a MyChron 4).
+    let ii = find(b"II").map(|b| b.data).unwrap_or(&[]);
+    let logger_id = u32_at(ii, 0x10).filter(|&n| n > 0);
+    let model_id = u16_at(ii, 0x04).filter(|&m| m > 0);
     let info = SessionInfo {
+        logger_id,
+        logger_model_id: model_id,
         driver: text_at(pp, 0x50, 40),
         venue: text_at(pp, 0x28, 40),
         session: text_at(pp, 0x78, 60),
@@ -212,6 +219,11 @@ mod tests {
         let mut pp = vec![0u8; 0x400];
         pp[0x28..0x2b].copy_from_slice(b"NKA");
         f.extend(pp);
+        f.extend(hdr(b"II"));
+        let mut ii = vec![0u8; 0x80];
+        ii[0x04..0x06].copy_from_slice(&106u16.to_le_bytes());
+        ii[0x10..0x14].copy_from_slice(&123456u32.to_le_bytes());
+        f.extend(ii);
         f.extend(hdr(b"MM"));
         let mut mm = vec![0u8; 0x400];
         mm[..6].copy_from_slice(b"Engine");
@@ -237,6 +249,7 @@ mod tests {
     fn reads_channels_laps_and_names() {
         let s = read(&sample()).unwrap();
         assert_eq!(s.info.venue.as_deref(), Some("NKA"));
+        assert_eq!((s.info.logger_id, s.info.logger_model.as_deref()), (Some(123456), Some("MyChron 4")));
         assert_eq!(s.info.date.as_deref(), Some("10/11/2026"));
         assert_eq!(s.laps.iter().map(|l| l.duration_ms()).collect::<Vec<_>>(), [1000, 2000]);
         let e = &s.channels[0];
