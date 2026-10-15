@@ -7,6 +7,7 @@
 use std::path::Path;
 
 pub mod checks;
+pub mod drk;
 pub mod notes;
 pub mod summary;
 
@@ -125,7 +126,12 @@ impl Lap {
 
 impl Session {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_bytes(&std::fs::read(path)?)
+        let path = path.as_ref();
+        let data = std::fs::read(path)?;
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("drk")) {
+            return drk::read(&data);
+        }
+        Self::from_bytes(&data)
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {

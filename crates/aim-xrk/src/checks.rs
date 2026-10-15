@@ -123,7 +123,9 @@ pub fn working_sensors(session: &Session) -> Vec<String> {
     session
         .channels
         .iter()
-        .filter(|c| sensor_of(&c.name).is_some() && c.values.len() > 1 && c.values.iter().any(|v| (v - c.values[0]).abs() > 1e-9))
+        // At least 50 readings that vary: a few stray values from a floating
+        // input (seen on a MyChron 4 with no head-temp sensor) don't count.
+        .filter(|c| sensor_of(&c.name).is_some() && c.values.len() >= 50 && c.values.iter().any(|v| (v - c.values[0]).abs() > 1e-9))
         .map(|c| c.name.clone())
         .collect()
 }

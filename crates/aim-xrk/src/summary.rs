@@ -200,7 +200,8 @@ pub fn parse_summary_csv(text: &str) -> Vec<SessionSummary> {
 /// `a_0035.xrz` → 35.
 pub fn session_number(file: &str) -> Option<u32> {
     let stem = file.rsplit('/').next()?.split('.').next()?;
-    stem.strip_prefix("a_")?.parse().ok()
+    // MyChron 5/6: "a_0035"; RaceStudio 2: "<name> <date>_003".
+    stem.strip_prefix("a_").or_else(|| stem.rsplit_once('_').map(|(_, n)| n))?.parse().ok()
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {

@@ -277,3 +277,28 @@ wire format, confirmed:
   key's restart). Mychronix shouldn't need it.
 - After a 0x0C, the key waits for its data to be read from 0x82; if it never
   is, it ignores further commands until unplugged.
+
+## RaceStudio 2 `.drk` files (MyChron 4), format version 6.00
+
+Read by `aim_xrk::drk`; checked against RaceStudio 2 on a MyChron 4 session
+(16 laps identical to the millisecond; a lap's RPM min/max/mean identical).
+
+- A run of blocks, each a 32-byte header — two capital letters, the format
+  version as u16 LE (600), a checksum — then data:
+  - `RD` ×2: the first is a bare header; the second holds the session name
+    and, at +0x0c, `DD-MM-YY HH:MM:SS` (the logger's clock).
+  - `PP` (1 KB): track name at +0x28, driver at +0x50, session name at +0x78.
+  - `II` (128 B).
+  - `MM` (1 KB) per channel: name at +0, code (e.g. `\t11040`) at +0x14,
+    sample count u32 at +0x48, full-scale float at +0x50.
+  - `GG` (256 B) per lap: lap time in ms u32 at +0x76, in logger ticks u32 at +0x04.
+  - `RR`: a 4 KB table, then every channel's samples as u16 LE, channel after
+    channel in `MM` order. The last 2–3 samples of each channel are a
+    trailer (0x4316, 0x2620, 0x1015, 0x7FFF…), not readings.
+- Time: fast channels every 100 logger ticks, slow ones every 1000. The
+  logger's clock drifts (≈1.5% on one MyChron 4); scale ticks to ms by
+  Σ lap ms / Σ lap ticks, as RaceStudio 2 does.
+- Values: Engine = RPM as is; Datalogger_Temp = raw / 100 °C (≈1 °C above
+  RS2's display — formula not exact yet); Battery = raw × 0.0055 V
+  (RS2: 8.2 V); 0xCFFF = nothing connected.
+- Older versions (RaceStudio 2's own samples) use other layouts — not read yet.
