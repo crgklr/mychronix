@@ -1,0 +1,5 @@
+LIBRARY msimg32
+EXPORTS
+AlphaBlend=fwd_AlphaBlend@44
+GradientFill=fwd_GradientFill@24
+TransparentBlt=fwd_TransparentBlt@44
