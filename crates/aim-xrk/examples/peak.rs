@@ -1,0 +1,1 @@
+fn main() { for p in std::env::args().skip(1) { if let Ok(s) = aim_xrk::Session::open(&p) { let mut v: Vec<f64> = s.channel("Engine").map(|c| c.values.clone()).unwrap_or_default(); v.sort_by(|a, b| a.total_cmp(b)); let p95 = v.get(v.len() * 95 / 100).copied().unwrap_or(0.0); println!("{} p95={:.0} n={}", p.rsplit('/').next().unwrap(), p95, v.len()); } } }

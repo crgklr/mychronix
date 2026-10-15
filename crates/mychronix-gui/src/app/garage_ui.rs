@@ -822,28 +822,32 @@ fn driver_column(
     heading(ui, "MyChron", None);
     for logger in &d.loggers {
         let on = status.connected.as_deref() == Some(logger.as_str());
+        // A MyChron 4 has no WiFi: it downloads through its data key.
+        let wifi = model_of(logger) != "MyChron 4";
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             ui.add(Icon::Mychron.image(if on { theme::GOOD } else { SECONDARY }, 34.0));
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(RichText::new(model_of(logger)).font(semibold(16.0)).color(TEXT));
-                let line = match (on, status.reading, status.new_count) {
+                let line = if !wifi { "Downloads through its data key".to_string() } else { match (on, status.reading, status.new_count) {
                     (true, true, _) => "On its WiFi · reading its sessions…".to_string(),
                     (true, false, 0) => "On its WiFi · everything downloaded".to_string(),
                     (true, false, n) => format!("On its WiFi · {n} new session{} to download", if n == 1 { "" } else { "s" }),
                     (false, ..) => "Off or out of range".to_string(),
-                };
-                ui.label(RichText::new(line).size(13.0).color(if on { theme::GOOD } else { SECONDARY }));
+                } };
+                ui.label(RichText::new(line).size(13.0).color(if on && wifi { theme::GOOD } else { SECONDARY }));
                 let mine: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| &s.logger == logger).collect();
                 let newest = mine.iter().filter_map(|s| s.summary.date).max();
                 ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
             });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
-                    act.go = Some(Page::Device);
-                }
-            });
+            if wifi {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
+                        act.go = Some(Page::Device);
+                    }
+                });
+            }
         });
     }
     if d.loggers.is_empty() {

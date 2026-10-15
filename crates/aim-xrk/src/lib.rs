@@ -257,6 +257,7 @@ fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
 /// numbers confirmed so far (others: None).
 pub fn mychron_model(model_id: u16) -> Option<&'static str> {
     match model_id {
+        106 => Some("MyChron 4"),
         720 => Some("MyChron 6"),
         _ => None,
     }
