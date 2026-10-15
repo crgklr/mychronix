@@ -50,6 +50,21 @@ enum Command {
     /// Talk to a MyChron over WiFi. Join its AiM-MYC… network first.
     #[command(subcommand)]
     Device(DeviceCommand),
+    /// Read a MyChron 4 data key plugged into this computer.
+    #[command(subcommand)]
+    Datakey(DataKeyCommand),
+}
+
+#[derive(Subcommand)]
+enum DataKeyCommand {
+    /// List the runs on the key.
+    List,
+    /// Download every run that isn't already saved (as .drk or .mc4).
+    Pull {
+        /// Folder to save into (default: ~/Mychronix/sessions/<logger serial>).
+        #[arg(long)]
+        to: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -89,7 +104,54 @@ fn main() -> anyhow::Result<()> {
         Command::Info { file, channels } => info(&file, channels),
         Command::Sessions { dir } => local_sessions(dir),
         Command::Device(cmd) => device(cmd),
+        Command::Datakey(cmd) => datakey(cmd),
     }
+}
+
+fn sessions_root() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Mychronix").join("sessions")
+}
+
+fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
+    use aim_link::datakey::DataKey;
+    let mut key = DataKey::open()?;
+    let runs = key.runs()?;
+    match cmd {
+        DataKeyCommand::List => {
+            println!("{} runs on the key", runs.len());
+            for r in &runs {
+                let (date, time) = r.start().unwrap_or_default();
+                let best = r.best_lap_cs.map(|cs| format_lap_time(cs as i64 * 10)).unwrap_or_else(|| "-".into());
+                println!("  run {:>3}  {date} {time}  {:>2} laps  best {best:>9}  {:>6} bytes  logger {}", r.number, r.laps(), r.data_len, r.serial);
+            }
+        }
+        DataKeyCommand::Pull { to } => {
+            let serial = runs.first().map(|r| r.serial.to_string()).unwrap_or_else(|| "mychron4".into());
+            let dir = to.unwrap_or_else(|| sessions_root().join(&serial));
+            std::fs::create_dir_all(&dir)?;
+            // Runs already here (from RaceStudio 2's .drk files or an earlier pull), by start time.
+            let have: Vec<(Option<String>, Option<String>)> = std::fs::read_dir(&dir)?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "drk" || x == "mc4"))
+                .filter_map(|p| Session::open(&p).ok())
+                .map(|s| (s.info.date, s.info.time))
+                .collect();
+            let mut saved = 0;
+            for r in &runs {
+                let Some((date, time)) = r.start() else { continue };
+                if have.iter().any(|(d, t)| d.as_deref() == Some(&date) && t.as_deref() == Some(&time)) {
+                    continue;
+                }
+                let run = key.download(r, |_, _| {})?;
+                let path = dir.join(r.file_name());
+                std::fs::write(&path, run.to_file())?;
+                println!("saved {}", path.display());
+                saved += 1;
+            }
+            println!("{saved} new of {} runs; {} already here", runs.len(), runs.len() - saved);
+        }
+    }
+    Ok(())
 }
 
 fn info(file: &PathBuf, list_channels: bool) -> anyhow::Result<()> {

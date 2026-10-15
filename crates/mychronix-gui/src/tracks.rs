@@ -246,9 +246,14 @@ impl Library {
             let weather = crate::weather::Weather::load(&xrz);
             lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup, weather });
         }
-        // RaceStudio 2 sessions (MyChron 4), summarized from the file itself.
-        for path in files_with_ext(&home.join("Mychronix").join("sessions"), "drk") {
-            let Ok(summary) = aim_xrk::drk::summary(&path) else { continue };
+        // MyChron 4 sessions: RaceStudio 2's .drk and runs downloaded from a
+        // data key (.mc4), summarized from the file itself.
+        let sessions_dir = home.join("Mychronix").join("sessions");
+        let rs2 = files_with_ext(&sessions_dir, "drk").into_iter().map(|p| (p, true));
+        let mc4 = files_with_ext(&sessions_dir, "mc4").into_iter().map(|p| (p, false));
+        for (path, is_drk) in rs2.chain(mc4) {
+            let summary = if is_drk { aim_xrk::drk::summary(&path) } else { aim_xrk::mc4::summary(&path) };
+            let Ok(summary) = summary else { continue };
             let session = lib.sessions.len();
             let logger = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let meta = crate::device::SessionMeta::load(&path);

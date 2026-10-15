@@ -31,7 +31,7 @@ aim-link.workspace = true
 name = "mychronix"
 maintainer = "Mychronix contributors"
 copyright = "Mychronix contributors"
-extended-description = "Download sessions from AiM MyChron kart data loggers over WiFi, analyze laps and browse tracks. Independent project, not affiliated with AiM."
+extended-description = "Download sessions from AiM MyChron kart data loggers (over WiFi, or a MyChron 4 data key), analyze laps and browse tracks. Independent project, not affiliated with AiM."
 section = "utils"
 depends = "$auto"
 recommends = "network-manager"
@@ -39,6 +39,7 @@ assets = [
     ["target/release/mychronix-gui", "usr/bin/", "755"],
     ["target/release/mychronix", "usr/bin/", "755"],
     ["../../packaging/linux/mychronix.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/linux/70-mychronix-aim.rules", "usr/lib/udev/rules.d/", "644"],
     ["assets/mychronix-icon.svg", "usr/share/icons/hicolor/scalable/apps/mychronix.svg", "644"],
     ["../../target/icons/48x48/mychronix.png", "usr/share/icons/hicolor/48x48/apps/", "644"],
     ["../../target/icons/128x128/mychronix.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
@@ -56,6 +57,7 @@ assets = [
     { source = "target/release/mychronix-gui", dest = "/usr/bin/mychronix-gui", mode = "755" },
     { source = "target/release/mychronix", dest = "/usr/bin/mychronix", mode = "755" },
     { source = "packaging/linux/mychronix.desktop", dest = "/usr/share/applications/mychronix.desktop", mode = "644" },
+    { source = "packaging/linux/70-mychronix-aim.rules", dest = "/usr/lib/udev/rules.d/70-mychronix-aim.rules", mode = "644" },
     { source = "crates/mychronix-gui/assets/mychronix-icon.svg", dest = "/usr/share/icons/hicolor/scalable/apps/mychronix.svg", mode = "644" },
     { source = "target/icons/48x48/mychronix.png", dest = "/usr/share/icons/hicolor/48x48/apps/mychronix.png", mode = "644" },
     { source = "target/icons/128x128/mychronix.png", dest = "/usr/share/icons/hicolor/128x128/apps/mychronix.png", mode = "644" },

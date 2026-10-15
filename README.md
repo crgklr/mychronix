@@ -61,6 +61,14 @@ works today:
   each session started, shown with its setup, from
   [Open-Meteo](https://open-meteo.com) (only the track position and date are
   sent; `"weather": false` in `~/Mychronix/settings.json` turns it off).
+- **MyChron 4 data key:** plug the key into the computer and Mychronix lists
+  its runs and downloads the new ones (Device page, or the MyChron 4's row in
+  the Garage). It only reads from the key; nothing on the key or the logger
+  is changed. RaceStudio 2's `.drk` files open too. On Linux the `.deb` and
+  `.rpm` install a udev rule so the key works without root; with the AppImage
+  or tarball, install it once:
+  `sudo cp share/mychronix/70-mychronix-aim.rules /etc/udev/rules.d/ && sudo udevadm control --reload`
+  (the tarball has it; for the AppImage, see `packaging/linux/` in the source).
 - **Update check:** once a day Mychronix asks GitHub whether a newer release
   is out and, if so, offers what's new and a download link. Nothing installs
   by itself; `"update_check": false` in `~/Mychronix/settings.json` turns it off.

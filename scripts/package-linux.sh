@@ -36,6 +36,7 @@ stage="target/mychronix-$version-$arch"
 rm -rf "$stage"
 install -Dm755 target/release/mychronix-gui "$stage/bin/mychronix-gui"
 install -Dm755 target/release/mychronix "$stage/bin/mychronix"
+install -Dm644 packaging/linux/70-mychronix-aim.rules "$stage/share/mychronix/70-mychronix-aim.rules"
 install -Dm644 packaging/linux/mychronix.desktop "$stage/share/applications/mychronix.desktop"
 install -Dm644 "$svg" "$stage/share/icons/hicolor/scalable/apps/mychronix.svg"
 for size in 48 128 256 512; do
