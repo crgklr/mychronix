@@ -215,3 +215,65 @@ logger, to see whether the 70 ms is fixed or varies; (2) trace how
 `FUN_141d8c780`'s "GPS CLOCK SYNCH" channel is consumed when GPS samples are
 placed. Until then Mychronix uses libxrk's timestamps unchanged; this only
 matters for loggers that stamp GPS on arrival (not the MyChron 6).
+
+## MyChron 4 data key (USB 11cc:0101) — static findings, Oct 15, 2026
+
+From RaceStudio 2 (`RaceStudio2.exe`, `Download.exe`, driver
+`AIM_USB_DRIVER_2008/AIM_USBdrv10_01.sys`), read with Ghidra; nothing has been
+sent to a key yet.
+
+- **Not a USB drive.** The key enumerates as 11cc:0101, class 0xDC
+  (diagnostic), one interface with EP1 interrupt IN/OUT (16 bytes), EP2 bulk
+  IN (64 bytes) and a fourth endpoint. Only AiM's software talks to it.
+- **Driver:** Microsoft's BulkUsb sample with an AiM IOCTL added. RS2 sends
+  every transfer as `DeviceIoControl(0x22000c)` with a 48-byte transfer
+  record: +0x10 buffer pointer, +0x14 byte count, +0x20 an 8-byte USB setup
+  packet. `0x220000` returns the configuration descriptor.
+- **Commands are vendor control transfers** (bmRequestType 0x40) with a
+  small data stage, set up in `CUSBHardware32`'s constructor:
+  - bRequest 0x0F booter (6 bytes) — firmware loader, never send;
+  - bRequest 0x0E memory (6 bytes): `[opcode, addr & 0xffff (LE), slave,
+    len (LE u16)]`, `wIndex = addr >> 16`; opcode 1 = MEM_READ;
+  - bRequest 0x0D "Evo3" (9 bytes): `[cmd, ...]`; cmd 0x1B = CMD_GETNETTABLE;
+  - bRequest 0x0C bulk (6 bytes): `[addr (3 bytes LE), len (LE u16), op]`,
+    `wIndex = 0x471`; op 1 = BULK_READ, then read `len` bytes from the bulk
+    IN pipe (`ReadMEM_MainBuff`);
+  - bRequest 0x02 CFG, 0x01, 0x00 — not yet identified.
+- `CConnectionDataKey::DumpStrumento` is a diagnostic dump of the key's own
+  microcontroller memory (MEM_READ 128 bytes at a time over 0xE0000–0xFFFFF,
+  0xF000–0xFFFF and 0x40000000 + 0–0x8FFFF), **not** the session download.
+- `CConnectionDataKey::LeggiNetTable` sends CMD_GETNETTABLE and reads a
+  256-byte table of up to 31 "slaves" (u16 logger code each, 8-byte
+  entries): the key acting as a USB-to-CAN bridge to a live logger.
+- **Unresolved:** which RS2 code path downloads runs stored on the key
+  (likely `Download.exe`'s run list → `.imd`/`.dat` → `.drk`), and the opcodes
+  for it. Next step: record RS2 downloading from a key that holds a dump
+  (Windows VM + usbmon), then decode.
+- **Never send:** booter (0x0F), MEM_WRITE / SLAVE_BULKWRITE, GPS writes, the
+  key-erase command, firmware updates.
+
+### Recorded: RaceStudio 2 downloading from the key (Oct 15, 2026)
+
+RS2 ran under Wine with `tools/aimkey-bridge` (a stand-in msimg32.dll that
+forwards AiM's IOCTLs to a libusb helper; Wine's out-of-process driver can't
+follow the pointer to the command bytes). The full exchange is logged; the
+wire format, confirmed:
+
+- AiM's driver sends RS2's vendor requests with **bmRequestType 0x42**
+  (vendor, endpoint recipient). bRequest 0x0C uses `wIndex = 0x0471`.
+- Transfer record (64-bit layout, 56 bytes): +0x04 endpoint, +0x08 read
+  flag, +0x10 buffer pointer, +0x18 length, +0x20 bytes transferred,
+  +0x24 setup packet, +0x2C OK flag. IOCTL 0x22000c = control,
+  0x220010 = bulk.
+- Read pattern: a command (0x0E memory or 0x0D "Evo3"), then
+  `0x0C [addr:3][len:2][op=1]` (BULK_READ), then read `len` bytes from bulk
+  IN 0x82.
+- Identify: 0x0E `07 00 00 00 00 00` → 128-byte block (key info).
+- Memory reads: 0x0E `01 lo lo slave len len`, `wIndex = addr >> 16`.
+- The download proper is 0x0D commands `1d 11 …` / `1d 12 nn 00 …` (cmd 0x1D
+  with sub-commands; `1d 12 nn` steps through stored items), each followed by
+  bulk reads of up to ~40 KB.
+- At the end RS2 sends 0x0F `0f 00 00 00 00 00` (booter family, probably the
+  key's restart). Mychronix shouldn't need it.
+- After a 0x0C, the key waits for its data to be read from 0x82; if it never
+  is, it ignores further commands until unplugged.
