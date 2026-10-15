@@ -246,6 +246,24 @@ impl Library {
             let weather = crate::weather::Weather::load(&xrz);
             lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup, weather });
         }
+        // RaceStudio 2 sessions (MyChron 4), summarized from the file itself.
+        for path in files_with_ext(&home.join("Mychronix").join("sessions"), "drk") {
+            let Ok(summary) = aim_xrk::drk::summary(&path) else { continue };
+            let session = lib.sessions.len();
+            let logger = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let meta = crate::device::SessionMeta::load(&path);
+            let chosen = meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty());
+            let track = match chosen.or_else(|| summary.track.clone()) {
+                Some(name) => lib.match_by_name(&name, &summary),
+                None => None,
+            };
+            if let Some(i) = track {
+                lib.tracks[i].sessions.push(session);
+            }
+            let setup = crate::setup::Setup::load(&path);
+            let weather = crate::weather::Weather::load(&path);
+            lib.sessions.push(LocalSession { path, logger, summary, track, meta, setup, weather });
+        }
         for t in &mut lib.tracks {
             t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));
         }
