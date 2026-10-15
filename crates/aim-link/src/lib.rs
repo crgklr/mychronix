@@ -7,6 +7,7 @@
 //! The protocol was worked out from captures of RaceStudio 3 talking to a
 //! MyChron 6; see `docs/protocol-notes.md`. Only reads are implemented.
 
+pub mod datakey;
 pub mod client;
 pub mod discovery;
 pub mod frame;

@@ -230,7 +230,9 @@ impl App {
             let p = profiles.for_logger(logger).model;
             if !p.is_empty() { p } else { digests.model(logger).unwrap_or_else(|| "MyChron".into()) }
         };
-        let status = GarageStatus { connected: connected_logger.clone(), reading: self.dev_files.is_empty(), new_count };
+        self.key_poll(&ui.ctx().clone());
+        let key = self.key.listing.as_ref().filter(|_| self.key.present && self.key.busy.is_none()).map(|(s, _, n)| (s.clone(), n.len()));
+        let status = GarageStatus { connected: connected_logger.clone(), key, reading: self.dev_files.is_empty(), new_count };
         let mut act = Actions::default();
 
         // Header.
@@ -306,6 +308,9 @@ impl App {
         }
         if act.edit_kart.is_some() {
             self.kart_edit = act.edit_kart.take();
+        }
+        if act.download_key {
+            self.key_download(&ui.ctx().clone());
         }
         if let Some(p) = act.open_lap.take() {
             self.pending_open = Some(p);
@@ -742,11 +747,14 @@ struct Actions {
     edit_setup: Option<usize>,
     edit_driver: Option<DriverEdit>,
     edit_kart: Option<KartEdit>,
+    download_key: bool,
 }
 
 /// The connected MyChron, if any.
 struct GarageStatus {
     connected: Option<String>,
+    /// A MyChron 4 data key that's plugged in: its logger's serial and new runs.
+    key: Option<(String, usize)>,
     /// Connected, but its session list hasn't arrived yet.
     reading: bool,
     new_count: usize,
@@ -830,17 +838,29 @@ fn driver_column(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(RichText::new(model_of(logger)).font(semibold(16.0)).color(TEXT));
-                let line = if !wifi { "Downloads through its data key".to_string() } else { match (on, status.reading, status.new_count) {
+                let key_new = status.key.as_ref().filter(|(s, _)| s == logger).map(|k| k.1);
+                let line = if !wifi { match key_new {
+                    Some(0) => "Data key plugged in · everything downloaded".to_string(),
+                    Some(n) => format!("Data key plugged in · {n} new run{} to download", if n == 1 { "" } else { "s" }),
+                    None => "Downloads through its data key".to_string(),
+                } } else { match (on, status.reading, status.new_count) {
                     (true, true, _) => "On its WiFi · reading its sessions…".to_string(),
                     (true, false, 0) => "On its WiFi · everything downloaded".to_string(),
                     (true, false, n) => format!("On its WiFi · {n} new session{} to download", if n == 1 { "" } else { "s" }),
                     (false, ..) => "Off or out of range".to_string(),
                 } };
-                ui.label(RichText::new(line).size(13.0).color(if on && wifi { theme::GOOD } else { SECONDARY }));
+                ui.label(RichText::new(line).size(13.0).color(if (on && wifi) || key_new.is_some() { theme::GOOD } else { SECONDARY }));
                 let mine: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| &s.logger == logger).collect();
                 let newest = mine.iter().filter_map(|s| s.summary.date).max();
                 ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
             });
+            if let Some(n) = status.key.as_ref().filter(|(s, _)| s == logger).map(|k| k.1).filter(|&n| n > 0) {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if button(ui, Some(Icon::FolderOpen), &format!("Download {n}"), true).on_hover_text("Download the new runs from the data key").clicked() {
+                        act.download_key = true;
+                    }
+                });
+            }
             if wifi {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {

@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub mod checks;
 pub mod drk;
+pub mod mc4;
 pub mod notes;
 pub mod summary;
 
@@ -130,6 +131,9 @@ impl Session {
         let data = std::fs::read(path)?;
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("drk")) {
             return drk::read(&data);
+        }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mc4")) {
+            return mc4::read(&data);
         }
         Self::from_bytes(&data)
     }

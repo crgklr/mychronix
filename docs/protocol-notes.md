@@ -302,3 +302,29 @@ Read by `aim_xrk::drk`; checked against RaceStudio 2 on a MyChron 4 session
   RS2's display — formula not exact yet); Battery = raw × 0.0055 V
   (RS2: 8.2 V); 0xCFFF = nothing connected.
 - Older versions (RaceStudio 2's own samples) use other layouts — not read yet.
+
+### Downloading runs from the key (decoded from the recording, Oct 15, 2026)
+
+All download commands are bRequest 0x0D (bmRequestType 0x42) with 9 data
+bytes `[1D][sub][00][addr: 3 bytes LE][00][len: u16 LE]`, followed by a bulk
+read of `len` bytes from 0x82. RS2 first sends the identify sequence (0x0E
+`07 …` + 0x0C BULK_READ 128) and two 128-byte memory reads; then:
+
+- `1D 11`, addr 0, len 4096: the **directory**, 16 bytes per run: model u16
+  (106), logger serial u32, a u32 (timestamp?), `ffffffff`, run index u16.
+- `1D 12`, addr = run index, len 256: the **run header**. +0x00 run number
+  (u16); +136 lap-records address, +140 data address, +144 end address,
+  +150 data length (u32, bytes); serial, model and firmware (`59 32`, BCD)
+  near +120; driver name near +0x13, track near +0x56; best lap in
+  hundredths at +8.
+- `1D 13`, lap-records address, len = data address − lap address:
+  **one 64-byte record per lap**, lap time in hundredths of a second at +4.
+- `1D 14`, data address, len = data length rounded up to 64: the **samples**,
+  u16 LE words: blocks of 10 frames, each block `[0xD0xx marker (not on the
+  first)] [RPM, temp] [logger temp, battery] [RPM, temp] × 9`; the run ends
+  at a `0xD2xx` word (then an end record). A MyChron 4 with an RPM input and
+  one temperature; other configurations not seen yet.
+
+Decoded this way, all 50 runs on a key give exactly the samples RaceStudio
+2 wrote into the matching .drk files (whose last few "samples" are the end
+record misread).

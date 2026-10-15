@@ -12,6 +12,7 @@ mod analysis_ui;
 mod charts_ui;
 mod corners_ui;
 mod sensor_ui;
+mod datakey_ui;
 mod events_page;
 mod garage_ui;
 mod report_ui;
@@ -123,6 +124,7 @@ pub struct App {
     splits: splits_ui::SplitsState,
     corners: corners_ui::CornersState,
     sensors: sensor_ui::SensorState,
+    key: datakey_ui::KeyState,
     charts: charts_ui::ChartsState,
     /// Shared cursor on the compare tab, meters along the reference lap.
     compare_cursor_m: Option<f64>,
@@ -510,6 +512,7 @@ impl eframe::App for App {
                 self.check_downloaded(paths, &id, &ui.ctx().clone());
             }
         }
+        self.key_poll(&ui.ctx().clone());
         self.sensor_dialog(&ui.ctx().clone());
 
         // Put the session back, unless the page opened another one this frame.
@@ -2228,6 +2231,7 @@ impl App {
                 setup_open: false,
             });
         }
+        self.key_panel(ui);
         self.device_status(ui);
         if self.dev_logger.is_some() {
             ui.add_space(14.0);
