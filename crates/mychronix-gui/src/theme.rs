@@ -93,6 +93,8 @@ fastframe_icons::icons! {
         EyeOff => lucide "eye-off",
         CircleCheck => lucide "circle-check",
         Users => lucide "users",
+        Download => "download",
+        CloudOff => "cloud-off",
         TriangleAlert => "triangle-alert",
         House => "house",
         /// A MyChron: its case, screen and two buttons (Mychronix's own, in Lucide's style).

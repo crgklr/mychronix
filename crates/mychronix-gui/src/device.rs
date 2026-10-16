@@ -195,6 +195,7 @@ fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
         .map(|csv| aim_xrk::parse_summary_csv(&String::from_utf8_lossy(&csv)))
         .unwrap_or_default();
     let new_tracks = copy_custom_tracks(&mut logger);
+    copy_track_list(&mut logger);
     Ok((listing, summaries, new_tracks))
 }
 
@@ -224,6 +225,22 @@ fn copy_custom_tracks(logger: &mut Logger) -> usize {
         }
     }
     copied
+}
+
+/// Keeps a copy of the logger's own AiM track list (`0:/tkk/al.ria`), so a
+/// computer that has never been online still knows the tracks by name and
+/// start/finish line. Read only when it isn't saved yet (it's ~340 KB).
+fn copy_track_list(logger: &mut Logger) {
+    let Some(target) = crate::aim_tracks::mychron_list_target() else { return };
+    if target.exists() {
+        return;
+    }
+    if let Ok(bytes) = logger.read_file("0:/tkk/al.ria", |_, _| {}) {
+        if aim_track::parse_ria(&bytes).is_ok_and(|r| !r.is_empty()) {
+            let _ = target.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(&target, bytes);
+        }
+    }
 }
 
 /// Downloads each session (and its `.xri` summary) into `dir`, writing the

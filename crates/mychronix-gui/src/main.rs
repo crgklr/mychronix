@@ -11,6 +11,7 @@
 //! previews the Device page with that logger's downloaded sessions
 //! (`MYCHRONIX_FAKE_DIALOG=1` also opens the download dialog).
 
+mod aim_tracks;
 mod app;
 mod braking;
 mod charts;
