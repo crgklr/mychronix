@@ -131,7 +131,8 @@ pub struct App {
     corners: corners_ui::CornersState,
     sensors: sensor_ui::SensorState,
     key: datakey_ui::KeyState,
-    device_view: device_ui::DeviceView,
+    /// The "Add a MyChron" window, while open.
+    add_mychron: Option<device_ui::AddMyChron>,
     track_pick: Option<track_pick_ui::TrackPick>,
     /// When the last touchscreen touch was seen, and whether touch is in use.
     last_touch: Option<std::time::Instant>,
@@ -2379,6 +2380,15 @@ impl App {
                 setup_open: false,
             });
         }
+        // MYCHRONIX_ADD_MYCHRON=wifi|key opens the "Add a MyChron" window at its steps (for testing).
+        if self.frames < 3 && self.add_mychron.is_none() {
+            match std::env::var("MYCHRONIX_ADD_MYCHRON").as_deref() {
+                Ok("wifi") => self.open_add_mychron(Some(device_ui::Way::Wifi), "MyChron 6"),
+                Ok("key") => self.open_add_mychron(Some(device_ui::Way::DataKey), "MyChron 4"),
+                Ok(_) => self.open_add_mychron(None, ""),
+                Err(_) => {}
+            }
+        }
         self.key_panel(ui);
         if self.dev_logger.is_some() {
             self.device_status(ui);
@@ -2388,6 +2398,9 @@ impl App {
             self.device_guide(ui);
         }
         self.download_dialog(&ctx);
+        if self.dev_dialog.is_none() {
+            self.add_mychron_dialog(&ctx);
+        }
     }
 
     fn logger_dir(&self) -> Option<PathBuf> {
