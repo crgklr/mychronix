@@ -3,6 +3,7 @@
 //!
 //! Sources, first match wins for a given track:
 //! - `~/Mychronix/tracks/**/*.tkk` and `*.ria`
+//! - AiM's database as downloaded from AiM (`~/Mychronix/aim-tracks`, see `aim_tracks`)
 //! - RaceStudio 3's copies, when installed under Wine (`~/.rs3-wine`)
 //! - sessions from `~/Mychronix/sessions/<logger>/a_NNNN.xri`
 
@@ -172,6 +173,9 @@ impl Library {
         }
 
         let mut rias = files_with_ext(&ours, "ria");
+        rias.extend(crate::aim_tracks::list_path());
+        // Before the first download: the list copied from a MyChron (no outlines).
+        rias.extend(crate::aim_tracks::mychron_list_path());
         let rs3_db = rs3.join("aim_tracks/aim_tracks.ria");
         if rs3_db.exists() {
             rias.push(rs3_db);

@@ -188,10 +188,15 @@ to record every frame exchanged with the MyChron. The command-line tool takes
 
 ### AiM track database
 
-The track list comes from RaceStudio 3's own database, which Mychronix doesn't
-ship. It reads it from a RaceStudio 3 install under Wine at `~/.rs3-wine`, or
-from any `.ria` and `.tkk` files you copy into `~/Mychronix/tracks/`. Custom
-tracks learned on your MyChron are copied from the logger automatically.
+The first time Mychronix starts with an internet connection, it downloads AiM's
+track database (about 5,600 tracks with their outlines, ~70 MB, under a minute)
+from AiM's public track server, the same files RaceStudio 3 uses, into
+`~/Mychronix/aim-tracks/`. After that, each start fetches only what AiM has
+added or changed. Offline, Mychronix uses what it already has and tries again
+next time; before the first download, it uses the track list stored on a
+connected MyChron 5/6. Custom tracks learned on your MyChron are copied from the
+logger automatically. `"aim_tracks": false` in `~/Mychronix/settings.json`
+turns the download off.
 
 ### Maps
 

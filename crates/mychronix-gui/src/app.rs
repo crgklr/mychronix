@@ -173,6 +173,13 @@ pub struct App {
     kart_page: usize,
     /// The update check, a newer release found, and its notes window.
     update_rx: Option<std::sync::mpsc::Receiver<crate::update::Release>>,
+    /// AiM's track database being brought up to date, and how far along.
+    aim_tracks_rx: Option<std::sync::mpsc::Receiver<crate::aim_tracks::Event>>,
+    aim_tracks_progress: Option<(usize, usize)>,
+    /// This is the first download of AiM's tracks (not just changes).
+    aim_tracks_first: bool,
+    /// The last try couldn't reach AiM's server.
+    aim_tracks_offline: bool,
     update: Option<crate::update::Release>,
     update_notes: bool,
     measured_ratio: Option<f64>,
@@ -635,6 +642,32 @@ impl App {
 
     /// A thin bar at the top when a newer release is out: what's new, download, dismiss.
     fn update_bar(&mut self, ui: &mut Ui) {
+        // Screenshot runs leave AiM's server alone unless MYCHRONIX_AIM_SYNC=1 (development only).
+        let sync = self.screenshot_to.is_none() || std::env::var_os("MYCHRONIX_AIM_SYNC").is_some();
+        if self.frames == 1 && self.aim_tracks_rx.is_none() && sync {
+            self.aim_tracks_rx = Some(crate::aim_tracks::spawn(ui.ctx().clone()));
+        }
+        while let Some(e) = self.aim_tracks_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            use crate::aim_tracks::Event;
+            match e {
+                Event::List => {
+                    self.aim_tracks_first = true;
+                    self.library = None;
+                }
+                Event::Progress { done, total } => self.aim_tracks_progress = (done < total).then_some((done, total)),
+                Event::Failed { offline } => {
+                    self.aim_tracks_progress = None;
+                    self.aim_tracks_offline = offline;
+                }
+                Event::Finished { changed } => {
+                    self.aim_tracks_progress = None;
+                    self.aim_tracks_offline = false;
+                    if changed > 0 {
+                        self.library = None; // pick up the new tracks and outlines
+                    }
+                }
+            }
+        }
         if self.frames == 1 && self.update_rx.is_none() {
             self.update_rx = Some(crate::update::spawn(ui.ctx().clone()));
         }
@@ -738,6 +771,15 @@ impl App {
                         }
                         if let Some(err) = &self.error {
                             ui.label(RichText::new(err).size(12.0).color(ui.visuals().error_fg_color));
+                        }
+                        // Right to left: count, bar, label, icon.
+                        if let Some((done, total)) = self.aim_tracks_progress {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(format!("{} of {}", group_thousands(done), group_thousands(total))).size(12.0).color(SECONDARY));
+                            progress_bar(ui, 180.0, 6.0, done as f32 / total.max(1) as f32);
+                            let what = if self.aim_tracks_first { "Downloading AiM's tracks" } else { "Updating AiM's tracks" };
+                            ui.label(RichText::new(what).font(medium(12.5)).color(TEXT));
+                            ui.add(Icon::Download.image(TEXT, 14.0));
                         }
                     });
                 });
@@ -1174,12 +1216,16 @@ impl App {
             .color(SECONDARY),
         );
         ui.add_space(18.0);
+        self.aim_tracks_banner(ui, &lib);
 
         if lib.tracks.is_empty() {
-            card(ui, |ui| {
-                ui.label(RichText::new("No tracks found").font(semibold(17.0)).color(TEXT));
-                ui.label(RichText::new("Put AiM track files (.ria, .tkk) in ~/Mychronix/tracks, or install RaceStudio 3 under Wine.").color(SECONDARY));
-            });
+            // The banner above already says why (downloading, or offline).
+            if self.aim_tracks_progress.is_none() && !self.aim_tracks_offline {
+                card(ui, |ui| {
+                    ui.label(RichText::new("No tracks yet").font(semibold(17.0)).color(TEXT));
+                    ui.label(RichText::new("AiM's track database downloads automatically when Mychronix is online, and tracks learned on your MyChron are copied when you connect it.").color(SECONDARY));
+                });
+            }
             self.library = Some(lib);
             return;
         }
@@ -1663,6 +1709,9 @@ impl App {
             self.map_satellite = !self.map_satellite;
         }
         let credit = if self.map_satellite { "Imagery © Esri, Maxar, Earthstar Geographics." } else { "Map data © OpenStreetMap contributors." };
+        // Offline, maps viewed before come from the cache; others draw the track on a blank background.
+        let credit = if self.aim_tracks_offline { format!("{credit}  Offline: maps you haven't viewed before appear once you're online.") } else { credit.to_string() };
+        let credit = credit.as_str();
 
         ui.add_space(6.0);
         match (mode, lap) {
@@ -3849,6 +3898,70 @@ fn section(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         ui.set_width(ui.available_width());
         add(ui)
     });
+}
+
+/// A rounded progress bar, `fraction` 0–1 filled.
+fn progress_bar(ui: &mut Ui, width: f32, height: f32, fraction: f32) {
+    let (r, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let round = CornerRadius::same((height / 2.0) as u8);
+    ui.painter().rect_filled(r, round, SURFACE_ACTIVE);
+    let w = (r.width() * fraction.clamp(0.0, 1.0)).max(height);
+    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(w, height)), round, theme::GOOD);
+}
+
+impl App {
+    /// On the Tracks page: AiM's tracks downloading (with a progress bar), or
+    /// a note when they couldn't be fetched because the computer is offline.
+    fn aim_tracks_banner(&self, ui: &mut Ui, lib: &Library) {
+        let have_list = crate::aim_tracks::list_path().is_some();
+        let (icon, title, detail, progress) = match self.aim_tracks_progress {
+            Some((done, total)) => (
+                Icon::Download,
+                if self.aim_tracks_first { "Downloading AiM's track database" } else { "Updating AiM's track database" },
+                if self.aim_tracks_first {
+                    "First time only: every AiM track with its outline, straight from AiM. Keep using Mychronix meanwhile; from now on it only fetches what changed.".to_string()
+                } else {
+                    "Fetching the tracks AiM added or changed since last time.".to_string()
+                },
+                Some((done, total)),
+            ),
+            None if self.aim_tracks_offline && !have_list => (
+                Icon::CloudOff,
+                "AiM's tracks will download when you're online",
+                if lib.count(Kind::Aim) > 0 {
+                    "Until then, tracks come from your MyChron's own list: names and start/finish lines, without outlines.".to_string()
+                } else {
+                    "Mychronix works offline. Your sessions and custom tracks are all here; AiM's track database downloads the next time Mychronix starts with an internet connection.".to_string()
+                },
+                None,
+            ),
+            _ => return,
+        };
+        Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin::same(18)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(42.0), Sense::hover());
+                ui.painter().rect_filled(r, CornerRadius::same(10), SURFACE_ACTIVE);
+                icon.image(TEXT, 20.0).paint_at(ui, Rect::from_center_size(r.center(), Vec2::splat(20.0)));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.label(RichText::new(title).font(semibold(16.5)).color(TEXT));
+                    ui.label(RichText::new(detail).font(regular(13.5)).color(SECONDARY));
+                    if let Some((done, total)) = progress {
+                        ui.add_space(6.0);
+                        progress_bar(ui, ui.available_width(), 8.0, done as f32 / total.max(1) as f32);
+                        ui.label(
+                            RichText::new(format!("{} of {} tracks  ·  {}%", group_thousands(done), group_thousands(total), done * 100 / total.max(1)))
+                                .font(medium(12.5))
+                                .color(SECONDARY),
+                        );
+                    }
+                });
+            });
+        });
+        ui.add_space(14.0);
+    }
 }
 
 fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
