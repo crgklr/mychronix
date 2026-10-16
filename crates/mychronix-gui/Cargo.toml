@@ -24,6 +24,7 @@ aim-track.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 aim-link.workspace = true
+trash = "5.2.9"
 
 # Linux packages, built by .github/workflows/release.yml (cargo-deb and
 # cargo-generate-rpm). Icons are rendered from the SVG into target/icons first.

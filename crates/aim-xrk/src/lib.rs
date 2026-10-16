@@ -266,11 +266,20 @@ fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
 /// A MyChron's model from the number AiM records in its files, for the
 /// numbers confirmed so far (others: None).
 pub fn mychron_model(model_id: u16) -> Option<&'static str> {
+    if is_mychron4(model_id) {
+        return Some("MyChron 4");
+    }
     match model_id {
-        106 => Some("MyChron 4"),
         720 => Some("MyChron 6"),
         _ => None,
     }
+}
+
+/// AiM's model codes for the MyChron 4 family (RaceStudio 2's logger table):
+/// 101 MyChron 4, 104 MyChron 4 2T, 106 and 107 the same on newer boards,
+/// 59 and 60 the 660 (drag racing), 20001 the 660's European version.
+pub fn is_mychron4(model_id: u16) -> bool {
+    matches!(model_id, 59 | 60 | 101 | 104 | 106 | 107 | 20001)
 }
 
 /// Formats a duration as `m:ss.mmm`, the way lap times are shown on the logger.

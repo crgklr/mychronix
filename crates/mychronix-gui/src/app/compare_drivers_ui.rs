@@ -20,9 +20,15 @@ pub(super) struct DriverPick {
     built: Option<(String, String, Option<aim_xrk::summary::Date>, Option<usize>)>,
 }
 
-/// A library session's driver: the one entered for it, else its MyChron's.
+/// A library session's driver: the one entered for it, else its kart's.
 fn session_driver(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
-    s.meta.as_ref().map(|m| m.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| Some(profiles.for_logger(&s.logger).driver).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("Logger {}", s.logger)))
+    let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
+    s.meta
+        .as_ref()
+        .map(|m| m.driver.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .or_else(|| kart.and_then(|k| profiles.driver_name(k.driver)).map(str::to_string))
+        .unwrap_or_default()
 }
 
 impl App {

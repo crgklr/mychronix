@@ -24,6 +24,8 @@ pub const DIM: Color32 = Color32::from_rgb(0x6e, 0x77, 0x84);
 /// Status "good" (best lap). Reserved: never a channel color; always paired with a label.
 pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xc7, 0x59);
 /// Favorite stars. Not a channel color.
+/// Deleting things: buttons and warnings.
+pub const DANGER: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
 pub const FAVORITE: Color32 = Color32::from_rgb(0xf5, 0xb7, 0x2e);
 /// Text on a `TEXT`-filled control (selected chip, primary button).
 pub const ON_TEXT: Color32 = Color32::from_rgb(0x0f, 0x11, 0x14);
@@ -87,6 +89,10 @@ fastframe_icons::icons! {
         Settings => lucide "settings",
         Plus => lucide "plus",
         Pencil => lucide "pencil",
+        Trash => lucide "trash-2",
+        EyeOff => lucide "eye-off",
+        CircleCheck => lucide "circle-check",
+        Users => lucide "users",
         TriangleAlert => "triangle-alert",
         House => "house",
         /// A MyChron: its case, screen and two buttons (Mychronix's own, in Lucide's style).

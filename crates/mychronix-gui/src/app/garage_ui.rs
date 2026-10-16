@@ -15,7 +15,8 @@ struct DriverRow {
     id: Option<u32>,
     name: String,
     engine: String,
-    loggers: Vec<String>,
+    /// Their sessions: recorded on their karts (see `LocalSession::kart`).
+    sessions: Vec<usize>,
     seat_ms: u64,
     laps: u32,
     days: Vec<aim_xrk::summary::Date>,
@@ -26,29 +27,25 @@ struct DriverRow {
 }
 
 fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
-    let mut groups: Vec<(Option<u32>, String, Vec<&Kart>, Vec<String>)> = profiles
+    // Each driver's numbers come from every MyChron their karts have had
+    // (removed ones too); a MyChron with no home is set up from its own card.
+    let groups: Vec<(Option<u32>, String, Vec<&Kart>, Vec<usize>)> = profiles
         .drivers
         .iter()
         .map(|d| {
-            let karts: Vec<&Kart> = profiles.karts.iter().filter(|k| k.driver == Some(d.id)).collect();
-            let loggers = karts.iter().filter(|k| !k.logger.is_empty()).map(|k| k.logger.clone()).collect();
-            (Some(d.id), d.name.clone(), karts, loggers)
+            let karts: Vec<&Kart> = profiles.garage_karts().filter(|k| k.driver == Some(d.id)).collect();
+            let theirs: Vec<u32> = profiles.karts.iter().filter(|k| k.driver == Some(d.id)).map(|k| k.id).collect();
+            let sessions = (0..lib.sessions.len()).filter(|&i| lib.sessions[i].kart.is_some_and(|k| theirs.contains(&k))).collect();
+            (Some(d.id), d.name.clone(), karts, sessions)
         })
         .collect();
-    // MyChrons on no driver's kart, by logger.
-    let mut others: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).chain(profiles.karts.iter().map(|k| k.logger.clone())).filter(|l| !l.is_empty()).collect();
-    others.sort();
-    others.dedup();
-    for l in others {
-        if !groups.iter().any(|g| g.3.contains(&l)) {
-            groups.push((None, format!("Logger {l}"), profiles.kart_on(&l).into_iter().collect(), vec![l]));
-        }
-    }
     groups
         .into_iter()
-        .map(|(id, name, karts, loggers)| {
-            let engine = karts.iter().map(|k| k.engine.clone()).find(|e| !e.trim().is_empty()).unwrap_or_default();
-            let on: Vec<usize> = (0..lib.sessions.len()).filter(|&i| loggers.contains(&lib.sessions[i].logger) && !events::is_warm_up(&lib.sessions[i].summary)).collect();
+        .map(|(id, name, karts, sessions)| {
+            // Their engine (for the picture): a kart in the Garage, else one they had.
+            let theirs = |k: &&Kart| id.is_some() && k.driver == id;
+            let engine = karts.iter().chain(profiles.karts.iter().filter(theirs).collect::<Vec<_>>().iter()).map(|k| k.engine.clone()).find(|e| !e.trim().is_empty()).unwrap_or_default();
+            let on: Vec<usize> = sessions.iter().copied().filter(|&i| !events::is_warm_up(&lib.sessions[i].summary)).collect();
             let seat_ms = on.iter().map(|&i| lib.sessions[i].summary.duration_ms.unwrap_or(0)).sum();
             let laps = on.iter().map(|&i| lib.sessions[i].summary.laps.unwrap_or(0)).sum();
             let mut per_day: Vec<(aim_xrk::summary::Date, u64)> = Vec::new();
@@ -84,7 +81,7 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
                         .filter_map(|&i| lib.sessions[i].summary.best_lap_ms.map(|b| (t.clone(), b, i)))
                         .min_by_key(|x| x.1)
                 });
-            DriverRow { id, name, engine, loggers, seat_ms, laps, days, per_day, best }
+            DriverRow { id, name, engine, sessions, seat_ms, laps, days, per_day, best }
         })
         .collect()
 }
@@ -98,24 +95,19 @@ struct KartRow {
 }
 
 fn kart_rows(lib: &Library, profiles: &Profiles) -> Vec<KartRow> {
-    let newest = |logger: &str| {
-        (0..lib.sessions.len()).filter(|&i| !logger.is_empty() && lib.sessions[i].logger == logger).max_by_key(|&i| {
+    // Its newest session, from whichever MyChron it had then.
+    let newest = |k: &Kart| {
+        (0..lib.sessions.len()).filter(|&i| lib.sessions[i].kart == Some(k.id)).max_by_key(|&i| {
             let s = &lib.sessions[i].summary;
             (s.date, s.start_time.clone(), s.number)
         })
     };
-    let mut rows: Vec<KartRow> = profiles.karts.iter().map(|k| KartRow { kart: Some(k.clone()), logger: k.logger.clone(), newest: newest(&k.logger) }).collect();
-    let mut loose: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).filter(|l| profiles.kart_on(l).is_none()).collect();
-    loose.sort();
-    loose.dedup();
-    rows.extend(loose.into_iter().map(|l| KartRow { kart: None, newest: newest(&l), logger: l }));
-    rows
+    profiles.garage_karts().map(|k| KartRow { kart: Some(k.clone()), logger: k.logger.clone(), newest: newest(k) }).collect()
 }
 
 /// A driver being added or edited (`driver.id` is 0 for a new one).
 pub(super) struct DriverEdit {
     driver: Driver,
-    confirm_delete: bool,
 }
 
 /// Classes offered while typing, besides those already entered.
@@ -135,7 +127,6 @@ pub(super) struct KartEdit {
     clutch_rpm: String,
     /// Typing an engine that isn't in the list.
     other_engine: bool,
-    confirm_delete: bool,
 }
 
 impl KartEdit {
@@ -154,7 +145,6 @@ impl KartEdit {
                 baseline: k.baseline.clone(),
                 clutch_rpm: k.clutch_rpm.clone(),
                 other_engine: !k.engine.trim().is_empty() && !crate::profiles::is_known_engine(&k.engine),
-                confirm_delete: false,
             },
             None => KartEdit {
                 id: None,
@@ -166,7 +156,6 @@ impl KartEdit {
                 baseline: Setup::default(),
                 clutch_rpm: String::new(),
                 other_engine: false,
-                confirm_delete: false,
             },
         }
     }
@@ -207,7 +196,7 @@ fn avatar(ui: &mut Ui, name: &str, size: f32, color: Color32) {
 
 /// "Logger 12345678", and the kart it's on if that isn't `except`.
 fn logger_label(profiles: &Profiles, logger: &str, except: Option<u32>) -> String {
-    match profiles.kart_on(logger) {
+    match profiles.mounted_on(logger) {
         Some(k) if Some(k.id) != except => format!("Logger {logger} (on {})", k.name),
         _ => format!("Logger {logger}"),
     }
@@ -231,9 +220,14 @@ impl App {
         let kart_sessions: Vec<PathBuf> = lib.sessions.iter().map(|s| s.path.clone()).collect();
         self.want_digests(kart_sessions.into_iter(), &ui.ctx().clone());
         let digests = self.sensors.digests.take().unwrap_or_default();
+        // A MyChron's model: from its WiFi name, else its session summaries
+        // (a MyChron 4's files carry its model code), else their digests.
         let model_of = |logger: &str| -> String {
-            let p = profiles.for_logger(logger).model;
-            if !p.is_empty() { p } else { digests.model(logger).unwrap_or_else(|| "MyChron".into()) }
+            Some(profiles.for_logger(logger).model)
+                .filter(|m| !m.is_empty())
+                .or_else(|| lib.sessions.iter().filter(|s| s.logger == logger).find_map(|s| s.summary.model.clone()))
+                .or_else(|| digests.model(logger))
+                .unwrap_or_else(|| "MyChron".into())
         };
         self.key_poll(&ui.ctx().clone());
         let key = self.key.listing.as_ref().filter(|_| self.key.present && self.key.busy.is_none()).map(|(s, _, n)| (s.clone(), n.len()));
@@ -245,7 +239,7 @@ impl App {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(RichText::new("Garage").font(semibold(28.0)).color(TEXT));
-                let (n, k) = (profiles.drivers.len(), profiles.karts.len());
+                let (n, k) = (profiles.drivers.len(), profiles.garage_karts().count());
                 let days: usize = {
                     let mut d: Vec<_> = drivers.iter().flat_map(|d| d.days.clone()).collect();
                     d.sort();
@@ -260,11 +254,17 @@ impl App {
                     act.go = Some(Page::Device);
                 }
                 if button(ui, Some(Icon::Plus), "Add driver", false).clicked() {
-                    act.edit_driver = Some(DriverEdit { driver: Driver::default(), confirm_delete: false });
+                    act.edit_driver = Some(DriverEdit { driver: Driver::default() });
                 }
             });
         });
         ui.add_space(18.0);
+
+        // MyChrons that need a home: whose they are and which kart.
+        for u in self.unplaced_mychrons(&lib, &profiles) {
+            self.unplaced_card(ui, &u, &model_of(&u.logger));
+            ui.add_space(12.0);
+        }
 
         if drivers.is_empty() {
             ui.label(RichText::new("No drivers yet. Add one, then add their kart and MyChron.").color(SECONDARY));
@@ -326,8 +326,13 @@ impl App {
         self.setup_baselines = Some(baselines);
         self.events = Some(defs);
         self.setup_dialog(ui.ctx());
+        if let Some(c) = act.confirm.take() {
+            self.garage_confirm = Some(c);
+        }
         self.driver_dialog(ui.ctx());
         self.kart_dialog(ui.ctx());
+        self.mychron_setup_dialog(ui.ctx());
+        self.garage_confirm_dialog(ui.ctx());
         if let Some(key) = act.open_event {
             self.event_sel = Some(key);
             self.page = Page::Events;
@@ -347,121 +352,115 @@ impl App {
         let existing = edit.driver.id != 0;
         let name = edit.driver.name.trim().to_string();
         let taken = profiles.drivers.iter().any(|d| d.id != edit.driver.id && d.name.eq_ignore_ascii_case(&name));
-        let karts: Vec<Kart> = profiles.karts.iter().filter(|k| existing && k.driver == Some(edit.driver.id)).cloned().collect();
+        let karts: Vec<Kart> = profiles.garage_karts().filter(|k| existing && k.driver == Some(edit.driver.id)).cloned().collect();
         let mut classes: Vec<String> = profiles.drivers.iter().map(|d| d.class.trim().to_string()).chain(CLASSES.iter().map(|c| c.to_string())).filter(|c| !c.is_empty()).collect();
         let mut seen = std::collections::HashSet::new();
         classes.retain(|c| seen.insert(c.to_lowercase()));
         let today = events::today();
-        let (mut open, mut save, mut cancel, mut delete) = (true, false, false, false);
+        let (mut save, mut cancel, mut delete) = (false, false, false);
         let mut open_kart: Option<KartEdit> = None;
         let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
         let field_w = 360.0;
-        egui::Window::new(RichText::new(if existing { "Driver" } else { "Add driver" }).font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(500.0);
-                egui::Grid::new("driver_edit").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-                    label(ui, "Name");
-                    let field = ui.add(egui::TextEdit::singleline(&mut edit.driver.name).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("e.g. Alex"));
-                    if !existing && edit.driver.name.is_empty() && !field.has_focus() && ui.memory(|m| m.focused().is_none()) {
-                        field.request_focus();
-                    }
-                    ui.end_row();
-                    label(ui, "Class");
-                    suggest_field(ui, "driver_class", &mut edit.driver.class, "e.g. Mini Swift", &classes, field_w);
-                    ui.end_row();
-                    label(ui, "Birthday");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut edit.driver.born).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(170.0).hint_text("3/14/2017"));
-                        let note = match (edit.driver.born.trim().is_empty(), edit.driver.age(today)) {
-                            (true, _) => String::new(),
-                            (false, Some(a)) => format!("age {a}"),
-                            (false, None) => "month/day/year".to_string(),
-                        };
-                        ui.label(RichText::new(note).color(DIM));
-                    });
-                    ui.end_row();
-                    label(ui, "Weight");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut edit.driver.weight_lb).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text("75"));
-                        ui.label(RichText::new("lb in race gear").color(DIM));
-                    });
-                    ui.end_row();
-                });
-                if taken {
-                    ui.label(RichText::new("There's already a driver with that name.").size(12.5).color(theme::FAVORITE));
-                }
-                ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Karts").font(semibold(15.0)).color(TEXT));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // Adds the driver first if they're new.
-                        if small_button(ui, Icon::Plus, "Add kart").clicked() {
-                            open_kart = Some(KartEdit::for_driver(profiles, None, "", Some(edit.driver.id)));
+        let closed = garage_manage_ui::look::dialog(ctx, "driver_edit", 620.0, |ui| {
+            let (title, sub) = if existing { ("Driver", "Their details, and the karts they race.") } else { ("Add driver", "Who's racing? Add their kart next.") };
+            garage_manage_ui::look::header(ui, Icon::User, SECONDARY, None, title, sub);
+            {
+                garage_manage_ui::look::body(ui, |ui| {
+                    egui::Grid::new("driver_edit").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+                        label(ui, "Name");
+                        let field = ui.add(egui::TextEdit::singleline(&mut edit.driver.name).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("e.g. Alex"));
+                        if !existing && edit.driver.name.is_empty() && !field.has_focus() && ui.memory(|m| m.focused().is_none()) {
+                            field.request_focus();
                         }
-                    });
-                });
-                if karts.is_empty() {
-                    let text = if name.is_empty() { "Name them, then add their kart." } else { "None yet." };
-                    ui.label(RichText::new(text).size(12.5).color(DIM));
-                }
-                for k in &karts {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            // Leave room for Edit.
-                            ui.set_max_width(ui.available_width() - 90.0);
-                            ui.spacing_mut().item_spacing.y = 1.0;
-                            ui.label(RichText::new(&k.name).font(medium(15.0)).color(TEXT));
-                            let sub = [k.engine.trim().to_string(), if k.logger.is_empty() { "no MyChron".into() } else { "MyChron on it".into() }]
-                                .into_iter()
-                                .filter(|x| !x.is_empty())
-                                .collect::<Vec<_>>()
-                                .join("  ·  ");
-                            ui.label(RichText::new(sub).size(12.5).color(DIM));
+                        ui.end_row();
+                        label(ui, "Class");
+                        suggest_field(ui, "driver_class", &mut edit.driver.class, "e.g. Mini Swift", &classes, field_w);
+                        ui.end_row();
+                        label(ui, "Birthday");
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut edit.driver.born).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(170.0).hint_text("3/14/2017"));
+                            let note = match (edit.driver.born.trim().is_empty(), edit.driver.age(today)) {
+                                (true, _) => String::new(),
+                                (false, Some(a)) => format!("age {a}"),
+                                (false, None) => "month/day/year".to_string(),
+                            };
+                            ui.label(RichText::new(note).color(DIM));
                         });
+                        ui.end_row();
+                        label(ui, "Weight");
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut edit.driver.weight_lb).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text("75"));
+                            ui.label(RichText::new("lb in race gear").color(DIM));
+                        });
+                        ui.end_row();
+                    });
+                    if taken {
+                        ui.label(RichText::new("There's already a driver with that name.").size(12.5).color(theme::FAVORITE));
+                    }
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Karts").font(semibold(15.0)).color(TEXT));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if small_button(ui, Icon::Pencil, "Edit").clicked() {
-                                open_kart = Some(KartEdit::new(profiles, Some(k), &k.logger));
+                            // Adds the driver first if they're new.
+                            if small_button(ui, Icon::Plus, "Add kart").clicked() {
+                                open_kart = Some(KartEdit::for_driver(profiles, None, "", Some(edit.driver.id)));
                             }
                         });
                     });
-                }
-                ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    if existing {
-                        let label = if edit.confirm_delete { "Yes, delete" } else { "Delete" };
-                        if button(ui, None, label, false).clicked() {
-                            if edit.confirm_delete { delete = true } else { edit.confirm_delete = true }
-                        }
-                        if edit.confirm_delete {
-                            ui.label(RichText::new("Their karts and sessions stay.").size(12.5).color(DIM));
-                        }
+                    if karts.is_empty() {
+                        let text = if name.is_empty() { "Name them, then add their kart." } else { "None yet." };
+                        ui.label(RichText::new(text).size(12.5).color(DIM));
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, Some(Icon::Check), if existing { "Save" } else { "Add" }, true).clicked() {
-                            save = true;
-                        }
-                        if button(ui, None, "Cancel", false).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    for k in &karts {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                // Leave room for Edit.
+                                ui.set_max_width(ui.available_width() - 90.0);
+                                ui.spacing_mut().item_spacing.y = 1.0;
+                                ui.label(RichText::new(&k.name).font(medium(15.0)).color(TEXT));
+                                let sub = [k.engine.trim().to_string(), if k.logger.is_empty() { "no MyChron".into() } else { "MyChron on it".into() }]
+                                    .into_iter()
+                                    .filter(|x| !x.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("  ·  ");
+                                ui.label(RichText::new(sub).size(12.5).color(DIM));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if small_button(ui, Icon::Pencil, "Edit").clicked() {
+                                    open_kart = Some(KartEdit::new(profiles, Some(k), &k.logger));
+                                }
+                            });
+                        });
+                    }
+                });
+            }
+            garage_manage_ui::look::footer_row(ui, |ui| {
+                use garage_manage_ui::look::{Kind, big_button};
+                if existing && big_button(ui, "Delete driver…", Some(Icon::Trash), Kind::Quiet, true) {
+                    delete = true;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if big_button(ui, if existing { "Save" } else { "Add" }, Some(Icon::Check), Kind::Primary, true) {
+                        save = true;
+                    }
+                    if big_button(ui, "Cancel", None, Kind::Quiet, true) {
+                        cancel = true;
+                    }
                 });
             });
+        });
+        let open = !closed;
         let ok = !name.is_empty() && !taken;
         let mut d = edit.driver.clone();
         for f in [&mut d.name, &mut d.class, &mut d.born, &mut d.weight_lb] {
             *f = f.trim().to_string();
         }
-        let changed = if delete {
-            profiles.drivers.retain(|x| x.id != d.id);
-            for k in profiles.karts.iter_mut().filter(|k| k.driver == Some(d.id)) {
-                k.driver = None;
-            }
-            true
-        } else if (save || open_kart.is_some()) && ok {
+        if delete {
+            // Deleting asks twice, in its own window.
+            self.garage_confirm = Some(garage_manage_ui::Confirm::DeleteDriver { id: d.id, sure: false, backed_up: None });
+            return;
+        }
+        let changed = if (save || open_kart.is_some()) && ok {
             // Going to a kart saves the driver first.
             if !existing {
                 d.id = profiles.drivers.iter().map(|x| x.id).max().unwrap_or(0) + 1;
@@ -478,13 +477,11 @@ impl App {
             false
         };
         if changed {
-            log::info!("driver {}: {name}", if delete { "deleted" } else if existing { "saved" } else { "added" });
+            log::info!("driver {}: {name}", if existing { "saved" } else { "added" });
             if let Err(e) = profiles.save() {
                 self.error = Some(format!("Couldn't save the driver: {e}"));
             }
-            if !delete {
-                self.kart_edit = open_kart;
-            }
+            self.kart_edit = open_kart;
         } else if open && !cancel {
             self.driver_edit = Some(edit);
         }
@@ -505,162 +502,165 @@ impl App {
         loggers.dedup();
         let name = edit.name.trim().to_string();
         let taken = profiles.karts.iter().any(|k| Some(k.id) != edit.id && k.name.eq_ignore_ascii_case(&name));
-        let (mut open, mut save, mut cancel, mut delete) = (true, false, false, false);
+        let (mut save, mut cancel, mut delete) = (false, false, false);
         let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
         let field_w = 400.0;
-        egui::Window::new(RichText::new(if edit.id.is_some() { "Kart" } else { "Add kart" }).font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                egui::Grid::new("kart_edit").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-                    label(ui, "Name");
-                    let field = ui.add(egui::TextEdit::singleline(&mut edit.name).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("e.g. Mini Swift Cadet"));
-                    if edit.id.is_none() && edit.name.is_empty() && !field.has_focus() && ui.memory(|m| m.focused().is_none()) {
-                        field.request_focus();
-                    }
-                    ui.end_row();
-                    label(ui, "Engine");
-                    ui.vertical(|ui| {
-                        let shown = if edit.other_engine { "Other engine".to_string() } else if edit.engine.is_empty() { "Choose an engine".to_string() } else { edit.engine.clone() };
-                        egui::ComboBox::from_id_salt("kart_engine")
-                            .selected_text(RichText::new(shown).font(regular(15.0)).color(if edit.engine.is_empty() && !edit.other_engine { DIM } else { TEXT }))
-                            .width(field_w)
-                            .height(420.0)
-                            .show_ui(ui, |ui| {
-                                for (maker, engines) in crate::profiles::ENGINES {
-                                    ui.add_space(4.0);
-                                    ui.label(RichText::new(maker.to_uppercase()).font(semibold(11.0)).color(DIM).extra_letter_spacing(0.6));
-                                    for e in engines {
-                                        if ui.selectable_label(!edit.other_engine && edit.engine.eq_ignore_ascii_case(e), RichText::new(*e).font(regular(14.5))).clicked() {
-                                            edit.engine = e.to_string();
-                                            edit.other_engine = false;
+        let closed = garage_manage_ui::look::dialog(ctx, "kart_edit", 680.0, |ui| {
+            let (title, sub) = if edit.id.is_some() { ("Kart", "Its engine, driver, MyChron and the setup it starts from.") } else { ("Add kart", "Its engine, driver, MyChron and the setup it starts from.") };
+            garage_manage_ui::look::header(ui, Icon::Flag, SECONDARY, None, title, sub);
+            // A tall form: it scrolls when the window is short.
+            let max_h = ui.ctx().content_rect().height() * 0.72;
+            egui::ScrollArea::vertical().min_scrolled_height(max_h).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                garage_manage_ui::look::body(ui, |ui| {
+                    egui::Grid::new("kart_edit").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+                        label(ui, "Name");
+                        let field = ui.add(egui::TextEdit::singleline(&mut edit.name).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("e.g. Mini Swift Cadet"));
+                        if edit.id.is_none() && edit.name.is_empty() && !field.has_focus() && ui.memory(|m| m.focused().is_none()) {
+                            field.request_focus();
+                        }
+                        ui.end_row();
+                        label(ui, "Engine");
+                        ui.vertical(|ui| {
+                            let shown = if edit.other_engine { "Other engine".to_string() } else if edit.engine.is_empty() { "Choose an engine".to_string() } else { edit.engine.clone() };
+                            egui::ComboBox::from_id_salt("kart_engine")
+                                .selected_text(RichText::new(shown).font(regular(15.0)).color(if edit.engine.is_empty() && !edit.other_engine { DIM } else { TEXT }))
+                                .width(field_w)
+                                .height(420.0)
+                                .show_ui(ui, |ui| {
+                                    for (maker, engines) in crate::profiles::ENGINES {
+                                        ui.add_space(4.0);
+                                        ui.label(RichText::new(maker.to_uppercase()).font(semibold(11.0)).color(DIM).extra_letter_spacing(0.6));
+                                        for e in engines {
+                                            if ui.selectable_label(!edit.other_engine && edit.engine.eq_ignore_ascii_case(e), RichText::new(*e).font(regular(14.5))).clicked() {
+                                                edit.engine = e.to_string();
+                                                edit.other_engine = false;
+                                            }
                                         }
                                     }
-                                }
-                                ui.separator();
-                                if ui.selectable_label(edit.other_engine, RichText::new("Other engine").font(regular(14.5))).clicked() {
-                                    edit.other_engine = true;
-                                    edit.engine.clear();
-                                }
-                            });
-                        if edit.other_engine {
-                            ui.add(egui::TextEdit::singleline(&mut edit.engine).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("Maker and model, e.g. TM KZ-R3"));
-                        }
-                    });
-                    ui.end_row();
-                    label(ui, "Clutch");
-                    ui.horizontal(|ui| {
-                        let typical = crate::setup::typical_clutch_rpm(&edit.engine);
-                        ui.add(egui::TextEdit::singleline(&mut edit.clutch_rpm).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text(format!("{typical:.0}")));
-                        ui.label(RichText::new("rpm when it engages").color(DIM));
-                    })
-                    .response
-                    .on_hover_text("Used to work out speed from RPM when there's no GPS. Leave blank for the engine's typical value.");
-                    ui.end_row();
-                    label(ui, "Driver");
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                        for d in &profiles.drivers {
-                            if chip(ui, &d.name, edit.driver == Some(d.id)).clicked() {
-                                edit.driver = Some(d.id);
-                            }
-                        }
-                    });
-                    ui.end_row();
-                    label(ui, "MyChron");
-                    ui.vertical(|ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                            for l in &loggers {
-                                if chip(ui, &logger_label(profiles, l, edit.id), &edit.logger == l).clicked() {
-                                    edit.logger = l.clone();
-                                }
-                            }
-                            if chip(ui, "None", edit.logger.is_empty()).clicked() {
-                                edit.logger.clear();
+                                    ui.separator();
+                                    if ui.selectable_label(edit.other_engine, RichText::new("Other engine").font(regular(14.5))).clicked() {
+                                        edit.other_engine = true;
+                                        edit.engine.clear();
+                                    }
+                                });
+                            if edit.other_engine {
+                                ui.add(egui::TextEdit::singleline(&mut edit.engine).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(field_w).hint_text("Maker and model, e.g. TM KZ-R3"));
                             }
                         });
-                        let hint = match profiles.kart_on(&edit.logger) {
-                            Some(k) if Some(k.id) != edit.id => format!("Saving moves this MyChron from {} to this kart.", k.name),
-                            _ if loggers.is_empty() => "A MyChron shows up here once it's connected or its sessions are downloaded.".to_string(),
-                            _ => "Sessions from this MyChron belong to this kart.".to_string(),
-                        };
-                        ui.label(RichText::new(hint).size(12.5).color(DIM));
+                        ui.end_row();
+                        label(ui, "Clutch");
+                        ui.horizontal(|ui| {
+                            let typical = crate::setup::typical_clutch_rpm(&edit.engine);
+                            ui.add(egui::TextEdit::singleline(&mut edit.clutch_rpm).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text(format!("{typical:.0}")));
+                            ui.label(RichText::new("rpm when it engages").color(DIM));
+                        })
+                        .response
+                        .on_hover_text("Used to work out speed from RPM when there's no GPS. Leave blank for the engine's typical value.");
+                        ui.end_row();
+                        label(ui, "Driver");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                            for d in &profiles.drivers {
+                                if chip(ui, &d.name, edit.driver == Some(d.id)).clicked() {
+                                    edit.driver = Some(d.id);
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        label(ui, "MyChron");
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                                for l in &loggers {
+                                    if chip(ui, &logger_label(profiles, l, edit.id), &edit.logger == l).clicked() {
+                                        edit.logger = l.clone();
+                                    }
+                                }
+                                if chip(ui, "None", edit.logger.is_empty()).clicked() {
+                                    edit.logger.clear();
+                                }
+                            });
+                            let hint = match profiles.mounted_on(&edit.logger) {
+                                Some(k) if Some(k.id) != edit.id => format!("Saving moves this MyChron from {} to this kart.", k.name),
+                                _ if loggers.is_empty() => "A MyChron shows up here once it's connected or its sessions are downloaded.".to_string(),
+                                _ => "Sessions from this MyChron belong to this kart.".to_string(),
+                            };
+                            ui.label(RichText::new(hint).size(12.5).color(DIM));
+                        });
+                        ui.end_row();
                     });
-                    ui.end_row();
-                });
-                if taken {
-                    ui.label(RichText::new("There's already a kart with that name.").size(12.5).color(theme::FAVORITE));
-                }
-                if edit.driver.is_none() {
-                    ui.label(RichText::new("Pick its driver to save it.").size(12.5).color(theme::FAVORITE));
-                }
-                ui.add_space(14.0);
-                ui.label(RichText::new("Baseline setup").font(semibold(15.0)).color(TEXT));
-                ui.label(RichText::new("What it runs before its first setup sheet. Later changes go on the session they were made for.").size(12.5).color(SECONDARY));
-                ui.add_space(8.0);
-                setup_ui::setup_fields(ui, "kart_baseline", &mut edit.baseline, &tires, field_w, false);
-                ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    if edit.id.is_some() {
-                        let label = if edit.confirm_delete { "Yes, delete" } else { "Delete" };
-                        if button(ui, None, label, false).clicked() {
-                            if edit.confirm_delete { delete = true } else { edit.confirm_delete = true }
-                        }
-                        if edit.confirm_delete {
-                            ui.label(RichText::new("Its sessions and setup sheets stay.").size(12.5).color(DIM));
-                        }
+                    if taken {
+                        ui.label(RichText::new("There's already a kart with that name.").size(12.5).color(theme::FAVORITE));
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, Some(Icon::Check), if edit.id.is_some() { "Save" } else { "Add" }, true).clicked() {
-                            save = true;
-                        }
-                        if button(ui, None, "Cancel", false).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    if edit.driver.is_none() {
+                        ui.label(RichText::new("Pick its driver to save it.").size(12.5).color(theme::FAVORITE));
+                    }
+                    ui.add_space(14.0);
+                    ui.label(RichText::new("Baseline setup").font(semibold(15.0)).color(TEXT));
+                    ui.label(RichText::new("What it runs before its first setup sheet. Later changes go on the session they were made for.").size(12.5).color(SECONDARY));
+                    ui.add_space(8.0);
+                    setup_ui::setup_fields(ui, "kart_baseline", &mut edit.baseline, &tires, field_w, false);
                 });
             });
-        let ok = !name.is_empty() && !taken && edit.driver.is_some();
-        let changed = if delete {
-            let id = edit.id.unwrap_or_default();
-            profiles.karts.retain(|k| k.id != id);
-            true
-        } else if save && ok {
-            // A MyChron is on one kart at a time.
-            if !edit.logger.is_empty() {
-                for k in profiles.karts.iter_mut().filter(|k| k.logger == edit.logger && Some(k.id) != edit.id) {
-                    k.logger.clear();
+            garage_manage_ui::look::footer_row(ui, |ui| {
+                use garage_manage_ui::look::{Kind, big_button};
+                if edit.id.is_some() && big_button(ui, "Remove from Garage…", Some(Icon::EyeOff), Kind::Quiet, true) {
+                    delete = true;
                 }
-            }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if big_button(ui, if edit.id.is_some() { "Save" } else { "Add" }, Some(Icon::Check), Kind::Primary, true) {
+                        save = true;
+                    }
+                    if big_button(ui, "Cancel", None, Kind::Quiet, true) {
+                        cancel = true;
+                    }
+                });
+            });
+        });
+        let open = !closed;
+        let ok = !name.is_empty() && !taken && edit.driver.is_some();
+        if delete {
+            // Removing asks twice, in its own window.
+            self.garage_confirm = edit.id.map(|id| garage_manage_ui::Confirm::RemoveKart { id, sure: false });
+            return;
+        }
+        let changed = if save && ok {
             let id = edit.id.unwrap_or_else(|| profiles.next_kart_id());
+            // Its MyChron history stays as it was; the MyChron is changed below.
+            let before = profiles.karts.iter().find(|k| k.id == id).cloned().unwrap_or_default();
             let kart = Kart {
                 id,
                 name: name.clone(),
                 engine: edit.engine.trim().to_string(),
                 driver: edit.driver,
-                logger: edit.logger.clone(),
                 baseline: edit.baseline.carried(),
                 clutch_rpm: edit.clutch_rpm.trim().to_string(),
+                ..before
             };
             match profiles.karts.iter_mut().find(|k| k.id == id) {
                 Some(k) => *k = kart,
                 None => profiles.karts.push(kart),
+            }
+            // A MyChron is on one kart at a time; the ones it replaces keep their sessions so far.
+            let lib = self.library.get_or_insert_with(Library::load);
+            let newest = |l: &str| lib.newest_start(l);
+            if edit.logger.is_empty() {
+                profiles.unmount(id, &newest);
+            } else {
+                profiles.mount(&edit.logger, id, &newest);
             }
             true
         } else {
             false
         };
         if changed {
-            log::info!("kart {}: {name}", if delete { "deleted" } else if edit.id.is_some() { "saved" } else { "added" });
+            log::info!("kart {}: {name}", if edit.id.is_some() { "saved" } else { "added" });
             if let Err(e) = profiles.save() {
                 self.error = Some(format!("Couldn't save the kart: {e}"));
             }
-            // Baselines come from the karts.
+            // Baselines and each session's kart come from the karts.
             self.setup_baselines = None;
+            self.library = None;
         } else if open && !cancel {
             self.kart_edit = Some(edit);
         }
@@ -770,6 +770,7 @@ struct Actions {
     edit_driver: Option<DriverEdit>,
     edit_kart: Option<KartEdit>,
     download_key: bool,
+    confirm: Option<garage_manage_ui::Confirm>,
 }
 
 /// The connected MyChron, if any.
@@ -850,7 +851,9 @@ fn driver_column(
 
     // MyChron.
     heading(ui, "MyChron", None);
-    for logger in &d.loggers {
+    // The MyChrons on their karts now (older ones' sessions still count above and below).
+    let mounted: Vec<String> = profiles.garage_karts().filter(|k| d.id.is_some() && k.driver == d.id && !k.logger.is_empty()).map(|k| k.logger.clone()).collect();
+    for logger in &mounted {
         let on = status.connected.as_deref() == Some(logger.as_str());
         // A MyChron 4 has no WiFi: it downloads through its data key.
         let wifi = model_of(logger) != "MyChron 4";
@@ -883,17 +886,18 @@ fn driver_column(
                     }
                 });
             }
-            if wifi {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
-                        act.go = Some(Page::Device);
-                    }
-                });
-            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if small_button(ui, Icon::X, "Remove").on_hover_text("Take it out of the Garage (its sessions stay)").clicked() {
+                    act.confirm = Some(garage_manage_ui::Confirm::RemoveMyChron { logger: logger.clone(), sure: false });
+                }
+                if wifi && button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
+                    act.go = Some(Page::Device);
+                }
+            });
         });
     }
-    if d.loggers.is_empty() {
-        ui.label(RichText::new("No MyChron yet. Put one on their kart (Edit on the kart) once it's been connected.").size(13.0).color(SECONDARY));
+    if mounted.is_empty() {
+        ui.label(RichText::new("No MyChron yet. A new one shows up at the top of the Garage once it's connected or its sessions are downloaded.").size(13.0).color(SECONDARY));
     }
     ui.add_space(10.0);
 
@@ -931,7 +935,6 @@ fn driver_column(
         .enumerate()
         .filter(|(_, r)| match (&r.kart, d.id) {
             (Some(kart), Some(id)) => kart.driver == Some(id),
-            (None, None) => d.loggers.contains(&r.logger),
             _ => false,
         })
         .collect();
@@ -950,10 +953,10 @@ fn driver_column(
 
     // Last race day: the newest event with this driver's sessions.
     heading(ui, "Last race day", None);
-    let last = all_events.iter().find(|e| e.sessions.iter().any(|&i| d.loggers.contains(&lib.sessions[i].logger)));
+    let last = all_events.iter().find(|e| e.sessions.iter().any(|i| d.sessions.contains(i)));
     match last {
         Some(e) => {
-            let theirs: Vec<usize> = e.sessions.iter().copied().filter(|&i| d.loggers.contains(&lib.sessions[i].logger) && !events::is_warm_up(&lib.sessions[i].summary)).collect();
+            let theirs: Vec<usize> = e.sessions.iter().copied().filter(|&i| d.sessions.contains(&i) && !events::is_warm_up(&lib.sessions[i].summary)).collect();
             let best = theirs.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
             let r = row(ui, false, |ui| {
                 ui.vertical(|ui| {
@@ -1028,11 +1031,9 @@ fn driver_tile(ui: &mut Ui, k: usize, d: &DriverRow, lib: &Library, profiles: &P
     if resp.hovered() && !lap_hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let hint = if d.id.is_some() { "Edit this driver" } else { "Put this MyChron on a kart" };
-    if resp.on_hover_text(hint).clicked() && !lap_hovered {
-        match d.id {
-            Some(id) => act.edit_driver = profiles.drivers.iter().find(|p| p.id == id).map(|p| DriverEdit { driver: p.clone(), confirm_delete: false }),
-            None => act.edit_kart = Some(KartEdit::new(profiles, None, &d.loggers[0])),
+    if resp.on_hover_text("Edit this driver").clicked() && !lap_hovered {
+        if let Some(id) = d.id {
+            act.edit_driver = profiles.drivers.iter().find(|p| p.id == id).map(|p| DriverEdit { driver: p.clone() });
         }
     }
 }

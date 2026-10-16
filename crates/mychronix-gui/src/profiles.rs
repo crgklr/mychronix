@@ -84,6 +84,46 @@ pub struct Kart {
     /// RPM at which the clutch engages, if measured; else the engine's typical one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub clutch_rpm: String,
+    /// MyChrons that were on it before, oldest first: their sessions up to
+    /// when they came off stay this kart's (and its driver's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub past: Vec<PastMyChron>,
+    /// Taken out of the Garage. Its sessions still show it and its setup.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
+}
+
+/// A MyChron a kart had: its sessions recorded up to `until` (the start of
+/// its newest session when it came off, "2026-10-11 02:21:31") are the kart's.
+/// Later ones belong to wherever it went next.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PastMyChron {
+    pub logger: String,
+    pub until: String,
+}
+
+/// A session's start as compared with `PastMyChron::until`: "2026-10-11 02:21:31".
+pub fn stamp(date: Option<aim_xrk::summary::Date>, time: Option<&str>) -> String {
+    match date {
+        Some(d) => format!("{:04}-{:02}-{:02} {}", d.year, d.month, d.day, time.unwrap_or("00:00:00")),
+        None => String::new(),
+    }
+}
+
+impl Kart {
+    /// Every MyChron that has been on it, the current one first.
+    pub fn all_loggers(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.logger).chain(self.past.iter().rev().map(|p| &p.logger)).filter(|l| !l.is_empty())
+    }
+
+    /// Takes its MyChron off; its sessions up to `until` stay this kart's.
+    fn unmount(&mut self, until: String) {
+        let old = std::mem::take(&mut self.logger);
+        if !old.is_empty() {
+            self.past.push(PastMyChron { logger: old, until });
+        }
+    }
 }
 
 /// Racing engines offered when adding a kart, by maker: the ones with a
@@ -189,6 +229,10 @@ pub struct Profiles {
     /// Download defaults by logger id, e.g. "12345678".
     #[serde(default)]
     pub loggers: BTreeMap<String, LoggerProfile>,
+    /// MyChrons put off with "Not now": how many of their sessions had no
+    /// kart then (they're asked about again once there are more).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub snoozed: BTreeMap<String, usize>,
 }
 
 impl Profiles {
@@ -228,7 +272,7 @@ impl Profiles {
                     driver,
                     logger: logger.clone(),
                     baseline: baselines.get(&logger).cloned().unwrap_or_default(),
-                    clutch_rpm: String::new(),
+                    ..Default::default()
                 });
             }
             let entry = self.loggers.get_mut(&logger).unwrap();
@@ -260,9 +304,102 @@ impl Profiles {
         self.drivers.iter().find(|d| d.id == id).map(|d| d.name.as_str())
     }
 
-    /// The kart a logger is mounted on.
+    /// The kart a logger is on, else the last one it was on (removed karts
+    /// included): for when there's no session time to go by.
     pub fn kart_on(&self, logger: &str) -> Option<&Kart> {
-        (!logger.is_empty()).then(|| self.karts.iter().find(|k| k.logger == logger)).flatten()
+        if logger.is_empty() {
+            return None;
+        }
+        self.karts.iter().find(|k| k.logger == logger).or_else(|| self.last_kart_of(logger).map(|(k, _)| k))
+    }
+
+    /// The kart `logger` was last on before, and when it came off.
+    pub fn last_kart_of(&self, logger: &str) -> Option<(&Kart, &str)> {
+        self.karts.iter().flat_map(|k| k.past.iter().filter(|p| p.logger == logger).map(move |p| (k, p.until.as_str()))).max_by(|a, b| a.1.cmp(b.1))
+    }
+
+    /// The kart a session from `logger` that started at `when` (see [`stamp`])
+    /// belongs to: the kart the MyChron was on then. None when it was on no
+    /// kart then (a MyChron that left a kart and came back without one).
+    pub fn kart_for(&self, logger: &str, when: &str) -> Option<&Kart> {
+        if logger.is_empty() {
+            return None;
+        }
+        let current = self.karts.iter().find(|k| k.logger == logger);
+        if when.is_empty() {
+            return current.or_else(|| self.kart_on(logger));
+        }
+        // The earliest time it came off a kart that's not before the session.
+        let mut spans: Vec<(&str, &Kart)> = self.karts.iter().flat_map(|k| k.past.iter().filter(|p| p.logger == logger).map(move |p| (p.until.as_str(), k))).collect();
+        spans.sort_by(|a, b| a.0.cmp(b.0));
+        spans.into_iter().find(|(until, _)| when <= *until).map(|(_, k)| k).or(current)
+    }
+
+    /// The Garage's karts (not removed).
+    pub fn garage_karts(&self) -> impl Iterator<Item = &Kart> {
+        self.karts.iter().filter(|k| !k.removed)
+    }
+
+    /// The kart in the Garage that `logger` is on now.
+    pub fn mounted_on(&self, logger: &str) -> Option<&Kart> {
+        (!logger.is_empty()).then(|| self.garage_karts().find(|k| k.logger == logger)).flatten()
+    }
+
+    /// Whether `logger` has been on one of the karts (now or before).
+    pub fn knows_logger(&self, logger: &str) -> bool {
+        self.karts.iter().any(|k| k.all_loggers().any(|l| l == logger))
+    }
+
+    /// Puts `logger` on kart `kart`. The MyChron it replaces, and the kart
+    /// this MyChron leaves, keep their sessions up to now: `newest(logger)` is
+    /// the start of a MyChron's newest session (see [`stamp`]).
+    pub fn mount(&mut self, logger: &str, kart: u32, newest: &dyn Fn(&str) -> String) {
+        if self.karts.iter().any(|k| k.id == kart && k.logger == logger) {
+            return;
+        }
+        let until = newest(logger);
+        for k in self.karts.iter_mut().filter(|k| k.id != kart && k.logger == logger) {
+            k.unmount(until.clone());
+        }
+        if let Some(k) = self.karts.iter_mut().find(|k| k.id == kart) {
+            let old = k.logger.clone();
+            k.unmount(newest(&old));
+            k.logger = logger.to_string();
+        }
+        self.snoozed.remove(logger);
+    }
+
+    /// Takes kart `kart`'s MyChron off it (its sessions so far stay the kart's).
+    pub fn unmount(&mut self, kart: u32, newest: &dyn Fn(&str) -> String) {
+        if let Some(k) = self.karts.iter_mut().find(|k| k.id == kart) {
+            let until = newest(&k.logger);
+            k.unmount(until);
+        }
+    }
+
+    /// Takes a MyChron out of the Garage: off its kart, whose sessions so
+    /// far it keeps. If it records more, it's asked about again.
+    pub fn remove_logger(&mut self, logger: &str, newest: &dyn Fn(&str) -> String) {
+        let until = newest(logger);
+        for k in self.karts.iter_mut().filter(|k| k.logger == logger) {
+            k.unmount(until.clone());
+        }
+    }
+
+    /// Takes a kart out of the Garage; its sessions keep it.
+    pub fn remove_kart(&mut self, kart: u32) {
+        if let Some(k) = self.karts.iter_mut().find(|k| k.id == kart) {
+            k.removed = true;
+        }
+    }
+
+    /// Deletes a driver and their karts (their sessions are deleted by the caller).
+    pub fn delete_driver(&mut self, driver: u32) {
+        self.drivers.retain(|d| d.id != driver);
+        self.karts.retain(|k| k.driver != Some(driver));
+        let known: Vec<String> = self.karts.iter().flat_map(|k| k.all_loggers().cloned()).collect();
+        self.loggers.retain(|l, _| known.contains(l));
+        self.snoozed.retain(|l, _| known.contains(l));
     }
 
     /// A logger's names and download defaults, blank where unknown.
@@ -282,7 +419,7 @@ impl Profiles {
     /// Remembers what a download was entered as. The logger is now on the kart
     /// named (added if new, with the driver as its usual driver); a kart that
     /// had this logger before no longer does.
-    pub fn note_download(&mut self, logger: &str, driver: &str, kart: &str, championship: &str, track: Option<&str>) {
+    pub fn note_download(&mut self, logger: &str, driver: &str, kart: &str, championship: &str, track: Option<&str>, newest: &dyn Fn(&str) -> String) {
         let entry = self.loggers.entry(logger.to_string()).or_default();
         entry.championship = championship.to_string();
         if let Some(t) = track {
@@ -301,13 +438,9 @@ impl Profiles {
                 self.karts.len() - 1
             }
         };
-        for (j, other) in self.karts.iter_mut().enumerate() {
-            if j != k && other.logger == logger {
-                other.logger.clear();
-            }
-        }
+        let id = self.karts[k].id;
+        self.mount(logger, id, newest);
         let k = &mut self.karts[k];
-        k.logger = logger.to_string();
         if k.driver.is_none() {
             k.driver = driver;
         }
@@ -426,16 +559,82 @@ mod tests {
     #[test]
     fn a_download_moves_the_mychron_to_the_kart_named() {
         let mut p = Profiles::default();
-        p.note_download("1", "Ann", "Cadet", "Club", Some("Club Circuit"));
+        p.note_download("1", "Ann", "Cadet", "Club", Some("Club Circuit"), &|_| String::new());
         assert_eq!(p.kart_on("1").map(|k| k.name.as_str()), Some("Cadet"));
         // Moved to a new kart, driven this time by someone else: the kart keeps no logger,
         // the new kart gets it, and the usual driver of an existing kart isn't changed.
-        p.note_download("1", "Bob", "Spare", "Club", None);
+        p.note_download("1", "Bob", "Spare", "Club", None, &|_| String::new());
         assert_eq!(p.karts[0].logger, "");
         assert_eq!(p.kart_on("1").map(|k| k.name.as_str()), Some("Spare"));
-        p.note_download("1", "Bob", "cadet", "Club", None);
+        p.note_download("1", "Bob", "cadet", "Club", None, &|_| String::new());
         assert_eq!(p.kart_on("1").and_then(|k| p.driver_name(k.driver)), Some("Ann"));
         assert_eq!(p.loggers["1"].track, "Club Circuit");
         assert_eq!(p.drivers.len(), 2);
+    }
+
+    fn two_drivers() -> Profiles {
+        let mut p = Profiles::default();
+        let (a, b) = (p.driver_named("Ann"), p.driver_named("Bo"));
+        p.karts.push(Kart { id: 1, name: "Ann's kart".into(), driver: Some(a), logger: "5555".into(), ..Default::default() });
+        p.karts.push(Kart { id: 2, name: "Bo's kart".into(), driver: Some(b), logger: "4444".into(), ..Default::default() });
+        p
+    }
+
+    /// The newest session start each MyChron had downloaded "so far".
+    fn newest(at: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> String {
+        move |l: &str| at.iter().find(|x| x.0 == l).map(|x| x.1.to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_handed_down_mychron_splits_its_sessions_by_time() {
+        // Ann's MyChron 5 (5555) goes to Bo; Ann gets a 6 (6666), Bo's 4 (4444) retires.
+        let mut p = two_drivers();
+        let so_far = newest(&[("5555", "2026-12-20 10:00:00"), ("4444", "2026-12-21 09:00:00")]);
+        p.mount("6666", 1, &so_far);
+        assert_eq!(p.karts[0].past, [PastMyChron { logger: "5555".into(), until: "2026-12-20 10:00:00".into() }]);
+        // Bo's race with the formatted 5 (before anything was set up) has no kart yet.
+        assert!(p.kart_for("5555", "2026-12-27 11:00:00").is_none());
+        p.mount("5555", 2, &so_far);
+        // Ann's old sessions stay Ann's; the new ones are Bo's; Bo's MyChron 4 stays Bo's.
+        assert_eq!(p.kart_for("5555", "2026-12-20 10:00:00").map(|k| k.id), Some(1));
+        assert_eq!(p.kart_for("5555", "2026-12-27 11:00:00").map(|k| k.id), Some(2));
+        assert_eq!(p.kart_for("4444", "2026-12-21 09:00:00").map(|k| k.id), Some(2));
+        assert_eq!(p.kart_for("6666", "2026-12-28 09:00:00").map(|k| k.id), Some(1));
+    }
+
+    #[test]
+    fn an_old_mychron_on_a_new_kart_of_the_same_driver() {
+        let mut p = two_drivers();
+        let so_far = newest(&[("5555", "2026-12-20 10:00:00")]);
+        p.mount("6666", 1, &so_far);
+        let ann = p.drivers[0].id;
+        p.karts.push(Kart { id: 3, name: "Ann's new kart".into(), driver: Some(ann), ..Default::default() });
+        p.mount("5555", 3, &so_far);
+        assert_eq!(p.kart_for("5555", "2026-12-01 10:00:00").map(|k| k.id), Some(1));
+        assert_eq!(p.kart_for("5555", "2027-01-05 10:00:00").map(|k| k.id), Some(3));
+    }
+
+    #[test]
+    fn removing_hides_but_keeps_the_links() {
+        let mut p = two_drivers();
+        p.remove_kart(1);
+        assert_eq!(p.garage_karts().count(), 1);
+        assert_eq!(p.kart_for("5555", "2026-10-01 10:00:00").map(|k| k.id), Some(1));
+        p.remove_logger("4444", &newest(&[("4444", "2026-10-11 02:21:31")]));
+        assert!(p.mounted_on("4444").is_none());
+        assert_eq!(p.kart_for("4444", "2026-10-11 02:21:31").map(|k| k.id), Some(2));
+        // Anything it records later is asked about.
+        assert!(p.kart_for("4444", "2026-11-01 10:00:00").is_none());
+        assert!(p.knows_logger("4444"));
+    }
+
+    #[test]
+    fn deleting_a_driver_takes_their_karts() {
+        let mut p = two_drivers();
+        let ann = p.drivers[0].id;
+        p.delete_driver(ann);
+        assert_eq!(p.drivers.len(), 1);
+        assert_eq!(p.karts.len(), 1);
+        assert_eq!(p.for_logger("4444").driver, "Bo");
     }
 }

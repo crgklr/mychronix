@@ -91,6 +91,9 @@ pub struct LocalSession {
     pub setup: Option<crate::setup::Setup>,
     /// The weather when it started, once fetched (see `crate::weather`).
     pub weather: Option<crate::weather::Weather>,
+    /// The kart its MyChron was on when it was recorded (see
+    /// `Profiles::kart_for`); None for a MyChron that wasn't on one then.
+    pub kart: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -101,10 +104,30 @@ pub struct Library {
     pub sources: Vec<String>,
 }
 
+impl LocalSession {
+    /// When it started, as `Profiles::kart_for` compares it.
+    pub fn start(&self) -> String {
+        crate::profiles::stamp(self.summary.date, self.summary.start_time.as_deref())
+    }
+}
+
 impl Library {
+    /// Gives each session the kart its MyChron was on when it was recorded.
+    pub fn assign_karts(&mut self, profiles: &crate::profiles::Profiles) {
+        for s in &mut self.sessions {
+            s.kart = profiles.kart_for(&s.logger, &s.start()).map(|k| k.id);
+        }
+    }
+
+    /// The start of a MyChron's newest session here, or "" (see `Profiles::mount`).
+    pub fn newest_start(&self, logger: &str) -> String {
+        self.sessions.iter().filter(|s| s.logger == logger).map(|s| s.start()).max().unwrap_or_default()
+    }
+
     pub fn load() -> Self {
         let started = std::time::Instant::now();
-        let lib = Self::load_inner();
+        let mut lib = Self::load_inner();
+        lib.assign_karts(&crate::profiles::Profiles::load());
         log::info!("library: {} tracks, {} sessions, {} sources, in {:?}", lib.tracks.len(), lib.sessions.len(), lib.sources.len(), started.elapsed());
         log::debug!("library sources: {:?}", lib.sources);
         lib
@@ -244,7 +267,7 @@ impl Library {
             }
             let setup = crate::setup::Setup::load(&xrz);
             let weather = crate::weather::Weather::load(&xrz);
-            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup, weather });
+            lib.sessions.push(LocalSession { path: xrz, logger, summary, track, meta, setup, weather, kart: None });
         }
         // MyChron 4 sessions: RaceStudio 2's .drk and runs downloaded from a
         // data key (.mc4), summarized from the file itself.
@@ -269,7 +292,7 @@ impl Library {
             }
             let setup = crate::setup::Setup::load(&path);
             let weather = crate::weather::Weather::load(&path);
-            lib.sessions.push(LocalSession { path, logger, summary, track, meta, setup, weather });
+            lib.sessions.push(LocalSession { path, logger, summary, track, meta, setup, weather, kart: None });
         }
         for t in &mut lib.tracks {
             t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));

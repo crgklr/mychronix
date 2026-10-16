@@ -113,7 +113,31 @@ fn defs(code: u16) -> &'static [Def] {
     ];
     // The channels expansion.
     const CHANNELS: [Def; 4] = [def(96, 2, 600, "M4ChExp1"), def(97, 2, 600, "M4ChExp2"), def(98, 2, 600, "M4ChExp3"), def(99, 2, 600, "M4ChExp4")];
+    // The 660 (drag racing): 50 Hz, exhaust and head temperatures; the
+    // "Europe" version (20001) has a speed input where the 660 has SHAFT.
+    const M4_660: [Def; 8] = [
+        def(0, 4, 0, "RPM"),
+        def(1, 4, 96, "EGT"),
+        def(2, 0, 45, "LoggerT"),
+        def(3, 0, 68, "Battery"),
+        def(13, 4, 501, "Lambda"),
+        def(15, 4, 91, "LambdaT"),
+        def(19, 4, 96, "CHT"),
+        def(20, 4, 77, "SHAFT"),
+    ];
+    const M4_660_EUROPE: [Def; 8] = [
+        def(0, 4, 0, "RPM"),
+        def(1, 4, 96, "TEMP1"),
+        def(2, 0, 45, "LoggerT"),
+        def(3, 0, 68, "Battery"),
+        def(13, 4, 501, "Lambda"),
+        def(15, 4, 91, "LambdaT"),
+        def(19, 4, 96, "TEMP2"),
+        def(20, 4, 1, "SpdM4"),
+    ];
     match code {
+        59 | 60 => &M4_660,
+        20001 => &M4_660_EUROPE,
         101 | 106 => &M4,
         104 | 107 => &M4_2T,
         102 => &GOLD,
@@ -138,9 +162,9 @@ fn recorded(h: &[u8]) -> Vec<Def> {
         match num {
             0 | 2 | 3 => true,
             1 => b(0x0E) & 2 != 0,
-            19 => matches!(model, 104 | 107) && b(0x0F) & 1 != 0,
-            20 => matches!(model, 101 | 104 | 106 | 107) && flags16 & 0x200 != 0,
-            13 | 15 => firmware > 0x3126 && b(0x10) & 2 != 0,
+            19 => matches!(model, 59 | 60 | 104 | 107) && b(0x0F) & 1 != 0,
+            20 => matches!(model, 59 | 60) || (matches!(model, 101 | 104 | 106 | 107) && flags16 & 0x200 != 0),
+            13 | 15 => (firmware > 0x3126 || matches!(model, 59 | 60)) && b(0x10) & 2 != 0,
             4 => expansion > 101 && b(0x0E) & 1 != 0,
             5 => expansion > 101 && b(0x0E) & 0x80 != 0,
             6 => expansion > 101,
@@ -153,7 +177,9 @@ fn recorded(h: &[u8]) -> Vec<Def> {
             _ => false,
         }
     };
-    let mut codes = vec![model, expansion];
+    // A 660 on newer firmware without bit 0 of byte 0x11 is the Europe version.
+    let base = if matches!(model, 59 | 60) && firmware > 0x4203 && b(0x11) & 1 == 0 { 20001 } else { model };
+    let mut codes = vec![base, expansion];
     if b(0x10) & 0x10 != 0 {
         codes.push(108);
     }
@@ -353,7 +379,7 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
         device: Some("MyChron 4".into()),
         logger_id: u32_at(h, 0x78).filter(|&n| n > 0),
         logger_model_id: u16_at(h, 0x7C),
-        logger_model: Some("MyChron 4".into()),
+        logger_model: u16_at(h, 0x7C).and_then(crate::mychron_model).map(str::to_string),
         vehicle: None,
     };
     if channels.iter().all(|c| c.values.is_empty()) && laps.is_empty() {
@@ -385,6 +411,7 @@ pub fn summary(path: &std::path::Path) -> Result<crate::summary::SessionSummary>
         best_lap_ms: best.map(|l| l.duration_ms() as u64),
         best_lap_number: best.map(|l| l.number as u32),
         max_rpm,
+        model: s.info.logger_model.clone(),
         driver: s.info.driver.clone(),
         ..Default::default()
     })
@@ -535,5 +562,20 @@ mod tests {
         let e = &s.channel("Engine").unwrap().values;
         assert_eq!(e.len(), 40);
         assert_eq!((e[0], e[39]), (7000.0, 7003.0));
+    }
+
+    #[test]
+    fn the_660_samples_at_50_hz() {
+        // A 660 with its exhaust and head temperatures on.
+        let mut h = header(59, 0, 0x02, 0x01, 0, 0);
+        h[0x76..0x78].copy_from_slice(&[0x40, 0x00]); // older firmware: not the Europe version
+        let n = names(&h);
+        assert_eq!(n.iter().filter(|&&c| c == "RPM").count(), 50);
+        assert_eq!(n.iter().filter(|&&c| c == "LoggerT").count(), 1);
+        assert_eq!(&n[..6], &["RPM", "EGT", "LoggerT", "Battery", "CHT", "SHAFT"]);
+        // Newer firmware: the Europe version, with speed instead of SHAFT.
+        let mut h = header(60, 0, 0x02, 0x01, 0, 0);
+        h[0x76..0x78].copy_from_slice(&[0x59, 0x32]);
+        assert!(names(&h).contains(&"SpdM4"));
     }
 }
