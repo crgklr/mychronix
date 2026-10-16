@@ -16,16 +16,19 @@ use crate::tracks::Library;
 
 /// Values are kept as typed ("250", "~10", "10/80"), so nothing typed is lost.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, from = "SetupFile")]
 pub struct Setup {
     /// Clutch (engine) sprocket teeth.
     pub drive_teeth: String,
     /// Rear axle sprocket teeth.
     pub driven_teeth: String,
-    /// e.g. "MG Yellow 10x4.60-5 SM2".
-    /// Older sheets spelled it "tyres".
+    /// Brand and compound, e.g. "MG Yellow SM2".
+    /// Older sheets spelled it "tyres" and put the size in it too.
     #[serde(alias = "tyres")]
     pub tires: String,
+    /// Tire sizes as marked on the sidewall, e.g. "10x4.60-5".
+    pub front_size: String,
+    pub rear_size: String,
     pub front_psi: String,
     pub rear_psi: String,
     /// Kart with driver, lb.
@@ -36,11 +39,67 @@ pub struct Setup {
     pub notes: String,
 }
 
+/// A sheet as stored; older sheets have the tire size inside `tires`, which
+/// loading moves into the size fields.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SetupFile {
+    drive_teeth: String,
+    driven_teeth: String,
+    #[serde(alias = "tyres")]
+    tires: String,
+    front_size: String,
+    rear_size: String,
+    front_psi: String,
+    rear_psi: String,
+    weight_lb: String,
+    ballast_lb: String,
+    jetting: String,
+    notes: String,
+}
+
+impl From<SetupFile> for Setup {
+    fn from(f: SetupFile) -> Self {
+        let mut s = Setup {
+            drive_teeth: f.drive_teeth,
+            driven_teeth: f.driven_teeth,
+            tires: f.tires,
+            front_size: f.front_size,
+            rear_size: f.rear_size,
+            front_psi: f.front_psi,
+            rear_psi: f.rear_psi,
+            weight_lb: f.weight_lb,
+            ballast_lb: f.ballast_lb,
+            jetting: f.jetting,
+            notes: f.notes,
+        };
+        if s.front_size.trim().is_empty() && s.rear_size.trim().is_empty() {
+            if let Some(size) = s.tires.split_whitespace().find(|w| is_tire_size(w)).map(str::to_string) {
+                s.tires = s.tires.split_whitespace().filter(|w| *w != size).collect::<Vec<_>>().join(" ");
+                s.front_size = size.clone();
+                s.rear_size = size;
+            }
+        }
+        s
+    }
+}
+
+/// Whether `w` looks like a kart tire size: "10x4.60-5", "11x7.10-5", "4.50/10.0-5".
+pub fn is_tire_size(w: &str) -> bool {
+    let w = w.to_lowercase();
+    (w.contains('x') || w.contains('/')) && w.contains('-') && w.chars().next().is_some_and(|c| c.is_ascii_digit())
+}
+
+/// Common kart tire sizes, offered in the size fields.
+pub const TIRE_SIZES: [&str; 8] = ["10x4.00-5", "10x4.50-5", "10x4.60-5", "11x5.00-5", "11x6.00-5", "11x6.50-5", "11x7.10-5", "11x7.10-6"];
+
 /// The fields that carry over, with their labels (notes don't).
-const FIELDS: [(&str, fn(&Setup) -> &String); 8] = [
+const FIELDS: [(&str, fn(&Setup) -> &String); 10] = [
     ("Drive sprocket", |s| &s.drive_teeth),
     ("Rear sprocket", |s| &s.driven_teeth),
     ("Tires", |s| &s.tires),
+    ("Front tire size", |s| &s.front_size),
+    ("Rear tire size", |s| &s.rear_size),
     ("Front pressure", |s| &s.front_psi),
     ("Rear pressure", |s| &s.rear_psi),
     ("Weight", |s| &s.weight_lb),
@@ -99,8 +158,15 @@ impl Setup {
             (d, r) if !r.is_empty() => parts.push(format!("{r}T rear{d}")),
             _ => {}
         }
-        if !self.tires.trim().is_empty() {
-            parts.push(t(&self.tires));
+        let sizes = match (t(&self.front_size), t(&self.rear_size)) {
+            (f, r) if !f.is_empty() && f == r => f,
+            (f, r) if !f.is_empty() && !r.is_empty() => format!("{f} / {r}"),
+            (f, r) => format!("{f}{r}"),
+        };
+        match (t(&self.tires), sizes) {
+            (n, z) if !n.is_empty() && !z.is_empty() => parts.push(format!("{n} {z}")),
+            (n, z) if !n.is_empty() || !z.is_empty() => parts.push(format!("{n}{z}")),
+            _ => {}
         }
         match (t(&self.front_psi), t(&self.rear_psi)) {
             (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} psi")),
@@ -122,8 +188,13 @@ impl Setup {
     /// Engine RPM per km/h the gearing and tire size should give with the clutch locked.
     pub fn expected_rpm_per_kmh(&self) -> Option<f64> {
         let ratio = number(&self.driven_teeth)? / number(&self.drive_teeth)?;
-        let circumference_m = std::f64::consts::PI * tire_diameter_in(&self.tires)? * 0.0254;
+        let circumference_m = std::f64::consts::PI * tire_diameter_in(self.rear_tire())? * 0.0254;
         Some(ratio * 1000.0 / 60.0 / circumference_m)
+    }
+
+    /// The rear tire's size (older sheets: the tire text, which held it).
+    pub fn rear_tire(&self) -> &str {
+        if self.rear_size.trim().is_empty() { &self.tires } else { &self.rear_size }
     }
 }
 
@@ -146,6 +217,46 @@ pub fn tire_diameter_in(tires: &str) -> Option<f64> {
     let before = lower[..x].trim_end();
     let start = before.rfind(|c: char| !(c.is_ascii_digit() || c == '.')).map(|i| i + 1).unwrap_or(0);
     before[start..].parse().ok().filter(|d: &f64| (6.0..=16.0).contains(d))
+}
+
+/// Name of the speed channel worked out from RPM, for sessions without GPS.
+pub const SPEED_FROM_RPM: &str = "Speed (from RPM)";
+
+/// Below this the clutch is out (idling or rolling), so RPM says nothing
+/// about speed: about 3,500 rpm on a kart 2-stroke, lower on a 4-stroke.
+pub fn typical_clutch_rpm(engine: &str) -> f64 {
+    let e = engine.to_lowercase();
+    let four_stroke = ["lo206", "briggs", "tillotson", "honda", "predator", "clone", "gx"].iter().any(|k| e.contains(k));
+    if four_stroke { 2200.0 } else { 3500.0 }
+}
+
+/// Whether the engine has a gearbox, so one gearing can't turn RPM into speed.
+pub fn is_shifter(engine: &str) -> bool {
+    let e = engine.to_lowercase();
+    e.contains("shifter") || e.contains("175") || e.contains("kz")
+}
+
+/// A speed channel from engine RPM, the gearing and the rear tire size, for
+/// a session with no GPS speed on a single-gear kart; None without RPM, without
+/// that setup, or for a shifter.
+/// `clutch_rpm`: the kart's own clutch engagement, else the engine's typical one.
+pub fn speed_from_rpm(session: &aim_xrk::Session, setup: &Setup, engine: &str, clutch_rpm: Option<f64>) -> Option<aim_xrk::Channel> {
+    if session.channel("GPS Speed").is_some() || is_shifter(engine) {
+        return None;
+    }
+    let clutch_in = clutch_rpm.unwrap_or_else(|| typical_clutch_rpm(engine));
+    let per_kmh = setup.expected_rpm_per_kmh()?;
+    let rpm = session.channels.iter().find(|c| (c.name == "RPM" || c.name == "Engine") && c.values.len() > 10)?;
+    let values = rpm.values.iter().map(|&r| if r < clutch_in { 0.0 } else { r / per_kmh }).collect();
+    Some(aim_xrk::Channel {
+        name: SPEED_FROM_RPM.into(),
+        group: None,
+        units: "km/h".into(),
+        decimals: 1,
+        interpolate: true,
+        times_ms: rpm.times_ms.clone(),
+        values,
+    })
 }
 
 /// Drive sprocket teeth that would give `rpm_per_kmh` with `driven` teeth on `tires`.
@@ -253,6 +364,15 @@ fn resolve_with(own: &[Option<Setup>], loggers: &[String], order: &[usize], base
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn old_sheets_move_the_tire_size_out_of_the_tires_text() {
+        let s: Setup = serde_json::from_str(r#"{"tires": "MG Yellow 10x4.60-5 SM2", "drive_teeth": "10"}"#).unwrap();
+        assert_eq!((s.tires.as_str(), s.front_size.as_str(), s.rear_size.as_str()), ("MG Yellow SM2", "10x4.60-5", "10x4.60-5"));
+        // New sheets keep what they say.
+        let s: Setup = serde_json::from_str(r#"{"tires": "MG Red", "front_size": "10x4.50-5", "rear_size": "11x7.10-5"}"#).unwrap();
+        assert_eq!((s.tires.as_str(), s.rear_tire()), ("MG Red", "11x7.10-5"));
+    }
+
     use super::*;
 
     fn gearing(drive: &str, driven: &str) -> Setup {

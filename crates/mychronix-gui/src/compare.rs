@@ -25,7 +25,10 @@ pub struct CompareLap {
 
 impl CompareLap {
     pub fn new(path: PathBuf, session: Arc<Session>, lap: Lap, label: String, slot: usize) -> Self {
-        let profile = DistanceProfile::from_gps(&session, &lap);
+        // Positions, else the GPS module's speed (MyChron 4), else speed worked out from RPM.
+        let profile = DistanceProfile::from_gps(&session, &lap)
+            .or_else(|| DistanceProfile::from_channel(&session, &lap, "GPS Speed"))
+            .or_else(|| DistanceProfile::from_channel(&session, &lap, crate::setup::SPEED_FROM_RPM));
         Self { path, session, lap, label, slot, profile }
     }
 }
@@ -46,6 +49,17 @@ impl DistanceProfile {
         let lo = gps.times_ms.partition_point(|&t| t < lap.start_ms);
         let hi = gps.times_ms.partition_point(|&t| t <= lap.end_ms);
         Self::integrate(&gps.times_ms[lo..hi], &gps.speed_kmh[lo..hi], lap.start_ms, lap.end_ms)
+    }
+
+    /// Integrates a speed channel (km/h) over the lap, for sessions without GPS.
+    pub fn from_channel(session: &Session, lap: &Lap, name: &str) -> Option<Self> {
+        let c = session.channel(name)?;
+        let lo = c.times_ms.partition_point(|&t| t < lap.start_ms);
+        let hi = c.times_ms.partition_point(|&t| t <= lap.end_ms);
+        // The app shows speeds in the user's units; integrate in km/h.
+        let to_kmh = if c.units == "mph" { 1.609_344 } else { 1.0 };
+        let kmh: Vec<f64> = c.values[lo..hi].iter().map(|v| v * to_kmh).collect();
+        Self::integrate(&c.times_ms[lo..hi], &kmh, lap.start_ms, lap.end_ms)
     }
 
     /// Trapezoid integration of speed (km/h) sampled at `times_ms`, from

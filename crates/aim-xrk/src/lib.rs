@@ -10,6 +10,9 @@ pub mod checks;
 pub mod drk;
 pub mod mc4;
 pub mod notes;
+pub mod rs2gps;
+mod sensor_table;
+pub mod sensors;
 pub mod summary;
 
 pub use libxrk;
@@ -130,7 +133,10 @@ impl Session {
         let path = path.as_ref();
         let data = std::fs::read(path)?;
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("drk")) {
-            return drk::read(&data);
+            return drk::open(path);
+        }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("imd")) {
+            return mc4::read_imd(&data);
         }
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mc4")) {
             return mc4::read(&data);

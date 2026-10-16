@@ -13,6 +13,9 @@ mod charts_ui;
 mod corners_ui;
 mod sensor_ui;
 mod datakey_ui;
+mod device_ui;
+mod track_pick_ui;
+mod compare_drivers_ui;
 mod events_page;
 mod garage_ui;
 mod report_ui;
@@ -125,11 +128,19 @@ pub struct App {
     corners: corners_ui::CornersState,
     sensors: sensor_ui::SensorState,
     key: datakey_ui::KeyState,
+    device_view: device_ui::DeviceView,
+    track_pick: Option<track_pick_ui::TrackPick>,
+    /// When the last touchscreen touch was seen, and whether touch is in use.
+    last_touch: Option<std::time::Instant>,
+    touch_mode: bool,
     charts: charts_ui::ChartsState,
     /// Shared cursor on the compare tab, meters along the reference lap.
     compare_cursor_m: Option<f64>,
     /// The reference length the compare graphs last showed (as bits), to reset their range.
     compare_window: Option<u64>,
+    /// Compare laps, or one driver's best against another's.
+    compare_mode: compare_drivers_ui::CompareMode,
+    driver_pick: compare_drivers_ui::DriverPick,
     /// Where the icon rail is (for opening it on hover), the session details and channel picker.
     rail_rect: Option<Rect>,
     session_details: bool,
@@ -261,13 +272,38 @@ impl App {
     /// Fills in what the logger leaves blank: the details entered for this
     /// session at download, else the names saved for its logger.
     fn fill_names(&mut self, session: &mut Session, path: &std::path::Path) {
+        // Without GPS, speed from RPM and the session's gearing and tires
+        // (before units are converted, so it's converted with the rest).
+        if session.channel("GPS Speed").is_none() {
+            let lib = self.library.get_or_insert_with(Library::load);
+            if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
+                let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
+                let resolved = crate::setup::resolve(lib, baselines);
+                let logger = lib.sessions[i].logger.clone();
+                let kart = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == logger).cloned();
+                let engine = kart.as_ref().map(|k| k.engine.clone()).unwrap_or_default();
+                let clutch = kart.as_ref().and_then(|k| crate::setup::number(&k.clutch_rpm));
+                if let Some(ch) = resolved.get(i).and_then(|r| crate::setup::speed_from_rpm(session, &r.setup, &engine, clutch)) {
+                    session.channels.push(ch);
+                }
+            }
+        }
         seconds_not_ms(session);
         let blank = |v: &Option<String>| v.as_deref().unwrap_or("").is_empty();
         let nonempty = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
-        if let Some(m) = crate::device::SessionMeta::load(path) {
-            if blank(&session.info.driver) {
-                session.info.driver = nonempty(&m.driver);
-            }
+        let meta = crate::device::SessionMeta::load(path);
+        // The driver entered for this session wins, then the Garage's driver of
+        // the kart this MyChron is on (over the name typed into the logger).
+        let entered = meta.as_ref().and_then(|m| nonempty(&m.driver));
+        let garage = session
+            .info
+            .logger_id
+            .map(|id| self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id.to_string()).driver)
+            .filter(|d| !d.is_empty());
+        if let Some(d) = entered.or(garage) {
+            session.info.driver = Some(d);
+        }
+        if let Some(m) = meta {
             if blank(&session.info.vehicle) {
                 session.info.vehicle = nonempty(&m.kart);
             }
@@ -375,12 +411,61 @@ impl App {
 
     fn open_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("AiM session", &["xrk", "xrz", "XRK", "XRZ"])
+            .add_filter("AiM session", &["xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4"])
+            .add_filter("MyChron 5/6 (.xrk, .xrz)", &["xrk", "xrz", "XRK", "XRZ"])
+            .add_filter("RaceStudio 2 / MyChron 4 (.drk, .imd, .mc4)", &["drk", "imd", "mc4", "DRK", "IMD", "MC4"])
             .pick_file()
         {
+            let path = self.import_rs2(path);
             self.load(path);
         }
     }
+
+    /// A RaceStudio 2 session opened from outside the library is copied into
+    /// it with its companion files (see `import_rs2_files`). Returns the copy
+    /// to open, or `path` as it was.
+    fn import_rs2(&mut self, path: PathBuf) -> PathBuf {
+        let root = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Mychronix").join("sessions");
+        match import_rs2_files(&path, &root) {
+            Ok(Some(copy)) => {
+                self.library = None;
+                copy
+            }
+            Ok(None) => path,
+            Err(e) => {
+                log::warn!("couldn't add {} to the library: {e}", path.display());
+                path
+            }
+        }
+    }
+}
+
+/// Copies a RaceStudio 2 session (`.drk`, `.imd` or `.mc4`) from outside
+/// `root` into `root/<logger serial>/`, with the files RaceStudio 2 keeps
+/// beside it: `.imd` (the raw download), `.gpk` and `.rrk` (GPS positions).
+/// Files already there are kept. None when it isn't one or is already inside.
+fn import_rs2_files(path: &std::path::Path, root: &std::path::Path) -> std::io::Result<Option<PathBuf>> {
+    let rs2 = path.extension().is_some_and(|e| ["drk", "imd", "mc4"].iter().any(|x| e.eq_ignore_ascii_case(x)));
+    if !rs2 || path.starts_with(root) {
+        return Ok(None);
+    }
+    let Ok(session) = Session::open(path) else { return Ok(None) };
+    let folder = root.join(session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "racestudio2".into()));
+    let (Some(dir), Some(stem), Some(name)) = (path.parent(), path.file_stem(), path.file_name()) else { return Ok(None) };
+    let dir = if dir.as_os_str().is_empty() { std::path::Path::new(".") } else { dir };
+    std::fs::create_dir_all(&folder)?;
+    let mut copied = 0;
+    for entry in std::fs::read_dir(dir)? {
+        let p = entry?.path();
+        let companion = p.file_stem() == Some(stem) && p.extension().is_some_and(|e| ["drk", "imd", "gpk", "rrk", "mc4"].iter().any(|x| e.eq_ignore_ascii_case(x)));
+        let to = folder.join(p.file_name().unwrap_or_default());
+        if companion && !to.exists() {
+            std::fs::copy(&p, &to)?;
+            copied += 1;
+        }
+    }
+    log::info!("added {} to the library ({copied} files copied)", path.display());
+    Ok(Some(folder.join(name)))
 }
 
 impl eframe::App for App {
@@ -388,6 +473,19 @@ impl eframe::App for App {
     /// "frame:x,y:dy" scrolls the wheel there by dy points instead (for testing).
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.input_frames += 1;
+        // Touch vs mouse: a touchscreen tap also moves the pointer, so remember
+        // when we last saw a real touch (hover effects stand down for a while).
+        let touched = raw.events.iter().any(|e| matches!(e, egui::Event::Touch { .. }));
+        if touched {
+            self.last_touch = Some(std::time::Instant::now());
+            self.touch_mode = true;
+        } else if self.touch_mode
+            && raw.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_)))
+            && self.last_touch.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(1))
+        {
+            // The mouse moved on its own: hover effects are back.
+            self.touch_mode = false;
+        }
         let Ok(spec) = std::env::var("MYCHRONIX_CLICKS") else { return };
         for item in spec.split(';') {
             let Some((f, xy)) = item.split_once(':') else { continue };
@@ -514,6 +612,7 @@ impl eframe::App for App {
         }
         self.key_poll(&ui.ctx().clone());
         self.sensor_dialog(&ui.ctx().clone());
+        self.track_pick_dialog(&ui.ctx().clone());
 
         // Put the session back, unless the page opened another one this frame.
         if self.session.is_none() {
@@ -609,9 +708,19 @@ impl App {
                             let id = b.logger_id.map(|i| format!("logger {i}")).unwrap_or_else(|| "logger".into());
                             ui.label(RichText::new(format!("MyChron connected  ·  {id}")).size(12.0).color(SECONDARY));
                         }
+                        None if self.key.present => {
+                            ui.add(Icon::Usb.image(theme::GOOD, 14.0));
+                            let text = match (&self.key.busy, &self.key.listing) {
+                                (Some(b), _) => b.clone(),
+                                (None, Some((serial, _, new))) if !new.is_empty() => format!("MyChron 4 data key plugged in  ·  logger {serial}  ·  {} new run{}", new.len(), if new.len() == 1 { "" } else { "s" }),
+                                (None, Some((serial, ..))) => format!("MyChron 4 data key plugged in  ·  logger {serial}  ·  everything downloaded"),
+                                (None, None) => "MyChron 4 data key plugged in".into(),
+                            };
+                            ui.label(RichText::new(text).size(12.0).color(SECONDARY));
+                        }
                         None => {
                             ui.add(Icon::Wifi.image(DIM, 14.0));
-                            ui.label(RichText::new("No logger connected").size(12.0).color(DIM));
+                            ui.label(RichText::new("No MyChron connected").size(12.0).color(DIM));
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1014,6 +1123,32 @@ fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best
         p.text(pos2(r, bottom), egui::Align2::RIGHT_CENTER, facts.join("  ·  "), regular(12.5), DIM);
     }
     response
+}
+
+/// Channels Mychronix works out rather than the logger measuring them.
+pub(super) fn is_calculated(name: &str) -> bool {
+    name == crate::setup::SPEED_FROM_RPM
+}
+
+/// The yellow note under a chart that uses a calculated channel.
+pub(super) fn calculated_note(ui: &mut Ui) {
+    ui.label(
+        RichText::new("Calculated from RPM, gearing and tire size, so it isn't precise (tire wear and clutch slip aren't known).")
+            .size(12.0)
+            .color(theme::FAVORITE),
+    );
+}
+
+/// Channels that measure the same thing under different names on different
+/// loggers (a MyChron 4's "Engine" is a MyChron 6's "RPM").
+const SAME_CHANNEL: [&[&str]; 2] = [&["RPM", "Engine"], &["GPS Speed", crate::setup::SPEED_FROM_RPM]];
+
+/// `session`'s channel `name`, or its equivalent under another name.
+fn same_channel<'a>(session: &'a Session, name: &str) -> Option<&'a aim_xrk::Channel> {
+    session.channel(name).or_else(|| {
+        let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
+        group.iter().find_map(|n| session.channel(n))
+    })
 }
 
 /// "Saturday, October 10, 2026".
@@ -2199,7 +2334,7 @@ impl App {
 
 
         ui.label(RichText::new("Device").font(semibold(28.0)).color(TEXT));
-        ui.label(RichText::new("Your MyChron, its sessions and downloads.").font(regular(14.5)).color(SECONDARY));
+        ui.label(RichText::new("Your MyChrons, how to download from them, and their sessions.").font(regular(14.5)).color(SECONDARY));
         ui.add_space(18.0);
 
         if let Some((ok, msg)) = self.dev_message.clone() {
@@ -2232,10 +2367,12 @@ impl App {
             });
         }
         self.key_panel(ui);
-        self.device_status(ui);
         if self.dev_logger.is_some() {
+            self.device_status(ui);
             ui.add_space(14.0);
             self.device_sessions(ui);
+        } else {
+            self.device_guide(ui);
         }
         self.download_dialog(&ctx);
     }
@@ -2291,7 +2428,7 @@ impl App {
                         ui.add(Icon::Mychron.image(DIM, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("No logger connected").font(semibold(17.0)).color(TEXT));
+                            ui.label(RichText::new("No MyChron found yet").font(semibold(17.0)).color(TEXT));
                             let hint = match &self.dev_busy {
                                 Some(b) => b.clone(),
                                 None => crate::device::JOIN_HINT.into(),
@@ -2321,13 +2458,6 @@ impl App {
                             });
                         }
                     }
-                    ui.add_space(12.0);
-                    hairline(ui);
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.add(Icon::Usb.image(DIM, 16.0));
-                        ui.label(RichText::new("USB (MyChron 4) isn't supported yet.").size(12.5).color(DIM));
-                    });
                 }
             }
         });
@@ -2893,9 +3023,14 @@ impl App {
     }
 
     fn compare_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        // This session's laps, to add or remove with a click.
-        self.lap_strip(ui, session, true);
-        ui.add_space(12.0);
+        self.compare_mode_toggle(ui);
+        if self.compare_mode == compare_drivers_ui::CompareMode::Drivers {
+            self.compare_drivers_bar(ui, session);
+        } else {
+            // This session's laps, to add or remove with a click.
+            self.lap_strip(ui, session, true);
+            ui.add_space(12.0);
+        }
         // Lap chips: color, label, reference marker; click to make reference, × to remove.
         let mut make_ref = None;
         let mut remove = None;
@@ -2922,11 +3057,13 @@ impl App {
                         });
                     });
             }
-            if button(ui, Some(Icon::Flag), "Add best laps at this track", false).clicked() {
-                self.add_best_laps_here(Some(session.clone()));
-            }
-            if !self.compare.is_empty() && button(ui, None, "Clear", false).clicked() {
-                self.compare.clear();
+            if self.compare_mode == compare_drivers_ui::CompareMode::Laps {
+                if button(ui, Some(Icon::Flag), "Add best laps at this track", false).clicked() {
+                    self.add_best_laps_here(Some(session.clone()));
+                }
+                if !self.compare.is_empty() && button(ui, None, "Clear", false).clicked() {
+                    self.compare.clear();
+                }
             }
         });
         if let Some(k) = make_ref {
@@ -2937,6 +3074,7 @@ impl App {
             self.compare.remove(k);
         }
         ui.add_space(12.0);
+        self.compare_calculated_notes(ui);
 
         if self.compare.len() < 2 {
             card(ui, |ui| {
@@ -2990,7 +3128,7 @@ impl App {
                             .compare
                             .iter()
                             .filter_map(|c| {
-                                c.session.channels.iter().find(|ch| &ch.name == name).map(|ch| (c.slot, crate::compare::channel_on_distance(c, ch, ref_len)))
+                                same_channel(&c.session, name).map(|ch| (c.slot, crate::compare::channel_on_distance(c, ch, ref_len)))
                             })
                             .collect();
                         let units = session.channels.iter().find(|c| &c.name == name).map(|c| pretty_units(&c.units).to_string()).unwrap_or_default();
@@ -3183,7 +3321,7 @@ impl App {
     fn analysis(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
         self.session_bar(ui, session);
         ui.add_space(12.0);
-        self.view_tabs(ui);
+        self.view_tabs(ui, session);
         ui.add_space(14.0);
         match self.analysis_view {
             AnalysisView::Compare => {
@@ -3334,8 +3472,9 @@ impl App {
                     if window_changed {
                         plot = plot.reset();
                     }
+                    let calculated = is_calculated(&c.name);
                     let response = plot
-                        .height(ui.available_height())
+                        .height(ui.available_height() - if calculated { 20.0 } else { 0.0 })
                         .show_background(false)
                         .grid_color(GRID)
                         .show_axes([last, true])
@@ -3360,6 +3499,9 @@ impl App {
                             }
                             plot.pointer_coordinate()
                         });
+                    if calculated {
+                        calculated_note(ui);
+                    }
                     // The cursor is kept as time, so the map and readouts follow it either way.
                     if let Some(p) = response.inner {
                         hovered = Some(match &profile {
@@ -3988,7 +4130,7 @@ fn channel_group(c: &Channel) -> &'static str {
 /// Channels shown when a session first opens: ones every MyChron records,
 /// falling back to the first few channels with real data.
 fn default_channels(session: &Session) -> Vec<usize> {
-    const PREFERRED: [&str; 7] = ["RPM", "GPS Speed", "Exhaust Temp", "Speed", "WheelSpeed", "Water Temp", "WT"];
+    const PREFERRED: [&str; 9] = ["RPM", "Engine", "GPS Speed", crate::setup::SPEED_FROM_RPM, "Exhaust Temp", "Speed", "WheelSpeed", "Water Temp", "WT"];
     let mut picks: Vec<usize> = PREFERRED
         .iter()
         .filter_map(|name| session.channels.iter().position(|c| c.name == *name && !is_dead(c)))
@@ -4044,4 +4186,51 @@ fn decimate(c: &Channel, start_ms: i64, end_ms: i64, max: usize) -> Vec<[f64; 2]
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-cycle MyChron 4 run from logger 4242 (`.mc4`).
+    fn mc4() -> Vec<u8> {
+        let mut h = vec![0u8; 256];
+        h[0x0E] = 0x02;
+        h[0x76..0x78].copy_from_slice(&[0x59, 0x32]);
+        h[0x78..0x7C].copy_from_slice(&4242u32.to_le_bytes());
+        h[0x7C..0x7E].copy_from_slice(&106u16.to_le_bytes());
+        h[0x9A..0xA1].copy_from_slice(&[0x00, 0x30, 0x10, 0x19, 0x05, 0x09, 0x26]);
+        let mut lap = vec![0xFFu8; 64];
+        lap[4..8].copy_from_slice(&100u32.to_le_bytes());
+        let words: Vec<u16> = (0..22).map(|k| 5000 + k).collect();
+        let data: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let mut f = b"MC4R".to_vec();
+        f.extend(1u32.to_le_bytes());
+        for part in [&h[..], &lap[..], &data[..]] {
+            f.extend((part.len() as u32).to_le_bytes());
+            f.extend(part);
+        }
+        f
+    }
+
+    #[test]
+    fn importing_a_racestudio_session_brings_its_companions() {
+        let base = std::env::temp_dir().join(format!("mychronix-import-{}", std::process::id()));
+        let (outside, root) = (base.join("RaceStudio2"), base.join("sessions"));
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("run 7.mc4"), mc4()).unwrap();
+        std::fs::write(outside.join("run 7.GPK"), b"gps").unwrap();
+        std::fs::write(outside.join("run 7.rrk"), b"raw").unwrap();
+        std::fs::write(outside.join("run 8.rrk"), b"another run").unwrap();
+        let copy = import_rs2_files(&outside.join("run 7.mc4"), &root).unwrap().unwrap();
+        assert_eq!(copy, root.join("4242").join("run 7.mc4"));
+        let mut got: Vec<String> = std::fs::read_dir(root.join("4242")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        got.sort();
+        assert_eq!(got, ["run 7.GPK", "run 7.mc4", "run 7.rrk"]);
+        // Already in the library: opened where it is.
+        assert_eq!(import_rs2_files(&copy, &root).unwrap(), None);
+        // Not a RaceStudio 2 file.
+        assert_eq!(import_rs2_files(&outside.join("run 8.rrk"), &root).unwrap(), None);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

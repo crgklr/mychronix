@@ -251,7 +251,9 @@ impl Library {
         let sessions_dir = home.join("Mychronix").join("sessions");
         let rs2 = files_with_ext(&sessions_dir, "drk").into_iter().map(|p| (p, true));
         let mc4 = files_with_ext(&sessions_dir, "mc4").into_iter().map(|p| (p, false));
-        for (path, is_drk) in rs2.chain(mc4) {
+        // A RaceStudio 2 raw download (.imd) counts only without its .drk.
+        let imd = files_with_ext(&sessions_dir, "imd").into_iter().filter(|p| !p.with_extension("drk").exists()).map(|p| (p, false));
+        for (path, is_drk) in rs2.chain(mc4).chain(imd) {
             let summary = if is_drk { aim_xrk::drk::summary(&path) } else { aim_xrk::mc4::summary(&path) };
             let Ok(summary) = summary else { continue };
             let session = lib.sessions.len();
