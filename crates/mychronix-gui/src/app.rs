@@ -16,6 +16,7 @@ mod datakey_ui;
 mod device_ui;
 mod track_pick_ui;
 mod compare_drivers_ui;
+mod compare_panel_ui;
 mod events_page;
 mod garage_manage_ui;
 mod garage_ui;
@@ -3147,7 +3148,14 @@ impl App {
             });
             ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
                 ui.set_width(map_w);
-                self.compare_map(ui, &reference);
+                // The map needs the reference lap's GPS; without it, the lap breakdown.
+                let lap = &self.compare[0];
+                let has_map = lap.session.gps.as_ref().is_some_and(|g| g.times_ms.iter().filter(|&&t| t >= lap.lap.start_ms && t <= lap.lap.end_ms).nth(2).is_some());
+                if has_map {
+                    self.compare_map(ui, &reference);
+                } else {
+                    egui::ScrollArea::vertical().id_salt("compare_breakdown").show(ui, |ui| self.compare_breakdown(ui, &reference));
+                }
             });
         });
         if hovered.is_some() {
