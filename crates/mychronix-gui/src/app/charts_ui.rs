@@ -143,6 +143,9 @@ impl App {
                 }
             });
             let bars: Vec<egui_plot::Bar> = main.iter().enumerate().map(|(k, &v)| egui_plot::Bar::new(start + bin * (k as f64 + 0.5), v).width(bin * 0.86)).collect();
+            if super::is_calculated(&c.name) {
+                super::calculated_note(ui);
+            }
             Plot::new(("histogram", c.name.clone()))
                 .height(ui.available_height())
                 .show_background(false)
@@ -247,6 +250,9 @@ impl App {
                     }
                 });
             });
+            if super::is_calculated(&st.x) || super::is_calculated(&st.y) {
+                super::calculated_note(ui);
+            }
             let mut plot = Plot::new(("scatter", st.x.clone(), st.y.clone()))
                 .height(ui.available_height())
                 .show_background(false)

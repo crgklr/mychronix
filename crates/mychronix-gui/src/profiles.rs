@@ -81,6 +81,9 @@ pub struct Kart {
     pub logger: String,
     /// Its setup before its first setup sheet.
     pub baseline: crate::setup::Setup,
+    /// RPM at which the clutch engages, if measured; else the engine's typical one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub clutch_rpm: String,
 }
 
 /// Racing engines offered when adding a kart, by maker: the ones with a
@@ -225,6 +228,7 @@ impl Profiles {
                     driver,
                     logger: logger.clone(),
                     baseline: baselines.get(&logger).cloned().unwrap_or_default(),
+                    clutch_rpm: String::new(),
                 });
             }
             let entry = self.loggers.get_mut(&logger).unwrap();

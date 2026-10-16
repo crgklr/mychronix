@@ -21,7 +21,9 @@ impl App {
     /// out over the page (the page itself doesn't move).
     pub(super) fn rail(&mut self, ctx: &egui::Context, space: Rect) {
         let id = egui::Id::new("rail_open");
-        let hovering = ctx.pointer_hover_pos().is_some_and(|p| self.rail_rect.is_some_and(|r| r.expand(2.0).contains(p)));
+        // Opens on hover with a mouse; with touch it stays narrow, so a tap
+        // goes straight to the page instead of sliding the rail under the finger.
+        let hovering = !self.touch_mode && ctx.pointer_hover_pos().is_some_and(|p| self.rail_rect.is_some_and(|r| r.expand(2.0).contains(p)));
         let t = ctx.animate_bool_with_time(id, hovering, 0.12);
         let width = RAIL_W + (RAIL_OPEN_W - RAIL_W) * t;
         let rect = Rect::from_min_size(space.min, vec2(width, space.height()));
@@ -82,7 +84,9 @@ impl App {
     /// on a second. The full tiles and setup open from "Details".
     pub(super) fn session_bar(&mut self, ui: &mut Ui, session: &Session) {
         let i = &session.info;
-        let title = i.venue.as_deref().filter(|s| !s.is_empty()).unwrap_or("Session").to_string();
+        // The library's track (a chosen one wins over the logger's name).
+        let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
+        let title = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
         let when = match (i.date.as_deref(), i.time.as_deref()) {
             (Some(d), Some(t)) => Some(format!("{d} at {}", t.get(..5).unwrap_or(t))),
             (Some(d), None) => Some(d.to_string()),
@@ -95,7 +99,15 @@ impl App {
             .collect::<Vec<_>>()
             .join("  ·  ");
         ui.horizontal(|ui| {
-            ui.label(RichText::new(title).font(semibold(24.0)).color(TEXT));
+            let t = ui.add(egui::Label::new(RichText::new(title).font(semibold(24.0)).color(TEXT)).sense(Sense::click()));
+            if t.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if t.on_hover_text("Change the track this session was at").clicked() {
+                if let Some(p) = self.path.clone() {
+                    self.open_track_pick(p);
+                }
+            }
             ui.add_space(6.0);
             ui.label(RichText::new(sub).font(regular(14.5)).color(SECONDARY));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -152,7 +164,23 @@ impl App {
     }
 
     /// The analysis views as tabs.
-    pub(super) fn view_tabs(&mut self, ui: &mut Ui) {
+    pub(super) fn view_tabs(&mut self, ui: &mut Ui, session: &Session) {
+        // Views that can't work for this session are grayed out, with why.
+        let gps = session.gps.as_ref().is_some_and(|g| g.len() > 10);
+        let distance = gps || session.channel("GPS Speed").is_some() || session.channel(crate::setup::SPEED_FROM_RPM).is_some();
+        let unavailable = |view: AnalysisView| -> Option<&'static str> {
+            match view {
+                AnalysisView::Splits if !gps => Some("Needs GPS: splits are measured along the track"),
+                AnalysisView::Corners if !gps => Some("Needs GPS: corners are found from the kart's position"),
+                AnalysisView::Compare if !distance => {
+                    Some("Needs GPS, or RPM with the kart's gearing and tire size (set them in the setup), to line laps up by distance")
+                }
+                _ => None,
+            }
+        };
+        if unavailable(self.analysis_view).is_some() {
+            self.analysis_view = AnalysisView::Session;
+        }
         let compare = if self.compare.is_empty() { "Compare".to_string() } else { format!("Compare ({})", self.compare.len()) };
         let tabs = [
             (AnalysisView::Session, Icon::ChartLine, "Graphs".to_string(), "Channels through a lap, with the track map"),
@@ -168,11 +196,12 @@ impl App {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (view, icon, label, hint) in tabs {
                 let selected = self.analysis_view == view;
+                let off = unavailable(view);
                 let galley = ui.painter().layout_no_wrap(label.clone(), medium(14.5), TEXT);
                 let size = vec2(galley.size().x + 50.0, 40.0);
-                let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-                let tint = if selected { TEXT } else if resp.hovered() { TEXT.gamma_multiply(0.85) } else { SECONDARY };
-                if resp.hovered() && !selected {
+                let (rect, resp) = ui.allocate_exact_size(size, if off.is_some() { Sense::hover() } else { Sense::click() });
+                let tint = if off.is_some() { DIM.gamma_multiply(0.6) } else if selected { TEXT } else if resp.hovered() { TEXT.gamma_multiply(0.85) } else { SECONDARY };
+                if resp.hovered() && !selected && off.is_none() {
                     ui.painter().rect_filled(rect.shrink2(vec2(0.0, 4.0)), CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
                 }
                 icon.image(tint, 16.0).paint_at(ui, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), Vec2::splat(16.0)));
@@ -180,6 +209,10 @@ impl App {
                 if selected {
                     let bar = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.5), pos2(rect.right() - 8.0, rect.bottom()));
                     ui.painter().rect_filled(bar, CornerRadius::same(2), TEXT);
+                }
+                if let Some(why) = off {
+                    resp.on_hover_text(why);
+                    continue;
                 }
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

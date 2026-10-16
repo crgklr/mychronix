@@ -64,9 +64,11 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
             per_day.sort_by_key(|x| x.0);
             let days = per_day.iter().map(|x| x.0).collect();
             // The track with the most on-track sessions, and the best lap there.
+            // The library's track (a chosen one wins over the logger's name).
+            let track_of = |i: usize| lib.sessions[i].track.map(|t| lib.tracks[t].name.clone()).or_else(|| lib.sessions[i].summary.track.clone());
             let mut counts: Vec<(String, usize)> = Vec::new();
             for &i in &on {
-                let t = lib.sessions[i].summary.track.clone().unwrap_or_default();
+                let t = track_of(i).unwrap_or_default();
                 match counts.iter_mut().find(|c| c.0 == t) {
                     Some(c) => c.1 += 1,
                     None => counts.push((t, 1)),
@@ -74,11 +76,11 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
             }
             let best = counts
                 .iter()
-                .filter(|(t, _)| on.iter().any(|&i| lib.sessions[i].summary.track.as_deref() == Some(t) && lib.sessions[i].summary.best_lap_ms.is_some()))
+                .filter(|(t, _)| on.iter().any(|&i| track_of(i).as_deref() == Some(t) && lib.sessions[i].summary.best_lap_ms.is_some()))
                 .max_by_key(|c| c.1)
                 .and_then(|(t, _)| {
                     on.iter()
-                        .filter(|&&i| lib.sessions[i].summary.track.as_deref() == Some(t))
+                        .filter(|&&i| track_of(i).as_deref() == Some(t))
                         .filter_map(|&i| lib.sessions[i].summary.best_lap_ms.map(|b| (t.clone(), b, i)))
                         .min_by_key(|x| x.1)
                 });
@@ -130,6 +132,7 @@ pub(super) struct KartEdit {
     driver: Option<u32>,
     logger: String,
     baseline: Setup,
+    clutch_rpm: String,
     /// Typing an engine that isn't in the list.
     other_engine: bool,
     confirm_delete: bool,
@@ -149,6 +152,7 @@ impl KartEdit {
                 driver: k.driver,
                 logger: k.logger.clone(),
                 baseline: k.baseline.clone(),
+                clutch_rpm: k.clutch_rpm.clone(),
                 other_engine: !k.engine.trim().is_empty() && !crate::profiles::is_known_engine(&k.engine),
                 confirm_delete: false,
             },
@@ -160,6 +164,7 @@ impl KartEdit {
                 driver: driver.or((profiles.drivers.len() == 1).then(|| profiles.drivers[0].id)),
                 logger: logger.to_string(),
                 baseline: Setup::default(),
+                clutch_rpm: String::new(),
                 other_engine: false,
                 confirm_delete: false,
             },
@@ -546,6 +551,15 @@ impl App {
                         }
                     });
                     ui.end_row();
+                    label(ui, "Clutch");
+                    ui.horizontal(|ui| {
+                        let typical = crate::setup::typical_clutch_rpm(&edit.engine);
+                        ui.add(egui::TextEdit::singleline(&mut edit.clutch_rpm).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text(format!("{typical:.0}")));
+                        ui.label(RichText::new("rpm when it engages").color(DIM));
+                    })
+                    .response
+                    .on_hover_text("Used to work out speed from RPM when there's no GPS. Leave blank for the engine's typical value.");
+                    ui.end_row();
                     label(ui, "Driver");
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
@@ -623,7 +637,15 @@ impl App {
                 }
             }
             let id = edit.id.unwrap_or_else(|| profiles.next_kart_id());
-            let kart = Kart { id, name: name.clone(), engine: edit.engine.trim().to_string(), driver: edit.driver, logger: edit.logger.clone(), baseline: edit.baseline.carried() };
+            let kart = Kart {
+                id,
+                name: name.clone(),
+                engine: edit.engine.trim().to_string(),
+                driver: edit.driver,
+                logger: edit.logger.clone(),
+                baseline: edit.baseline.carried(),
+                clutch_rpm: edit.clutch_rpm.trim().to_string(),
+            };
             match profiles.karts.iter_mut().find(|k| k.id == id) {
                 Some(k) => *k = kart,
                 None => profiles.karts.push(kart),
@@ -712,7 +734,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add(Icon::Calendar.image(SECONDARY, 16.0));
                     ui.label(RichText::new(date.map(long_date).unwrap_or_else(|| "Unknown date".into())).font(semibold(16.0)).color(TEXT));
-                    let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].summary.track.clone()).collect();
+                    let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track.map(|t| lib.tracks[t].name.clone()).or_else(|| lib.sessions[i].summary.track.clone())).collect();
                     tracks.dedup();
                     ui.label(RichText::new(tracks.join(", ")).color(SECONDARY));
                 });
@@ -1051,7 +1073,15 @@ fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Pro
         };
         let rows: Vec<(&str, String)> = [
             ("Gearing", if s.drive_teeth.trim().is_empty() && s.driven_teeth.trim().is_empty() { String::new() } else { format!("{} / {}", s.drive_teeth.trim(), s.driven_teeth.trim()) }),
-            ("Tires", s.tires.trim().to_string()),
+            ("Tires", [s.tires.trim().to_string(), match (s.front_size.trim(), s.rear_size.trim()) {
+                (f, r) if !f.is_empty() && f == r => f.to_string(),
+                (f, r) if !f.is_empty() && !r.is_empty() => format!("{f} front, {r} rear"),
+                (f, r) => format!("{f}{r}"),
+            }]
+            .into_iter()
+            .filter(|x| !x.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")),
             ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} psi"), (f, r) => format!("{f} / {r} psi") }),
             ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} lb with driver", s.weight_lb.trim()) }),
             ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} lb", s.ballast_lb.trim()) }),

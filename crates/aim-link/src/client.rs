@@ -14,7 +14,9 @@
 //! the PC for data (phase `0x0a01`, used by writes) is refused.
 
 use std::io::{BufReader, ErrorKind, Write};
-use std::net::{SocketAddr, SocketAddrV4, TcpStream};
+use std::net::{SocketAddr, SocketAddrV4, TcpStream, UdpSocket};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::frame::{self, Frame};
@@ -54,7 +56,9 @@ pub struct DirEntry {
 impl DirEntry {
     pub fn is_session(&self) -> bool {
         let lower = self.name.to_ascii_lowercase();
-        lower.ends_with(".xrz") || lower.ends_with(".xrk") || lower.ends_with(".drk")
+        // MyChron 6s also store some sessions as .hrz (format not known yet;
+        // kept as downloaded).
+        lower.ends_with(".xrz") || lower.ends_with(".hrz") || lower.ends_with(".xrk") || lower.ends_with(".drk")
     }
 }
 
@@ -102,6 +106,44 @@ pub fn parse_listing(data: &[u8]) -> Result<Vec<DirEntry>, Error> {
 pub struct Logger {
     reader: BufReader<TcpStream>,
     writer: TcpStream,
+    /// Stops the keepalive thread when the connection is dropped.
+    keepalive: Arc<AtomicBool>,
+}
+
+impl Drop for Logger {
+    fn drop(&mut self) {
+        self.keepalive.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Sends `aim-ka` to the logger about once a second while the connection is
+/// open, as RS3 does: loggers are reported to drop or stall a TCP connection
+/// that goes a second or so without one.
+fn keep_alive(addr: SocketAddr, running: Arc<AtomicBool>) {
+    let target = SocketAddr::new(addr.ip(), crate::discovery::DISCOVERY_PORT);
+    let socket = match UdpSocket::bind(SocketAddr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), 0)) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("keepalive: couldn't open a UDP socket: {e}");
+            return;
+        }
+    };
+    let _ = socket.set_read_timeout(Some(Duration::from_millis(900)));
+    let mut buf = [0u8; 512];
+    let mut quiet = 0;
+    while running.load(Ordering::Relaxed) {
+        let _ = socket.send_to(crate::discovery::PING, target);
+        // Drain the reply; a run of missing replies is the earliest sign of a hung logger.
+        match socket.recv_from(&mut buf) {
+            Ok(_) => quiet = 0,
+            Err(_) => {
+                quiet += 1;
+                if quiet == 5 {
+                    log::warn!("keepalive: no reply from {} for ~5 s", addr.ip());
+                }
+            }
+        }
+    }
 }
 
 impl Logger {
@@ -115,7 +157,12 @@ impl Logger {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        let mut logger = Self { reader: BufReader::new(stream.try_clone()?), writer: stream };
+        let keepalive = Arc::new(AtomicBool::new(true));
+        {
+            let running = keepalive.clone();
+            std::thread::Builder::new().name("aim-ka".into()).spawn(move || keep_alive(addr, running))?;
+        }
+        let mut logger = Self { reader: BufReader::new(stream.try_clone()?), writer: stream, keepalive };
         logger.send(STCP, HELLO.to_vec())?;
         let reply = logger.recv()?;
         if reply.tag != *STCP || reply.payload.len() != 8 {
@@ -152,11 +199,27 @@ impl Logger {
         self.send(STNC, request_body(command, sub, path)?)?;
 
         let mut size = None;
+        let mut stale = 0;
         while size.is_none() {
             let reply = self.recv()?;
             let (phase, len) = reply_phase(&reply)?;
             match phase {
                 PHASE_ACK => {}
+                // A payload staged for another command (another app's
+                // download cut short, or newer firmware's identify bundle):
+                // read it out so the logger moves on, then wait for ours.
+                PHASE_READY if reply_command(&reply).is_some_and(|c| c != (command, sub)) && stale < 3 => {
+                    stale += 1;
+                    log::warn!("{path}: the logger had {len} bytes staged for command {:?}; clearing them", reply_command(&reply));
+                    let mut got = 0u64;
+                    while got < len as u64 {
+                        let chunk = self.pull(got as u32)?;
+                        if chunk.is_empty() {
+                            break;
+                        }
+                        got += chunk.len() as u64;
+                    }
+                }
                 PHASE_READY => size = Some(len as u64),
                 PHASE_SEND_TO_LOGGER => {
                     return Err(Error::Protocol(format!("{path}: the logger asked for data; writes aren't supported")));
@@ -234,7 +297,15 @@ impl Logger {
 }
 
 /// The 64-byte request body, laid out as RS3 sends it.
+/// Commands that erase or reset something on the logger, as (command, group):
+/// delete file, remove folder, empty folder, format media, format data, erase
+/// firmware, reset WiFi. Mychronix only reads, and refuses to build these.
+const DESTRUCTIVE: [(u16, u16); 7] = [(0x06, 0x04), (0x07, 0x04), (0x08, 0x04), (0x09, 0x04), (0x0d, 0x04), (0x1000, 0x05), (0x05, 0x0c)];
+
 fn request_body(command: u16, sub: u16, path: &str) -> Result<Vec<u8>, Error> {
+    if DESTRUCTIVE.contains(&(command, sub)) {
+        return Err(Error::Protocol(format!("refusing destructive command {command:#x}/{sub:#x}")));
+    }
     if path.len() > 31 || !path.is_ascii() {
         return Err(Error::Protocol(format!("path {path:?} must be ASCII and at most 31 bytes")));
     }
@@ -259,9 +330,24 @@ fn reply_phase(reply: &Frame) -> Result<(u16, u32), Error> {
     Ok((u16::from_le_bytes([p[24], p[25]]), u32::from_le_bytes(p[16..20].try_into().unwrap())))
 }
 
+/// The command a reply answers (bytes 8–11, as in the request), if it says.
+fn reply_command(reply: &Frame) -> Option<(u16, u16)> {
+    let p = reply.payload.get(8..12)?;
+    let c = (u16::from_le_bytes([p[0], p[1]]), u16::from_le_bytes([p[2], p[3]]));
+    (c != (0, 0)).then_some(c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destructive_commands_are_refused() {
+        for (c, g) in DESTRUCTIVE {
+            assert!(request_body(c, g, "1:/mem/a_0001.xrz").is_err());
+        }
+        assert!(request_body(cmd::READ_FILE.0, cmd::READ_FILE.1, "1:/mem/a_0001.xrz").is_ok());
+    }
 
     #[test]
     fn request_matches_capture() {

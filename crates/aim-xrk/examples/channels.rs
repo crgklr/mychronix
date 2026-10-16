@@ -1,13 +1,18 @@
-//! Lists a session's channels with units, sample count and range.
-//! `cargo run -p aim-xrk --example channels -- <file.xrk>`
+//! Lists each channel of the given sessions: samples, units and median value.
 fn main() {
-    for path in std::env::args().skip(1) {
-        let s = aim_xrk::Session::open(std::path::Path::new(&path)).expect("open");
-        println!("== {path}");
+    for p in std::env::args().skip(1) {
+        match aim_xrk::Session::open(&p) {
+            Ok(s) => {
+                println!("{}  ({} laps)", p.rsplit('/').next().unwrap(), s.laps.len());
         for c in &s.channels {
-            let (lo, hi) = c.values.iter().fold((f64::MAX, f64::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
-            let changes = c.values.windows(2).any(|w| w[0] != w[1]);
-            println!("{:28} {:8} {:7} samples  {:>10.2} .. {:<10.2}{}", c.name, c.units, c.values.len(), lo, hi, if changes { "" } else { "  (constant)" });
+                    let mut v = c.values.clone();
+                    v.sort_by(|a, b| a.total_cmp(b));
+                    let med = v.get(v.len() / 2).copied().unwrap_or(f64::NAN);
+                    let rate = if c.times_ms.len() > 1 { c.times_ms.len() as f64 * 1000.0 / (c.times_ms[c.times_ms.len() - 1] - c.times_ms[0]).max(1) as f64 } else { 0.0 };
+                    println!("  {:<16} {:>7} samples ~{:>4.0} Hz  median {:>9.2} {}", c.name, c.values.len(), rate, med, c.units);
+                }
+            }
+            Err(e) => println!("{}: {e}", p.rsplit('/').next().unwrap()),
         }
     }
 }

@@ -206,6 +206,31 @@ impl App {
 }
 
 /// The setup fields, as a two-column grid; `notes` adds the session's notes.
+/// A tire size: common kart sizes, or typed.
+fn size_field(ui: &mut Ui, id: &str, value: &mut String, which: &str) {
+    let known = setup::TIRE_SIZES.contains(&value.trim());
+    let other = !value.trim().is_empty() && !known;
+    egui::ComboBox::from_id_salt(id)
+        .width(130.0)
+        .selected_text(RichText::new(if value.trim().is_empty() { "Size".to_string() } else if other { "Other".into() } else { value.clone() }).font(regular(15.0)))
+        .show_ui(ui, |ui| {
+            for s in setup::TIRE_SIZES {
+                if ui.selectable_label(value.trim() == s, s).clicked() {
+                    *value = s.to_string();
+                }
+            }
+            ui.separator();
+            if ui.selectable_label(other, "Other…").clicked() && known {
+                value.clear();
+                value.push(' ');
+            }
+        });
+    if other || value == " " {
+        ui.add(egui::TextEdit::singleline(value).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(100.0).hint_text("e.g. 10x4.60-5"));
+    }
+    ui.label(RichText::new(which).color(DIM));
+}
+
 pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tires: &[String], width: f32, notes: bool) {
     let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
     let small = |ui: &mut Ui, value: &mut String, hint: &str, unit: &str| {
@@ -223,7 +248,14 @@ pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tires: &[String
         });
         ui.end_row();
         label(ui, "Tires");
-        suggest_field(ui, &format!("{id}_tires"), &mut s.tires, "e.g. MG Yellow 10x4.60-5 SM2", tires, width);
+        suggest_field(ui, &format!("{id}_tires"), &mut s.tires, "Brand and compound, e.g. MG Yellow SM2", tires, width);
+        ui.end_row();
+        label(ui, "Tire sizes");
+        ui.horizontal(|ui| {
+            size_field(ui, &format!("{id}_front_size"), &mut s.front_size, "front");
+            ui.add_space(8.0);
+            size_field(ui, &format!("{id}_rear_size"), &mut s.rear_size, "rear");
+        });
         ui.end_row();
         label(ui, "Pressure");
         ui.horizontal(|ui| {
@@ -272,13 +304,13 @@ fn gearing_check(s: &Setup, measured: Option<f64>) -> Option<(bool, String)> {
             if off.abs() < 0.03 {
                 Some((true, format!("RPM and speed are consistent with {}/{} ({:.0} rpm per {unit} measured, {:.0} expected for nominal tire size).", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             } else {
-                let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tires));
+                let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, s.rear_tire()));
                 let hint = implied.map(|t| format!(" With {}T rear that's a {t:.1}-tooth drive.", s.driven_teeth.trim())).unwrap_or_default();
                 Some((false, format!("RPM and speed don't match {}/{}: {:.0} rpm per {unit} measured, {:.0} expected.{hint} Check the sheet.", s.drive_teeth.trim(), s.driven_teeth.trim(), per(m), per(e))))
             }
         }
         None => {
-            let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, &s.tires))?;
+            let implied = setup::number(&s.driven_teeth).and_then(|d| setup::implied_drive_teeth(m, d, s.rear_tire()))?;
             Some((true, format!("RPM and speed suggest a {:.0}-tooth drive sprocket ({implied:.1}) with {}T rear.", implied.round(), s.driven_teeth.trim())))
         }
     }
