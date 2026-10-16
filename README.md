@@ -1,232 +1,249 @@
 # Mychronix
 
-A Linux desktop app for **AiM MyChron** kart data loggers: download sessions
-over WiFi, analyze laps, and browse tracks.
+A free desktop app for **AiM MyChron** kart data loggers on **Linux** and
+**Apple Silicon Macs**: download your sessions, analyze and compare laps, keep
+setup sheets, and follow your season — no Windows and no RaceStudio needed.
 
-Mychronix exists to fill a gap on systems AiM doesn't support, such as Linux.
-It is not meant to replace AiM products or RaceStudio in any way on officially
-supported operating systems; if you're on one of those, use RaceStudio.
+AiM's own software, RaceStudio, runs only on Windows. Mychronix is for the kart
+racers and families who don't use Windows. If you're on Windows, use RaceStudio.
 
 > Mychronix is an independent project. It is not affiliated with, endorsed by
 > or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of
 > AiM Tech Srl.
 
-## Status
+## Which MyChrons work
 
-Early, and built around one MyChron 6 and the features its owners use. What
-works today:
+| MyChron | How it downloads | Status |
+|---|---|---|
+| **MyChron 6, 6T** | Over the MyChron's own WiFi | Works; tested on a MyChron 6 |
+| **MyChron 5, 5S, 5 2T, 5S 2T** | Over WiFi, the same way | Expected to work; not yet tested on one |
+| **MyChron 4, 4 2T, 4 660** | With AiM's USB data key | Works; tested on a MyChron 4 with the key |
+| MyChron 4 with an expansion box or CAN devices | Data key | Read the way RaceStudio 2 reads them; not yet tested on hardware |
+| MyChron 3 | Serial cable | Not supported yet |
 
-- **Download** sessions from a MyChron 5/6 over its WiFi, including joining the
-  logger's network from the app, with RaceStudio-style session details
-  (driver, kart, championship, session type, track, comment).
-- **Garage:** the home page. Your MyChrons and whether they're connected,
-  seat time per driver, and each kart with the setup it's running. Add and
-  edit drivers and karts there: a kart has its engine, usual driver, the
-  MyChron mounted on it and a baseline setup.
-- **Sessions:** every downloaded session by race day, with best laps, named
-  after the kart its MyChron is on.
-- **Analysis:** channels over time or distance with a shared cursor and the
-  track map colored by any channel; every lap as a strip across the top (best
-  lap matching the logger's own, out/in and slow laps dimmed); channels added
-  from a grouped picker (engine, movement, lap timing, logger), with the
-  MyChron's timing channels in seconds and unused ones hidden.
-- **Lap by lap** (RaceStudio's channels report): one row per lap with chosen statistics (RPM, speed, EGT,
-  lateral and braking g by default; presets for engine and driving), max/min/
-  average/std dev over the laps you tick, and any column graphed by lap.
-- **Splits** (RaceStudio's split times report): each lap's time through 2–8
-  splits, shown as times or against the best split or best lap, each split or
-  running total, shaded fastest to slowest; best theoretical and best rolling
-  laps; average, median, slowest and std dev; per-split details (speed through
-  it, time and distance driven by lap) and a map of every lap through it.
-- **Histogram:** time spent in each band of a channel (RPM, speed, EGT, g) for
-  a lap or every racing lap, as % of time or seconds, with the best lap
-  outlined for comparison.
-- **Scatter:** one channel against another, optionally colored by a third:
-  RPM against speed with the setup sheet's gearing drawn as a line, and the
-  G-G diagram on a circular grid.
-- **Lap comparison:** overlay up to eight laps from any sessions, lined up by
-  distance around the track, with the time gap to a reference lap and a map of
-  where time is gained and lost.
-- **Events:** sessions grouped into events as RaceStudio does (week, track and
-  championship), plus events you name or plan ahead. Each driver's sessions,
-  laps, time on track, fastest lap, peak RPM and EGT and top speed, best lap
-  through the event, and a season summary per championship. Engine warm-ups
-  are listed but left out of the numbers.
-- **Session notes and sensor check:** each session opens with what stands out
-  across its racing laps (lap times trending up or down, consistency,
-  temperatures climbing), and after a download Mychronix warns about sensors
-  that stopped recording (an RPM wire left off), only for sensors that have
-  worked before on that MyChron.
-- **Weather:** the air temperature, humidity and pressure at the track when
-  each session started, shown with its setup, from
-  [Open-Meteo](https://open-meteo.com) (only the track position and date are
-  sent; `"weather": false` in `~/Mychronix/settings.json` turns it off).
-- **MyChron 4 data key:** plug the key into the computer and Mychronix lists
-  its runs and downloads the new ones (Device page, or the MyChron 4's row in
-  the Garage). It only reads from the key; nothing on the key or the logger
-  is changed. RaceStudio 2's `.drk` files open too. On Linux the `.deb` and
-  `.rpm` install a udev rule so the key works without root; with the AppImage
-  or tarball, install it once:
-  `sudo cp share/mychronix/70-mychronix-aim.rules /etc/udev/rules.d/ && sudo udevadm control --reload`
-  (the tarball has it; for the AppImage, see `packaging/linux/` in the source).
-- **Update check:** once a day Mychronix asks GitHub whether a newer release
-  is out and, if so, offers what's new and a download link. Nothing installs
-  by itself; `"update_check": false` in `~/Mychronix/settings.json` turns it off.
-- **Setup sheets:** gearing, tires and pressures, weight and ballast, jetting
-  and notes per session, as RaceStudio's log sheets. A session without its own
-  sheet uses the previous one (the first uses the kart's baseline), changes are flagged on the session and the
-  event, and the gearing is checked against RPM and GPS speed.
-- **Tracks:** AiM's track database by country with venue details, outlines,
-  elevation, favorites, your speed on the track with braking points, splits
-  with sector times and an ideal lap, map or satellite view.
+Mychronix only ever **reads** from your MyChron and data key. It never changes
+settings, deletes sessions or updates firmware.
 
-Mychronix only ever reads from the logger.
+## What it does
 
-## To do
+- **Download** from your MyChron. Add it from the Device page and Mychronix walks
+  you through connecting: over WiFi it can join the MyChron's network for you
+  (on Linux), and with the data key it finds the key when you plug it in. New
+  sessions are offered for download with RaceStudio-style details (driver, kart,
+  championship, session type, track, comment). Nothing already downloaded is
+  ever overwritten.
+- **Garage** (the home page): your drivers, their karts and the MyChron on each,
+  seat time and race days. A new MyChron gets a card asking whose it is and which
+  kart it goes on. MyChrons can move between karts and drivers (handed down to a
+  younger sibling, say) and every session stays with the kart it was recorded on.
+- **Sessions**: everything by race day, with best laps and lap-time sparklines.
+  Filter by dates (presets or a calendar that marks your race days), drivers,
+  tracks and timed laps; search by anything.
+- **Analysis**: channels over time or distance on a shared cursor, a track map
+  colored by any channel, every lap as a strip across the top.
+- **Lap by lap**, **Splits**, **Corners**, **Histogram** and **Scatter**
+  (RPM against speed with your gearing drawn in, the G-G diagram).
+- **Compare** laps, or each driver's best lap at a track, lined up by distance,
+  with the time gap and where time was won and lost.
+- **Speed without GPS**: worked out from RPM, gearing and rear tire size (marked
+  wherever it's used, since it can't be exact), so a MyChron without GPS still
+  gets corners and comparisons.
+- **Events**: sessions grouped by week, track and championship, as RaceStudio
+  does, plus events you plan ahead; a season summary per championship.
+- **Setup sheets**: gearing, tires and pressures, weight and ballast, jetting
+  and notes per session (and each kart's clutch engagement in the Garage); each session inherits the last one and changes
+  are flagged.
+- **Session notes and sensor check**: what stands out across a session's laps,
+  and a warning when a sensor that has worked before stops recording.
+- **Tracks**: AiM's track database (about 5,600 tracks with outlines, details and
+  logos), your custom tracks, maps and satellite views, favorites.
+- **Weather** at the track when each session started.
+- **Works offline.** At the track with no signal, everything you've downloaded is
+  there; anything that needs the internet waits until you're back online.
 
-Roughly in priority order.
+## Install
 
-- [ ] **MyChron 4:** read its sessions through AiM's data key (CAN-to-USB on the 5-pin Binder connector); compare laps
-      timed by the infrared beacon (no GPS) along time instead of distance.
-- [ ] **Live device test:** confirm joining, listing, downloading and
-      disconnecting from the Device page end to end on a MyChron 6.
-- [ ] **Session details after download:** edit driver, kart, championship,
-      session type and comment for one or many sessions; filter by session
-      type.
-- [ ] **Import, export and delete sessions:** add `.xrk`/`.xrz` files or folders
-      from elsewhere (e.g. a friend's data); export copies; remove sessions.
-- [ ] **Laps preview** on the Sessions page: lap times for the selected session
-      and a lap-time-by-lap graph, without opening it.
-- [ ] **Analysis by distance:** a time/distance switch for the Session tab's
-      graphs; quick lap picks (best 1/3/5, first or last laps); drag a range to
-      read the time and channel change across it; min/max/average per
-      channel.
-- [ ] **Lap comparison, more:** the time-change map for every compared lap, not
-      just the second; a "differential" view beside the gap; a time-based mode
-      for laps without GPS.
-- [ ] **Split divisions:** by corners and straights, or the track's official
-      splits; rename, divide, merge and drag splits; saved per track. Split
-      bands over the distance graphs, double-click to zoom into one.
-- [ ] **Tracks:** make a custom track from a session's lap; import and export
-      `.tkk` files; show the track's local time and time zone.
-- [ ] **Device information:** firmware version, the tracks stored on the
-      logger, and its counters (odometers), all read-only.
-- [ ] **Export:** sessions and laps to CSV.
-- [ ] **Writing to the logger** (custom tracks, settings), only once that part
-      of the protocol is properly understood. Firmware updates are out of scope.
-- [ ] **MyChron 5:** confirm it works the same as the 6 over WiFi.
-- [ ] **GPS timing on older loggers:** RaceStudio places GPS ~70 ms apart from
-      the other channels on an early MyChron 5 sample (0 ms on a MyChron 6).
-      Probably re-timing by the GPS receiver's clock; see "GPS timing against
-      the other channels" in `docs/protocol-notes.md`.
-- [ ] **Packaging:** a Flatpak or similar so installing doesn't need Rust.
+Download the latest release from the
+[Releases page](https://github.com/crgklr/mychronix/releases).
 
-## Install (Linux)
-
-Each release on GitHub has downloads for most Linux systems:
+### Linux
 
 | Download | For |
 |---|---|
-| `Mychronix-<version>-x86_64.AppImage` | Any distro, no install: mark it executable and double-click. |
+| `Mychronix-<version>-x86_64.AppImage` | Any distribution, no install: make it executable and double-click it. |
 | `mychronix_<version>-1_amd64.deb` | Ubuntu, Debian, Mint, Pop!_OS: `sudo apt install ./mychronix_*.deb` |
 | `mychronix-<version>-1.x86_64.rpm` | Fedora, openSUSE: `sudo dnf install ./mychronix-*.rpm` |
 | `mychronix-<version>-x86_64.tar.gz` | Anything else: unpack and run `bin/mychronix-gui`. |
 
-They're built on Ubuntu 22.04, so they run on that and newer (glibc 2.35+:
-Debian 12, Fedora 36, Mint 21 and later). Joining the MyChron's WiFi from the
-app uses NetworkManager, which nearly every desktop distro has; without it,
-join the MyChron's network yourself and everything else works.
+They run on Ubuntu 22.04 and newer, or any distribution from 2022 on (glibc
+2.35+: Debian 12, Fedora 36, Mint 21 and later). Joining the MyChron's WiFi
+from inside the app uses NetworkManager, which nearly every desktop has; without
+it, join the MyChron's network yourself and everything else works.
 
-`scripts/package-linux.sh` builds the same downloads locally (see the script
-for what it needs); `.github/workflows/release.yml` runs it for each `v*` tag.
-
-## Install (Mac)
-
-For Apple Silicon Macs (M1 and later) on macOS 11 or newer: download
-`Mychronix-<version>-arm64.dmg` from a release, open it and drag Mychronix into
-Applications.
-
-Mychronix isn't signed with an Apple Developer ID, so the first launch shows
-"Apple could not verify…". Click Done, open System Settings → Privacy &
-Security, and click **Open Anyway** next to Mychronix. Once per version.
-
-On a Mac, join the MyChron's WiFi (AiM-MYC…) from the menu bar yourself (macOS
-doesn't let apps list WiFi networks without Location access); Mychronix finds
-the logger once you're on it. If macOS asks to let Mychronix find devices on
-your local network, allow it. The `mychronix` command-line tool is inside the
-app at `Mychronix.app/Contents/MacOS/mychronix`. Logs go to
-`~/Library/Logs/Mychronix`; your data is in `~/Mychronix` as on Linux.
-
-### Build from source
-
-Needs Rust (via [rustup](https://rustup.rs)), a C compiler, and ImageMagick for
-the icons. WiFi joining uses NetworkManager (`nmcli`).
+**MyChron 4 data key:** Linux needs AiM's USB rule to let Mychronix read the
+key without root. The `.deb` and `.rpm` install it. With the AppImage or the
+tarball, install it once (the tarball includes the file; for the AppImage it's
+`packaging/linux/70-mychronix-aim.rules` in this repository):
 
 ```sh
-./scripts/install-desktop.sh
+sudo cp 70-mychronix-aim.rules /etc/udev/rules.d/ && sudo udevadm control --reload
 ```
 
-This builds Mychronix, installs `mychronix-gui` and the `mychronix`
-command-line tool to `~/.local/bin`, and adds a launcher with its icon to your
-app menu.
+### Mac (Apple Silicon)
 
-Data lives in `~/Mychronix/`: sessions under `sessions/<logger id>/`, your
-names, favorites, events and setups as small JSON files; each session's setup
-sheet sits beside it as `a_NNNN.setup.json`. A file that can't be read is kept as
-`<name>.damaged-<time>.json` rather than overwritten, and if Mychronix ever
-crashes the details go to `~/.cache/mychronix/crash.log`.
+For M1 and newer Macs on macOS 11 or later: open
+`Mychronix-<version>-arm64.dmg` and drag Mychronix into Applications.
 
-### Logs
+Mychronix isn't signed by Apple yet, so the first launch shows "Apple could not
+verify…". Click Done, open System Settings → Privacy & Security, and click
+**Open Anyway** next to Mychronix (once per version).
 
-Mychronix keeps a log at `~/.cache/mychronix/mychronix.log` (on a Mac,
-`~/Library/Logs/Mychronix/mychronix.log`; rolled over at
-1 MB): startup, library loads, every MyChron scan, WiFi change, listing and
-download, and every error shown on screen. Start it with `MYCHRONIX_LOG=debug`
-for more (each session it lists, each WiFi command), or `MYCHRONIX_LOG=trace`
-to record every frame exchanged with the MyChron. The command-line tool takes
-`-v` / `-vv` for the same, printed to the terminal.
+On a Mac, join the MyChron's WiFi (named `AiM-MYC…`) from the menu bar yourself:
+macOS doesn't let apps list WiFi networks. Mychronix finds the MyChron once
+you're on its network. If macOS asks to let Mychronix find devices on your local
+network, allow it.
 
-### AiM track database
+### Updates
 
-The first time Mychronix starts with an internet connection, it downloads AiM's
-track database (about 5,600 tracks with their outlines, ~70 MB, under a minute)
-from AiM's public track server, the same files RaceStudio 3 uses, into
-`~/Mychronix/aim-tracks/`. After that, each start fetches only what AiM has
-added or changed. Offline, Mychronix uses what it already has and tries again
-next time; before the first download, it uses the track list stored on a
-connected MyChron 5/6. Custom tracks learned on your MyChron are copied from the
-logger automatically. `"aim_tracks": false` in `~/Mychronix/settings.json`
-turns the download off.
+Once a day Mychronix checks GitHub for a newer release and, if there is one,
+shows what's new and where to download it. Nothing installs by itself.
 
-### Maps
+## Using it
 
-Map tiles come from OpenStreetMap and satellite imagery from Esri World
-Imagery (free for personal, non-commercial use with attribution). Both are
-cached in `~/.cache/mychronix/tiles`.
+1. **Add your MyChron:** open the **Device** page and click **Add a MyChron**.
+   Pick your model and follow the steps; Mychronix shows when it has found it.
+2. **Download** the new sessions it offers.
+3. **Set up the Garage:** say whose MyChron it is and which kart it's on, and
+   fill in the kart's baseline setup (gearing and tire size matter most without
+   GPS).
+4. Open any session from **Sessions** or the Garage to analyze it.
+
+### MyChron 4 and the data key
+
+The MyChron 4 has no download cable: AiM's data key carries the sessions.
+
+1. At the kart, with the MyChron **switched off**, plug the data key into it,
+   then switch the MyChron on. It shows "Downloading data" for a few seconds
+   while it copies the new sessions to the key, then switches off.
+2. Unplug the key and plug its USB end into your computer.
+3. Mychronix finds the key, lists its runs and offers the new ones.
+
+RaceStudio 2 files (`.drk`, with the `.gpk`/`.rrk` GPS files beside them) open
+too: use **Open…**.
+
+### Track learning
+
+At a track AiM's database doesn't have, or whose layout has changed, turn on
+**track learning** on the MyChron and set the start/finish line there, or every
+session records as one long lap. Tracks learned on a MyChron 5 or 6 are copied
+into Mychronix automatically when you connect it.
+
+## Your data
+
+Everything stays on your computer, in `~/Mychronix/`:
+
+| Where | What |
+|---|---|
+| `sessions/<logger serial>/` | Downloaded sessions, as the MyChron stores them (`.xrz`, or `.drk` for a MyChron 4), with their details (`.meta.json`) and setup sheets (`.setup.json`) beside them |
+| `profiles.json` | Drivers, karts and MyChrons |
+| `setups.json`, `events.json`, `settings.json` | Kart baselines, events, settings |
+| `aim-tracks/` | AiM's track database (downloaded; safe to delete, it comes back) |
+| `tracks/` | Custom tracks, and any `.ria`/`.tkk` track files you add yourself |
+
+Removing a MyChron or kart in the Garage only hides it; deleting a driver moves
+that driver's sessions to the system Trash, after asking twice. A settings file
+that can't be read is kept as `<name>.damaged-<time>.json` rather than
+overwritten.
+
+## Internet use
+
+Mychronix works without an internet connection. When there is one, it uses it
+for these, and sends nothing about you:
+
+| What | From | Turn off |
+|---|---|---|
+| AiM's track database: all of it the first time (~70 MB, under a minute), then only what changed | AiM's public track server, the one RaceStudio 3 uses | `"aim_tracks": false` |
+| Weather when each session started (only the track's position and the date are sent) | [Open-Meteo](https://open-meteo.com) | `"weather": false` |
+| Whether a newer Mychronix is out | GitHub | `"update_check": false` |
+| Map tiles and satellite imagery, cached once viewed | OpenStreetMap; Esri World Imagery | — |
+
+The settings go in `~/Mychronix/settings.json`, e.g. `{ "weather": false }`.
+
+## Troubleshooting
+
+- **Logs:** `~/.cache/mychronix/mychronix.log` on Linux,
+  `~/Library/Logs/Mychronix/mychronix.log` on a Mac. Every connection, download
+  and on-screen error is recorded there. Start Mychronix with
+  `MYCHRONIX_LOG=debug` for more, or `MYCHRONIX_LOG=trace` to record every
+  message exchanged with the MyChron. A crash writes `crash.log` beside it.
+- **The MyChron isn't found over WiFi:** make sure its WiFi is on in its own
+  menu and that this computer has joined its `AiM-MYC…` network; the MyChron
+  gives no internet, so the computer may warn about that.
+- **The data key isn't found on Linux:** install the USB rule (see Install).
+- **A session has no lap times:** track learning was probably off (see above).
 
 ## Command line
 
 ```sh
-mychronix info session.xrz        # laps and channels
+mychronix info session.xrz        # a session's laps and channels
 mychronix sessions                # downloaded sessions
-mychronix device probe            # is a MyChron answering?
-mychronix device pull             # download every new session
+mychronix device probe            # is a MyChron answering over WiFi?
+mychronix device pull             # download every new session over WiFi
 ```
+
+`-v` / `-vv` print more. On a Mac the tool is inside the app, at
+`Mychronix.app/Contents/MacOS/mychronix`.
+
+## Building from source
+
+Needs Rust ([rustup](https://rustup.rs)), a C compiler and ImageMagick (for the
+icons).
+
+```sh
+./scripts/install-desktop.sh      # build, then install to ~/.local/bin with a launcher
+cargo test --workspace            # run the tests
+```
+
+`scripts/package-linux.sh` and `scripts/package-macos.sh` build the release
+downloads; `.github/workflows/release.yml` runs them for every `v*` tag.
 
 ## How it works
 
-The MyChron's WiFi protocol was worked out from captures of RaceStudio 3
-talking to a MyChron 6, for interoperability with hardware we own. What is
-known, and how sure we are of each part, is written up in
+AiM doesn't publish how its loggers talk to a computer. The WiFi protocol was
+worked out from recordings of RaceStudio 3 talking to a MyChron 6, and the data
+key's from RaceStudio 2, for interoperability with hardware we own. Everything
+known, where it came from and how sure we are of it is in
 [docs/protocol-notes.md](docs/protocol-notes.md).
 
-| Crate | What it does |
-| --- | --- |
-| `aim-link` | Finding a logger, its framing and checksums, listing and downloading files |
-| `aim-xrk` | Session files (`.xrk`/`.xrz`) via [libxrk](https://github.com/m3rlin45/libxrk), and session summaries (`.xri`) |
-| `aim-track` | AiM track files (`.ria` database, `.tkk` tracks) |
-| `mychronix-cli` | The `mychronix` command |
-| `mychronix-gui` | The app, built with [egui](https://github.com/emilk/egui) and [fastframe](https://github.com/crmne/fastframe) |
+| Part | What it does |
+|---|---|
+| `crates/aim-link` | Talking to MyChrons: WiFi discovery and messages, the data key over USB. Read-only by design. |
+| `crates/aim-xrk` | Session files: `.xrk`/`.xrz` (via [libxrk](https://github.com/m3rlin45/libxrk)), RaceStudio 2's `.drk` and its GPS files, MyChron 4 runs, sensor scaling |
+| `crates/aim-track` | AiM track files (`.ria` lists, `.tkk` tracks) |
+| `crates/mychronix-cli` | The `mychronix` command |
+| `crates/mychronix-gui` | The app, built with [egui](https://github.com/emilk/egui) and [fastframe](https://github.com/crmne/fastframe) |
+| `tools/` | Development aids: regenerating the sensor table from RaceStudio 2, and a bridge for recording RaceStudio 2 with the data key |
+
+## Still to do
+
+Roughly in priority order:
+
+- [ ] Test a MyChron 5 (and a MyChron 4 with an expansion box) on real hardware.
+- [ ] Edit sessions' details after downloading, one or many at once.
+- [ ] Import sessions from elsewhere (a friend's data) and export to CSV.
+- [ ] Make a custom track from a session's lap; import and export `.tkk` files.
+- [ ] Device information: firmware version, tracks stored on the MyChron,
+      odometers (read-only).
+- [ ] Compare laps by time when there's no GPS and no gearing.
+- [ ] Read the MyChron 4's CAN devices' own readings.
+- [ ] Split divisions by corners and straights, saved per track.
+- [ ] GPS timing on older loggers: RaceStudio places GPS ~70 ms apart from the
+      other channels on an early MyChron 5 sample (see the protocol notes).
+- [ ] MyChron 3 (serial cable).
+- [ ] Sign the Mac app with an Apple Developer ID.
+
+Writing settings or tracks to a MyChron is possible later, once that part of the
+protocol is properly understood. Firmware updates are out of scope.
 
 ## License
 
@@ -236,4 +253,5 @@ your option.
 Third-party parts keep their own licenses: Lucide icons (ISC, see
 `crates/mychronix-gui/assets/icons/LICENSE.txt`), the Inter typeface bundled by
 fastframe (SIL Open Font License), and the Rust dependencies (MIT, Apache-2.0
-and other permissive licenses).
+and other permissive licenses). Track data comes from AiM; map data from
+OpenStreetMap contributors; satellite imagery from Esri.
