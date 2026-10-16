@@ -21,6 +21,7 @@ mod events_page;
 mod garage_manage_ui;
 mod garage_ui;
 mod report_ui;
+mod sessions_filter_ui;
 mod setup_ui;
 mod splits_ui;
 
@@ -217,9 +218,8 @@ pub struct App {
     // Sessions page
     profiles: Option<crate::profiles::Profiles>,
     /// Logger id to show, or all.
-    session_logger: Option<String>,
-    /// Track index to show, or all.
-    session_track: Option<usize>,
+    /// The Sessions page's filters (right column).
+    session_filter: sessions_filter_ui::SessionFilter,
     session_search: String,
 
     // Tracks page
@@ -778,7 +778,6 @@ impl App {
     fn sessions_page(&mut self, ui: &mut Ui) {
         let lib = self.library.take().unwrap_or_else(Library::load);
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
-        let mut go_garage = false;
         let mut shown_rows: Vec<usize> = Vec::new();
         let loggers: Vec<String> = {
             let mut l: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
@@ -786,9 +785,9 @@ impl App {
             l.dedup();
             l
         };
-        let driver_name = |logger: &str, profiles: &crate::profiles::Profiles| {
-            profiles.get(logger).map(|p| p.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("Logger {logger}"))
-        };
+        let driver_of = |i: usize| sessions_filter_ui::session_driver(&lib.sessions[i], &profiles);
+        // The newest session's day, for "Last race day".
+        let newest = lib.sessions.iter().filter_map(|s| s.summary.date).max().and_then(|d| jiff::civil::Date::new(d.year as i16, d.month as i8, d.day as i8).ok());
 
         let setups = crate::setup::resolve(&lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
         let raced: Vec<usize> = {
@@ -798,10 +797,11 @@ impl App {
             v
         };
         ui.label(RichText::new("Sessions").font(semibold(28.0)).color(TEXT));
+        let matching = (0..lib.sessions.len()).filter(|&i| self.session_filter.keeps(&lib, i, &profiles, newest)).count();
+        let count = if matching < lib.sessions.len() { format!("Showing {matching} of {} sessions", lib.sessions.len()) } else { format!("{} sessions", lib.sessions.len()) };
         ui.label(
             RichText::new(format!(
-                "{} sessions  ·  {} track{}  ·  {} logger{}",
-                lib.sessions.len(),
+                "{count}  ·  {} track{}  ·  {} MyChron{}",
                 raced.len(),
                 if raced.len() == 1 { "" } else { "s" },
                 loggers.len(),
@@ -824,7 +824,7 @@ impl App {
 
         let gap = 14.0;
         let height = ui.available_height();
-        let side_w = 340.0_f32.min(ui.available_width() * 0.32);
+        let side_w = 360.0_f32.min(ui.available_width() * 0.32);
         let list_w = ui.available_width() - side_w - gap;
         let mut open = None;
         ui.horizontal_top(|ui| {
@@ -832,28 +832,7 @@ impl App {
             let column = Layout::top_down(Align::Min);
             ui.allocate_ui_with_layout(vec2(list_w, height), column, |ui| {
                 ui.set_width(list_w);
-                // Filters: driver, track, search.
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    if chip(ui, "All drivers", self.session_logger.is_none()).clicked() {
-                        self.session_logger = None;
-                    }
-                    for l in &loggers {
-                        if chip(ui, &driver_name(l, &profiles), self.session_logger.as_deref() == Some(l.as_str())).clicked() {
-                            self.session_logger = Some(l.clone());
-                        }
-                    }
-                    ui.add_space(12.0);
-                    if chip(ui, "All tracks", self.session_track.is_none()).clicked() {
-                        self.session_track = None;
-                    }
-                    for &ti in &raced {
-                        if chip(ui, &lib.tracks[ti].name, self.session_track == Some(ti)).clicked() {
-                            self.session_track = Some(ti);
-                        }
-                    }
-                });
-                ui.add_space(8.0);
+                // Filters are in the right column; search stays here.
                 search_field(ui, &mut self.session_search, "Search driver, kart, championship, track, comment…");
                 ui.add_space(10.0);
 
@@ -861,8 +840,7 @@ impl App {
                 let mut shown: Vec<usize> = (0..lib.sessions.len())
                     .filter(|&i| {
                         let s = &lib.sessions[i];
-                        self.session_logger.as_ref().is_none_or(|l| *l == s.logger)
-                            && self.session_track.is_none_or(|t| s.track == Some(t))
+                        self.session_filter.keeps(&lib, i, &profiles, newest)
                             && (needle.is_empty() || {
                                 let sum = &s.summary;
                                 let m = s.meta.clone().unwrap_or_default();
@@ -872,7 +850,7 @@ impl App {
                                     sum.date.map(|d| format!("{d} {}", crate::events::us_short(d))).unwrap_or_default(),
                                     sum.track.clone().unwrap_or_default(),
                                     s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default(),
-                                    if m.driver.is_empty() { driver_name(&s.logger, &profiles) } else { m.driver.clone() },
+                                    driver_of(i),
                                     m.kart,
                                     m.championship,
                                     m.session_type,
@@ -904,10 +882,9 @@ impl App {
                             end += 1;
                         }
                         let day = &shown[k..end];
-                        let mut tracks: Vec<String> = day
-                            .iter()
-                            .filter_map(|&i| lib.sessions[i].summary.track.clone())
-                            .collect();
+                        // The tracks raced that day, as assigned (else as recorded).
+                        let mut tracks: Vec<String> = day.iter().filter_map(|&i| sessions_filter_ui::session_track(&lib, i)).collect();
+                        tracks.sort();
                         tracks.dedup();
                         let best = day.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
                         ui.add_space(if k == 0 { 0.0 } else { 14.0 });
@@ -925,8 +902,7 @@ impl App {
                         });
                         ui.add_space(6.0);
                         for &i in day {
-                            let s = &lib.sessions[i];
-                            let driver = s.meta.as_ref().map(|m| m.driver.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| driver_name(&s.logger, &profiles));
+                            let driver = driver_of(i);
                             if session_row_with(ui, &lib, i, &driver, best, !setups[i].changes.is_empty(), extras.get(&i)).clicked() {
                                 open = Some(lib.sessions[i].path.clone());
                             }
@@ -939,26 +915,11 @@ impl App {
                 });
             });
 
-            // Drivers & karts: which kart each logger is on; edited in the Garage.
+            // Filters: when, drivers, tracks.
             ui.allocate_ui_with_layout(vec2(side_w, height), column, |ui| {
                 ui.set_width(side_w);
-                card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(Icon::User.image(SECONDARY, 16.0));
-                        ui.label(RichText::new("Drivers & karts").font(semibold(16.0)).color(TEXT));
-                    });
-                    ui.label(RichText::new("Your MyChrons don't store names, so each session takes its driver and kart from the kart its MyChron is on.").size(12.5).color(SECONDARY));
-                    ui.add_space(8.0);
-                    for l in &loggers {
-                        ui.label(RichText::new(format!("Logger {l}")).size(12.5).color(DIM));
-                        let p = profiles.for_logger(l);
-                        let line = [p.kart, p.driver].into_iter().filter(|x| !x.trim().is_empty()).collect::<Vec<_>>().join("  ·  ");
-                        ui.label(RichText::new(if line.is_empty() { "Not on a kart yet".to_string() } else { line }).color(TEXT));
-                        ui.add_space(8.0);
-                    }
-                    if button(ui, Some(Icon::House), "Edit in the Garage", false).clicked() {
-                        go_garage = true;
-                    }
+                egui::ScrollArea::vertical().id_salt("sessions_filters").auto_shrink([false, false]).show(ui, |ui| {
+                    self.sessions_filter_panel(ui, &lib, &profiles, newest);
                 });
             });
         });
@@ -971,9 +932,6 @@ impl App {
         self.library = Some(lib);
         self.profiles = Some(profiles);
         self.want_weather(&shown_rows, &ui.ctx().clone());
-        if go_garage {
-            self.page = Page::Garage;
-        }
         if let Some(path) = open {
             self.load(path);
         }
