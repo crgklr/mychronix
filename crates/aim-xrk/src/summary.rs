@@ -59,6 +59,8 @@ pub struct SessionSummary {
     pub max_rpm: Option<u32>,
     pub max_speed: Option<f64>,
     pub max_lateral_g: Option<f64>,
+    /// The logger's model, e.g. "MyChron 4", when the file says.
+    pub model: Option<String>,
     pub driver: Option<String>,
     pub vehicle: Option<String>,
     pub championship: Option<String>,
@@ -93,6 +95,7 @@ impl SessionSummary {
             max_rpm: num("maxrpm").map(|n| n as u32),
             max_speed: float("maxvel"),
             max_lateral_g: float("maxlacc"),
+            model: None,
             driver: text("pilota"),
             vehicle: text("veicolo"),
             championship: text("campionato"),
@@ -200,8 +203,10 @@ pub fn parse_summary_csv(text: &str) -> Vec<SessionSummary> {
 /// `a_0035.xrz` → 35.
 pub fn session_number(file: &str) -> Option<u32> {
     let stem = file.rsplit('/').next()?.split('.').next()?;
-    // MyChron 5/6: "a_0035"; RaceStudio 2: "<name> <date>_003".
-    stem.strip_prefix("a_").or_else(|| stem.rsplit_once('_').map(|(_, n)| n))?.parse().ok()
+    // MyChron 5/6: "a_0035" (or "a_0035-2", a second recording with that
+    // name after the logger was formatted); RaceStudio 2: "<name> <date>_003".
+    let n = stem.strip_prefix("a_").or_else(|| stem.rsplit_once('_').map(|(_, n)| n))?;
+    n.split('-').next()?.parse().ok()
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {

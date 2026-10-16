@@ -35,8 +35,10 @@ impl App {
         let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
         let mut ids: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
         ids.extend(profiles.loggers.keys().cloned());
-        ids.extend(profiles.karts.iter().map(|k| k.logger.clone()));
-        ids.retain(|i| !i.is_empty());
+        ids.extend(profiles.garage_karts().map(|k| k.logger.clone()));
+        // Only the Garage's MyChrons (on a kart in it) and new ones: removed
+        // ones, and ones a kart had before, aren't shown.
+        ids.retain(|i| !i.is_empty() && (profiles.mounted_on(i).is_some() || !profiles.knows_logger(i)));
         ids.sort();
         ids.dedup();
         ids.into_iter()
@@ -45,12 +47,10 @@ impl App {
                 let model = Some(profiles.for_logger(&id).model)
                     .filter(|m| !m.is_empty())
                     .or_else(|| digests.model(&id))
-                    .or_else(|| mine.iter().any(|s| s.path.extension().is_some_and(|e| e == "drk" || e == "mc4")).then(|| "MyChron 4".to_string()))
+                    .or_else(|| mine.iter().find_map(|s| s.summary.model.clone()))
                     .unwrap_or_else(|| "MyChron".into());
                 let owner = profiles
-                    .karts
-                    .iter()
-                    .find(|k| k.logger == id)
+                    .kart_on(&id)
                     .and_then(|k| k.driver)
                     .and_then(|d| profiles.driver_name(Some(d)).map(str::to_string))
                     .or_else(|| Some(profiles.for_logger(&id).driver).filter(|d| !d.is_empty()));

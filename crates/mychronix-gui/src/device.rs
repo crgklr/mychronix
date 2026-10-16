@@ -53,6 +53,41 @@ pub struct SessionMeta {
     pub session_type: String,
     #[serde(default)]
     pub comment: String,
+    /// The file's date and time as the MyChron listed it when downloaded, so
+    /// a different recording under the same name (after the MyChron was
+    /// formatted) is told apart.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub listed: String,
+}
+
+/// A listed file's date and time ("10/10/2026 14:39:36").
+fn listed(entry: &DirEntry) -> String {
+    format!("{} {}", entry.date.trim(), entry.time.trim()).trim().to_string()
+}
+
+/// `a_0001.xrz`, then `a_0001-2.xrz`, `a_0001-3.xrz`…: where a recording
+/// named `name` may be saved in `dir`.
+fn candidates(dir: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
+    let p = Path::new(name);
+    let (stem, ext) = (p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), p.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default());
+    let dir = dir.to_path_buf();
+    (1..).map(move |k| dir.join(if k == 1 { name.to_string() } else { format!("{stem}-{k}.{ext}") }))
+}
+
+/// The local copy of `entry`, if it's been downloaded into `dir`: the same
+/// size, and (when the download noted it) the same listed date and time.
+pub fn downloaded(dir: &Path, entry: &DirEntry) -> Option<PathBuf> {
+    candidates(dir, &entry.name).take_while(|p| p.exists()).find(|p| {
+        let same_size = std::fs::metadata(p).is_ok_and(|m| m.len() == entry.size);
+        let same_time = SessionMeta::load(p).map(|m| m.listed).filter(|l| !l.is_empty()).is_none_or(|l| l == listed(entry));
+        same_size && same_time
+    })
+}
+
+/// Where a new download of `entry` goes: its own name, or the next free
+/// numbered one when that's taken. Nothing already downloaded is replaced.
+fn target_for(dir: &Path, entry: &DirEntry) -> PathBuf {
+    candidates(dir, &entry.name).find(|p| !p.exists()).expect("an unused name")
 }
 
 impl SessionMeta {
@@ -208,15 +243,16 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
         let data = logger
             .read_file(&path, |done, total| send(Event::Progress { index, count, file: entry.name.clone(), done, total }))
             .map_err(|e| format!("Downloading {} failed: {e}", entry.name))?;
-        let target = dir.join(&entry.name);
+        let target = target_for(dir, entry);
         let partial = target.with_extension("part");
         std::fs::write(&partial, &data).and_then(|_| std::fs::rename(&partial, &target)).map_err(|e| e.to_string())?;
         log::info!("saved {} ({} bytes)", target.display(), data.len());
         // The small summary beside it, used by the Sessions and Tracks pages.
         let xri = Path::new(&entry.name).with_extension("xri");
         if let Ok(bytes) = logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}) {
-            let _ = std::fs::write(dir.join(&xri), bytes);
+            let _ = std::fs::write(target.with_extension("xri"), bytes);
         }
+        let meta = SessionMeta { listed: listed(entry), ..meta.clone() };
         meta.save(&target).map_err(|e| e.to_string())?;
         saved += 1;
     }
@@ -464,5 +500,27 @@ mod tests {
     #[test]
     fn meta_sits_beside_the_session() {
         assert_eq!(SessionMeta::path_for(Path::new("/x/a_0035.xrz")), Path::new("/x/a_0035.meta.json"));
+    }
+
+    #[test]
+    fn a_reused_name_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!("mychronix-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = |size: u64, time: &str| DirEntry { name: "a_0001.xrz".into(), size, date: "12/27/2026".into(), time: time.into() };
+        // Ann's a_0001, downloaded earlier.
+        let ann = entry(5, "10:00:00");
+        std::fs::write(dir.join("a_0001.xrz"), b"bens!").unwrap();
+        SessionMeta { listed: listed(&ann), ..Default::default() }.save(&dir.join("a_0001.xrz")).unwrap();
+        assert_eq!(downloaded(&dir, &ann), Some(dir.join("a_0001.xrz")));
+        // After a format, a different a_0001 (same size even): not downloaded, and saved beside it.
+        let bo = entry(5, "15:30:00");
+        assert_eq!(downloaded(&dir, &bo), None);
+        assert_eq!(target_for(&dir, &bo), dir.join("a_0001-2.xrz"));
+        std::fs::write(dir.join("a_0001-2.xrz"), b"jacks").unwrap();
+        SessionMeta { listed: listed(&bo), ..Default::default() }.save(&dir.join("a_0001-2.xrz")).unwrap();
+        assert_eq!(downloaded(&dir, &bo), Some(dir.join("a_0001-2.xrz")));
+        assert_eq!(std::fs::read(dir.join("a_0001.xrz")).unwrap(), b"bens!");
+        assert_eq!(aim_xrk::summary::session_number("a_0001-2.xrz"), Some(1));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

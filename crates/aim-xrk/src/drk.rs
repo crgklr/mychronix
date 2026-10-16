@@ -206,7 +206,7 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
         date,
         time,
         device: Some("MyChron 4".into()),
-        logger_model: Some("MyChron 4".into()),
+        logger_model: model_id.and_then(crate::mychron_model).map(str::to_string),
         ..Default::default()
     };
     Ok((Session { info, channels, laps, gps: None }, ms_per_tick))
@@ -306,6 +306,7 @@ pub fn summary(path: &std::path::Path) -> Result<crate::summary::SessionSummary>
         best_lap_ms: best.map(|l| l.duration_ms() as u64),
         best_lap_number: best.map(|l| l.number as u32),
         max_rpm,
+        model: s.info.logger_model.clone(),
         driver: s.info.driver.clone(),
         ..Default::default()
     })

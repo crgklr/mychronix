@@ -288,9 +288,10 @@ impl Baselines {
     }
 
     pub fn with_karts(mut saved: Self, profiles: &crate::profiles::Profiles) -> Self {
+        // Each kart starts from its baseline (keyed as `kart_key`).
         for k in &profiles.karts {
-            if !k.logger.is_empty() && k.baseline != Setup::default() {
-                saved.loggers.insert(k.logger.clone(), k.baseline.clone());
+            if k.baseline != Setup::default() {
+                saved.loggers.insert(kart_key(k.id), k.baseline.clone());
             }
         }
         saved
@@ -318,11 +319,15 @@ pub struct Resolved {
 }
 
 /// Every session's setup, by library index.
+/// What setups carry over within: a kart (whichever MyChron it had then).
+fn kart_key(id: u32) -> String {
+    format!("kart:{id}")
+}
+
 pub fn resolve(lib: &Library, baselines: &Baselines) -> Vec<Resolved> {
     let own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
-    let loggers: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
     let order = chronological(lib);
-    resolve_with(&own, &loggers, &order, baselines)
+    resolve_with(&own, &keys(lib), &order, baselines)
 }
 
 fn chronological(lib: &Library) -> Vec<usize> {
@@ -423,19 +428,27 @@ mod tests {
 pub fn before(lib: &Library, baselines: &Baselines, i: usize) -> Setup {
     let mut own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
     own[i] = None;
-    let loggers: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
-    resolve_with(&own, &loggers, &chronological(lib), baselines)[i].setup.carried()
+    resolve_with(&own, &keys(lib), &chronological(lib), baselines)[i].setup.carried()
 }
 
-/// The setup in force for `logger` after its newest session (for the next download).
-pub fn latest(lib: &Library, baselines: &Baselines, logger: &str) -> Setup {
+/// What each session's setup carries over within: its kart (whichever
+/// MyChron it had then), or for a session on no kart, its MyChron.
+fn keys(lib: &Library) -> Vec<String> {
+    lib.sessions.iter().map(|s| s.kart.map(kart_key).unwrap_or_else(|| s.logger.clone())).collect()
+}
+
+/// The setup in force on `kart` (the kart the MyChron downloading now is
+/// on), else for `logger`, after its newest session: for the next download.
+pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u32>) -> Setup {
     let resolved = resolve(lib, baselines);
+    let key = kart.map(kart_key).unwrap_or_else(|| logger.to_string());
+    let keys = keys(lib);
     chronological(lib)
         .into_iter()
         .rev()
-        .find(|&i| lib.sessions[i].logger == logger)
+        .find(|&i| keys[i] == key)
         .map(|i| resolved[i].setup.carried())
-        .or_else(|| baselines.loggers.get(logger).map(|b| b.carried()))
+        .or_else(|| baselines.loggers.get(&key).map(|b| b.carried()))
         .unwrap_or_default()
 }
 

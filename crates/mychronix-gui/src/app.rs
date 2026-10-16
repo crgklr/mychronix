@@ -17,6 +17,7 @@ mod device_ui;
 mod track_pick_ui;
 mod compare_drivers_ui;
 mod events_page;
+mod garage_manage_ui;
 mod garage_ui;
 mod report_ui;
 mod setup_ui;
@@ -160,6 +161,12 @@ pub struct App {
     /// The Garage's driver and kart dialogs.
     driver_edit: Option<garage_ui::DriverEdit>,
     kart_edit: Option<garage_ui::KartEdit>,
+    /// Setting up a MyChron that's new to the Garage.
+    mychron_setup: Option<garage_manage_ui::MyChronSetup>,
+    /// Deleting a driver, or removing a kart or MyChron, waiting for "Are you sure?".
+    garage_confirm: Option<garage_manage_ui::Confirm>,
+    /// MyChrons put off with "Not now" while connected (asked again once reconnected).
+    snoozed_while_on: std::collections::BTreeSet<String>,
     /// Which page of drivers the Garage shows (two drivers to a page).
     kart_page: usize,
     /// The update check, a newer release found, and its notes window.
@@ -272,6 +279,15 @@ impl App {
     /// Fills in what the logger leaves blank: the details entered for this
     /// session at download, else the names saved for its logger.
     fn fill_names(&mut self, session: &mut Session, path: &std::path::Path) {
+        // The kart its MyChron was on when it was recorded (for a file opened
+        // from elsewhere: the one its MyChron is on, or was last on).
+        let lib = self.library.get_or_insert_with(Library::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+        let kart: Option<crate::profiles::Kart> = match lib.sessions.iter().find(|s| s.path == path) {
+            Some(s) => s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id)).cloned(),
+            None => session.info.logger_id.and_then(|id| profiles.kart_on(&id.to_string())).cloned(),
+        };
+        let kart_driver = kart.as_ref().and_then(|k| profiles.driver_name(k.driver)).map(str::to_string);
         // Without GPS, speed from RPM and the session's gearing and tires
         // (before units are converted, so it's converted with the rest).
         if session.channel("GPS Speed").is_none() {
@@ -279,8 +295,6 @@ impl App {
             if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
                 let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
                 let resolved = crate::setup::resolve(lib, baselines);
-                let logger = lib.sessions[i].logger.clone();
-                let kart = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == logger).cloned();
                 let engine = kart.as_ref().map(|k| k.engine.clone()).unwrap_or_default();
                 let clutch = kart.as_ref().and_then(|k| crate::setup::number(&k.clutch_rpm));
                 if let Some(ch) = resolved.get(i).and_then(|r| crate::setup::speed_from_rpm(session, &r.setup, &engine, clutch)) {
@@ -292,15 +306,10 @@ impl App {
         let blank = |v: &Option<String>| v.as_deref().unwrap_or("").is_empty();
         let nonempty = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
         let meta = crate::device::SessionMeta::load(path);
-        // The driver entered for this session wins, then the Garage's driver of
-        // the kart this MyChron is on (over the name typed into the logger).
+        // The driver entered for this session wins, then its kart's driver
+        // (over the name typed into the logger).
         let entered = meta.as_ref().and_then(|m| nonempty(&m.driver));
-        let garage = session
-            .info
-            .logger_id
-            .map(|id| self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id.to_string()).driver)
-            .filter(|d| !d.is_empty());
-        if let Some(d) = entered.or(garage) {
+        if let Some(d) = entered.or(kart_driver.filter(|d| !d.is_empty())) {
             session.info.driver = Some(d);
         }
         if let Some(m) = meta {
@@ -311,14 +320,9 @@ impl App {
                 session.info.session = nonempty(&m.session_type);
             }
         }
-        let logger = session.info.logger_id.map(|id| id.to_string());
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-        if let Some(p) = logger.as_deref().and_then(|l| profiles.get(l)) {
-            if blank(&session.info.driver) {
-                session.info.driver = nonempty(&p.driver);
-            }
+        if let Some(k) = &kart {
             if blank(&session.info.vehicle) {
-                session.info.vehicle = nonempty(&p.kart);
+                session.info.vehicle = nonempty(&k.name);
             }
         }
     }
@@ -351,7 +355,8 @@ impl App {
     fn latest_setup(&mut self, logger: &str) -> crate::setup::Setup {
         let lib = self.library.get_or_insert_with(Library::load);
         let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
-        crate::setup::latest(lib, baselines, logger)
+        let kart = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).mounted_on(logger).map(|k| k.id);
+        crate::setup::latest(lib, baselines, logger, kart)
     }
 
     pub fn show_distance(&mut self) {
@@ -2382,13 +2387,13 @@ impl App {
         Some(PathBuf::from(std::env::var_os("HOME")?).join("Mychronix").join("sessions").join(id.to_string()))
     }
 
-    /// Sessions on the logger not yet saved here (same name and size).
+    /// Sessions on the logger not yet saved here (see `device::downloaded`).
     fn new_on_logger(&self) -> Vec<aim_link::DirEntry> {
         let dir = self.logger_dir();
         self.dev_files
             .iter()
             .filter(|e| e.is_session())
-            .filter(|e| !dir.as_ref().is_some_and(|d| std::fs::metadata(d.join(&e.name)).is_ok_and(|m| m.len() == e.size)))
+            .filter(|e| !dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
             .cloned()
             .collect()
     }
@@ -2494,8 +2499,7 @@ impl App {
                                 kart: p.kart,
                                 championship: p.championship,
                                 track,
-                                session_type: String::new(),
-                                comment: String::new(),
+                                ..Default::default()
                             },
                             detected,
                             setup: setup_now.clone(),
@@ -2677,11 +2681,14 @@ impl App {
             // Remember these for next time (not the comment or session type, which change every time).
             // The MyChron is now on the kart named, so the kart's baseline applies to it.
             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-            profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()));
+            // A MyChron moving to another kart leaves its sessions so far with the old one.
+            let lib = self.library.get_or_insert_with(Library::load);
+            profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
             if let Err(e) = profiles.save() {
                 self.error = Some(format!("Couldn't save the driver and kart: {e}"));
             }
             self.setup_baselines = None;
+            self.library = None;
             // Each file gets the dialog's details; with several tracks, its own track from the logger.
             let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
                 .dev_files
