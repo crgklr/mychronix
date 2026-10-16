@@ -228,6 +228,46 @@ pub(super) mod look {
         resp.clicked()
     }
 
+    /// A form label beside or above a field.
+    pub fn label(ui: &mut Ui, text: &str) {
+        ui.label(RichText::new(text).font(medium(16.0)).color(SECONDARY));
+    }
+
+    /// A text field `width` wide (or the row's width when None).
+    pub fn text(ui: &mut Ui, value: &mut String, hint: &str, width: Option<f32>) -> egui::Response {
+        let w = width.unwrap_or_else(|| ui.available_width());
+        ui.add(egui::TextEdit::singleline(value).font(regular(16.5)).margin(Margin::symmetric(14, 12)).desired_width(w).hint_text(hint))
+    }
+
+    /// The steps of a form, as a bar of tabs under the header: done, current
+    /// and to come. When `jump` is set (editing), any step can be clicked.
+    pub fn steps(ui: &mut Ui, names: &[&str], current: usize, jump: bool) -> Option<usize> {
+        let mut to = None;
+        Frame::new().inner_margin(Margin { left: PAD, right: PAD, top: 8, bottom: 4 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let w = (ui.available_width() - 8.0 * (names.len() - 1) as f32) / names.len() as f32;
+                for (k, name) in names.iter().enumerate() {
+                    let (rect, resp) = ui.allocate_exact_size(vec2(w, 44.0), if jump { Sense::click() } else { Sense::hover() });
+                    let on = k == current;
+                    let done = k < current && !jump;
+                    let bar = Rect::from_min_size(rect.left_top(), vec2(rect.width(), 4.0));
+                    ui.painter().rect_filled(bar, CornerRadius::same(2), if on || done { TEXT } else { theme::OUTLINE });
+                    let color = if on { TEXT } else if jump && resp.hovered() { SECONDARY } else { DIM };
+                    ui.painter().text(pos2(rect.left(), rect.top() + 24.0), egui::Align2::LEFT_CENTER, format!("{}  {name}", k + 1), semibold(14.0), color);
+                    if jump && resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if jump && resp.clicked() {
+                        to = Some(k);
+                    }
+                }
+            });
+        });
+        to
+    }
+
     /// A text field sized for a window.
     pub fn field(ui: &mut Ui, text: &mut String, hint: &str) -> egui::Response {
         ui.add(egui::TextEdit::singleline(text).font(regular(16.0)).margin(Margin::symmetric(14, 12)).desired_width(ui.available_width()).hint_text(hint))
@@ -294,7 +334,7 @@ fn plural(n: usize, word: &str) -> String {
 impl App {
     /// Every known MyChron's model ("MyChron 4"), by ID: from its WiFi name,
     /// else its session summaries, else their digests.
-    fn mychron_models(&mut self) -> BTreeMap<String, String> {
+    pub(super) fn mychron_models(&mut self) -> BTreeMap<String, String> {
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         let lib = self.library.get_or_insert_with(Library::load);
         let mut ids: Vec<String> = profiles.karts.iter().flat_map(|k| k.all_loggers().cloned()).chain(lib.sessions.iter().map(|s| s.logger.clone())).collect();

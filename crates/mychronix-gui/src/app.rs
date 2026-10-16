@@ -2780,8 +2780,8 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
         egui::TextEdit::singleline(value)
             .id_salt(id)
             .hint_text(RichText::new(hint).color(DIM))
-            .font(regular(15.0))
-            .margin(Margin::symmetric(12, 9))
+            .font(regular(16.5))
+            .margin(Margin::symmetric(14, 12))
             .desired_width(width),
     );
     let popup_id = response.id.with("suggestions");
