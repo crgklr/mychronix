@@ -232,14 +232,14 @@ fn size_field(ui: &mut Ui, id: &str, value: &mut String, which: &str) {
 }
 
 pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tires: &[String], width: f32, notes: bool) {
-    let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
+    let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(16.0)).color(SECONDARY));
     let small = |ui: &mut Ui, value: &mut String, hint: &str, unit: &str| {
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(value).font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_width(90.0).hint_text(hint));
+            ui.add(egui::TextEdit::singleline(value).font(regular(16.5)).margin(Margin::symmetric(14, 12)).desired_width(100.0).hint_text(hint));
             ui.label(RichText::new(unit).color(DIM));
         });
     };
-    egui::Grid::new(id).num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+    egui::Grid::new(id).num_columns(2).spacing([20.0, 14.0]).show(ui, |ui| {
         label(ui, "Gearing");
         ui.horizontal(|ui| {
             small(ui, &mut s.drive_teeth, "10", "drive");
