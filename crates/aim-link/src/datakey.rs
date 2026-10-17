@@ -108,7 +108,26 @@ impl DataKey {
             .find(|d| d.vendor_id() == VID && d.product_id() == PID)
             .ok_or(KeyError::NotFound)?;
         let device = info.open().wait().map_err(|e| KeyError::Open(e.to_string()))?;
-        let interface = device.detach_and_claim_interface(0).wait().map_err(|e| KeyError::Open(e.to_string()))?;
+        // macOS leaves a device of a class it doesn't know (the key is class
+        // 0xDC) unconfigured, so it has no interface to claim yet: select its
+        // configuration, as any driver for it would. Linux configures it itself.
+        if device.active_configuration().is_err() {
+            let value = device.configurations().next().map(|c| c.configuration_value()).unwrap_or(1);
+            log::info!("data key: unconfigured, selecting configuration {value}");
+            device.set_configuration(value).wait().map_err(|e| KeyError::Open(format!("couldn't configure it: {e}")))?;
+        }
+        // The system publishes the interface a moment after configuring it.
+        let mut tries = 0;
+        let interface = loop {
+            match device.detach_and_claim_interface(0).wait() {
+                Ok(i) => break i,
+                Err(_) if tries < 20 => {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => return Err(KeyError::Open(e.to_string())),
+            }
+        };
         let data_in = interface.endpoint::<Bulk, In>(DATA_IN).map_err(|e| KeyError::Open(e.to_string()))?;
         let mut key = DataKey { interface, data_in };
         key.identify()?;
