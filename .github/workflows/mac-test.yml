@@ -1,0 +1,32 @@
+# A quick Mac-only build for testing: push to the `mac-test` branch (or run
+# it by hand) and the Apple Silicon .dmg appears as a downloadable artifact
+# on the run. Nothing is released. Tests are left to the Release workflow,
+# to keep this quick.
+name: Mac test build
+
+on:
+  push:
+    branches: [mac-test]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: brew install librsvg
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Package
+        run: scripts/package-macos.sh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: mychronix-macos-arm64-test
+          path: target/dist/*
+          retention-days: 7
