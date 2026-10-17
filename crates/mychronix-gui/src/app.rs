@@ -225,6 +225,8 @@ pub struct App {
     dev_progress: Option<(usize, usize, String, u64, u64)>,
     dev_message: Option<(bool, String)>,
     dev_last_scan: f64,
+    /// A scan is with the worker: don't queue another (one takes several seconds).
+    dev_scanning: bool,
     /// The download dialog, while open.
     dev_dialog: Option<DownloadDialog>,
 
@@ -2260,6 +2262,7 @@ impl App {
         if worker_died {
             self.dev = None;
             self.dev_busy = None;
+            self.dev_scanning = false;
             self.dev_progress = None;
             self.dev_message = Some((false, "The connection to the MyChron stopped unexpectedly and has been restarted. Try again.".into()));
             return;
@@ -2267,6 +2270,7 @@ impl App {
         for e in events {
             match e {
                 Event::Scanned { logger, networks, current } => {
+                    self.dev_scanning = false;
                     // Switched to another network some other way (e.g. GNOME's menu):
                     // undo the pause on the other networks' auto-connect.
                     if self.dev_joined.is_some() && current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
@@ -2300,6 +2304,7 @@ impl App {
                 Event::Joined { ssid } => {
                     self.dev_joined = Some(ssid);
                     self.dev_busy = Some("Looking for your MyChron…".into());
+                    self.dev_scanning = true;
                     let _ = self.dev.as_ref().unwrap().tx.send(Command::Scan);
                 }
                 Event::Left => {
@@ -2395,8 +2400,9 @@ impl App {
         // Keep looking while nothing is connected; check now and then that a logger is still there.
         let now = ctx.input(|i| i.time);
         let every = if self.dev_logger.is_some() { 15.0 } else { 4.0 };
-        if self.dev_busy.is_none() && self.dev_last_scan != f64::MAX && now - self.dev_last_scan > every {
+        if self.dev_busy.is_none() && !self.dev_scanning && self.dev_last_scan != f64::MAX && now - self.dev_last_scan > every {
             self.dev_last_scan = now;
+            self.dev_scanning = true;
             let _ = self.dev.as_ref().unwrap().tx.send(Command::Scan);
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -2449,6 +2455,7 @@ impl App {
                 Err(_) => {}
             }
         }
+        self.unplaced_connected(ui);
         self.key_panel(ui);
         if self.dev_logger.is_some() {
             self.device_status(ui);
@@ -2460,6 +2467,43 @@ impl App {
         self.download_dialog(&ctx);
         if self.dev_dialog.is_none() {
             self.add_mychron_dialog(&ctx);
+        }
+        self.mychron_setup_dialog(&ctx);
+    }
+
+    /// The Garage's "New MyChron detected" card, here too, for a connected
+    /// MyChron (WiFi or data key) that isn't on a kart yet.
+    fn unplaced_connected(&mut self, ui: &mut Ui) {
+        let lib = self.library.take().unwrap_or_else(crate::tracks::Library::load);
+        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let connected: Vec<String> = self
+            .dev_logger
+            .as_ref()
+            .and_then(|b| b.logger_id)
+            .map(|i| i.to_string())
+            .into_iter()
+            .chain(self.key.listing.as_ref().filter(|_| self.key.present).map(|(s, ..)| s.clone()))
+            .collect();
+        let wifi_id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
+        let wifi_model = self.dev_current_wifi.as_deref().map(model_from_ssid).filter(|m| m.starts_with("MyChron"));
+        let cards: Vec<_> = self
+            .unplaced_mychrons(&lib, &profiles)
+            .into_iter()
+            .filter(|u| connected.contains(&u.logger))
+            .map(|u| {
+                let model = Some(profiles.for_logger(&u.logger).model)
+                    .filter(|m| !m.is_empty())
+                    .or_else(|| wifi_model.filter(|_| wifi_id.as_deref() == Some(u.logger.as_str())).map(String::from))
+                    .or_else(|| lib.sessions.iter().filter(|s| s.logger == u.logger).find_map(|s| s.summary.model.clone()))
+                    .unwrap_or_else(|| "MyChron".into());
+                (u, model)
+            })
+            .collect();
+        self.library = Some(lib);
+        self.profiles = Some(profiles);
+        for (u, model) in cards {
+            self.unplaced_card(ui, &u, &model);
+            ui.add_space(14.0);
         }
     }
 
