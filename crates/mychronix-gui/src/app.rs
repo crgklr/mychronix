@@ -23,6 +23,7 @@ mod garage_ui;
 mod report_ui;
 mod sessions_filter_ui;
 mod setup_ui;
+mod welcome_ui;
 mod splits_ui;
 
 use crate::splits;
@@ -177,6 +178,10 @@ pub struct App {
     /// AiM's track database being brought up to date, and how far along.
     aim_tracks_rx: Option<std::sync::mpsc::Receiver<crate::aim_tracks::Event>>,
     aim_tracks_progress: Option<(usize, usize)>,
+    /// Session files being imported, how far along, and what came in.
+    import_rx: Option<std::sync::mpsc::Receiver<crate::import::Event>>,
+    import_progress: Option<(usize, usize)>,
+    import_report: Option<crate::import::Report>,
     /// This is the first download of AiM's tracks (not just changes).
     aim_tracks_first: bool,
     /// The last try couldn't reach AiM's server.
@@ -482,6 +487,19 @@ fn import_rs2_files(path: &std::path::Path, root: &std::path::Path) -> std::io::
     Ok(Some(folder.join(name)))
 }
 
+/// A file "dropped" by MYCHRONIX_DROP (for testing).
+#[derive(Debug)]
+struct TestDrop(PathBuf);
+
+impl egui::DroppedFile for TestDrop {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
 impl eframe::App for App {
     /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames;
     /// "frame:x,y:dy" scrolls the wheel there by dy points instead (for testing).
@@ -530,6 +548,16 @@ impl eframe::App for App {
                 Some(2) => raw.events.push(button(false)),
                 _ => {}
             }
+        }
+        // MYCHRONIX_DROP="frame:path" drops that file or folder on the window then;
+        // MYCHRONIX_DRAG="frame" holds a dragged file over it from then on (for testing).
+        if let Some((f, path)) = std::env::var("MYCHRONIX_DROP").ok().and_then(|v| v.split_once(':').map(|(f, p)| (f.parse::<u32>().ok(), p.to_string()))) {
+            if f == Some(self.input_frames) {
+                raw.dropped_files.push(std::sync::Arc::new(TestDrop(PathBuf::from(path))));
+            }
+        }
+        if std::env::var("MYCHRONIX_DRAG").ok().and_then(|v| v.parse::<u32>().ok()).is_some_and(|f| self.input_frames >= f) {
+            raw.hovered_files.push(egui::HoveredFile::default());
         }
     }
 
@@ -648,6 +676,17 @@ impl App {
         if self.frames == 1 && self.aim_tracks_rx.is_none() && sync {
             self.aim_tracks_rx = Some(crate::aim_tracks::spawn(ui.ctx().clone()));
         }
+        // MYCHRONIX_IMPORT=<file or folder> imports it at start (for testing; the file picker can't be clicked).
+        static IMPORT_ONCE: std::sync::Once = std::sync::Once::new();
+        if self.frames >= 3 && self.import_rx.is_none() && !IMPORT_ONCE.is_completed() {
+            IMPORT_ONCE.call_once(|| {});
+            if let Some(p) = std::env::var_os("MYCHRONIX_IMPORT") {
+                let lib = self.library.get_or_insert_with(Library::load);
+                self.import_rx = Some(crate::import::spawn(vec![PathBuf::from(p)], lib, ui.ctx().clone()));
+                self.import_progress = Some((0, 0));
+            }
+        }
+        self.import_poll();
         while let Some(e) = self.aim_tracks_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             use crate::aim_tracks::Event;
             match e {
@@ -773,6 +812,13 @@ impl App {
                         if let Some(err) = &self.error {
                             ui.label(RichText::new(err).size(12.0).color(ui.visuals().error_fg_color));
                         }
+                        if let Some((done, total)) = self.import_progress.filter(|p| p.1 > 0) {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(format!("{} of {}", group_thousands(done), group_thousands(total))).size(12.0).color(SECONDARY));
+                            progress_bar(ui, 180.0, 6.0, done as f32 / total.max(1) as f32);
+                            ui.label(RichText::new("Importing sessions").font(medium(12.5)).color(TEXT));
+                            ui.add(Icon::FolderOpen.image(TEXT, 14.0));
+                        }
                         // Right to left: count, bar, label, icon.
                         if let Some((done, total)) = self.aim_tracks_progress {
                             ui.add_space(10.0);
@@ -839,7 +885,21 @@ impl App {
             v.dedup();
             v
         };
-        ui.label(RichText::new("Sessions").font(semibold(28.0)).color(TEXT));
+        let mut import = false;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Sessions").font(semibold(28.0)).color(TEXT));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let busy = self.import_progress.is_some();
+                if button(ui, Some(Icon::FolderOpen), if busy { "Importing…" } else { "Import a folder…" }, false).clicked() && !busy {
+                    import = true;
+                }
+            });
+        });
+        if import {
+            self.import_dialog(true, &ui.ctx().clone());
+        }
+        // Session files or folders dropped on the window are imported too.
+        self.import_drops(&ui.ctx().clone());
         let matching = (0..lib.sessions.len()).filter(|&i| self.session_filter.keeps(&lib, i, &profiles, newest)).count();
         let count = if matching < lib.sessions.len() { format!("Showing {matching} of {} sessions", lib.sessions.len()) } else { format!("{} sessions", lib.sessions.len()) };
         ui.label(

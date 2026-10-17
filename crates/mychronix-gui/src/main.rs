@@ -13,6 +13,7 @@
 
 mod aim_tracks;
 mod app;
+mod import;
 mod braking;
 mod charts;
 mod compare;

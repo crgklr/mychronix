@@ -32,6 +32,10 @@ settings, deletes sessions or updates firmware.
   sessions are offered for download with RaceStudio-style details (driver, kart,
   championship, session type, track, comment). Nothing already downloaded is
   ever overwritten.
+- **Import** sessions you already have: choose a folder (from RaceStudio, a USB
+  stick or a friend) and Mychronix finds the `.xrk`, `.xrz` and `.drk` files in
+  it, skips any already in your library and leaves everything else alone. On a
+  Mac you can also drag files or folders onto the window.
 - **Garage** (the home page): your drivers, their karts and the MyChron on each,
   seat time and race days. A new MyChron gets a card asking whose it is and which
   kart it goes on. MyChrons can move between karts and drivers (handed down to a
@@ -110,9 +114,15 @@ shows what's new and where to download it. Nothing installs by itself.
 
 ## Using it
 
-1. **Add your MyChron:** open the **Device** page and click **Add a MyChron**.
-   Pick your model and follow the steps; Mychronix shows when it has found it.
-2. **Download** the new sessions it offers.
+The first time you open Mychronix, it offers two ways to start:
+
+1. **Connect your MyChron:** pick your model and follow the steps; Mychronix
+   shows when it has found it, then **download** the new sessions it offers.
+   (Later, the Device page's **Add a MyChron** does the same.)
+2. **Or import session files** you already have: choose their folder.
+
+Then:
+
 3. **Set up the Garage:** say whose MyChron it is and which kart it's on, and
    fill in the kart's baseline setup (gearing and tire size matter most without
    GPS).
@@ -230,7 +240,8 @@ Roughly in priority order:
 
 - [ ] Test a MyChron 5 (and a MyChron 4 with an expansion box) on real hardware.
 - [ ] Edit sessions' details after downloading, one or many at once.
-- [ ] Import sessions from elsewhere (a friend's data) and export to CSV.
+- [ ] Export sessions and laps to CSV.
+- [ ] Drag and drop on Linux under Wayland (waiting on the windowing library).
 - [ ] Make a custom track from a session's lap; import and export `.tkk` files.
 - [ ] Device information: firmware version, tracks stored on the MyChron,
       odometers (read-only).
