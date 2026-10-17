@@ -274,12 +274,13 @@ impl App {
             ui.label(RichText::new("No drivers yet. Add one, then add their kart and MyChron.").color(SECONDARY));
         }
 
-        // One column per driver, two at a time; with more, a carousel of pages.
+        // One driver fills the width; two split it in half; with more, a
+        // carousel of pages of two, each column as wide as in the split.
         let gap = 28.0;
         let pages = drivers.len().div_ceil(2).max(1);
         let page = self.kart_page.min(pages - 1);
         let footer_h = if pages > 1 { 40.0 } else { 0.0 };
-        let col_w = (ui.available_width() - gap) / 2.0;
+        let col_w = if drivers.len() == 1 { ui.available_width() } else { (ui.available_width() - gap) / 2.0 };
         let col_h = ui.available_height() - footer_h;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -887,16 +888,17 @@ fn driver_column(
                 let newest = mine.iter().filter_map(|s| s.summary.date).max();
                 ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
             });
-            if let Some(n) = status.key.as_ref().filter(|(s, _)| s == logger).map(|k| k.1).filter(|&n| n > 0) {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // One row from the right edge: Remove, then Download (data key) or Connect (WiFi).
+            let key_new = status.key.as_ref().filter(|(s, _)| s == logger).map(|k| k.1).filter(|&n| n > 0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                if small_button(ui, Icon::X, "Remove").on_hover_text("Take it out of the Garage (its sessions stay)").clicked() {
+                    act.confirm = Some(garage_manage_ui::Confirm::RemoveMyChron { logger: logger.clone(), sure: false });
+                }
+                if let Some(n) = key_new {
                     if button(ui, Some(Icon::FolderOpen), &format!("Download {n}"), true).on_hover_text("Download the new runs from the data key").clicked() {
                         act.download_key = true;
                     }
-                });
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if small_button(ui, Icon::X, "Remove").on_hover_text("Take it out of the Garage (its sessions stay)").clicked() {
-                    act.confirm = Some(garage_manage_ui::Confirm::RemoveMyChron { logger: logger.clone(), sure: false });
                 }
                 if wifi && button(ui, Some(Icon::Wifi), if on { "Open" } else { "Connect" }, false).clicked() {
                     act.go = Some(Page::Device);
