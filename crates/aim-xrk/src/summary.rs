@@ -200,6 +200,86 @@ pub fn parse_summary_csv(text: &str) -> Vec<SessionSummary> {
         .collect()
 }
 
+/// Builds a summary from a session itself, for a MyChron 5/6 recording that
+/// arrives without the logger's `.xri` (from RaceStudio, a USB stick or a
+/// friend). Follows the logger's rules: laps numbered from 1, best lap among
+/// complete laps only.
+pub fn summarize(s: &crate::Session, file: Option<&str>) -> SessionSummary {
+    let text = |v: &Option<String>| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+    // MyChron 5/6 files write the date month-first (09/19/2026).
+    let date = s.info.date.as_deref().and_then(|d| {
+        let p: Vec<u16> = d.split('/').filter_map(|x| x.trim().parse().ok()).collect();
+        (p.len() == 3 && (1..=12).contains(&p[0]) && (1..=31).contains(&p[1])).then(|| Date { year: p[2], month: p[0] as u8, day: p[1] as u8 })
+    });
+    let best = s.best_lap(10_000);
+    // Where the first timed lap started: the start/finish line, for matching the track.
+    let start_finish = s.gps.as_ref().zip(s.laps.get(1)).and_then(|(g, lap)| {
+        let i = g.times_ms.partition_point(|&t| t < lap.start_ms);
+        Some((*g.latitude.get(i)?, *g.longitude.get(i)?)).filter(|(la, lo)| *la != 0.0 || *lo != 0.0)
+    });
+    let rpm = ["RPM", "Engine", "Engine RPM"].iter().find_map(|n| s.channel(n));
+    SessionSummary {
+        number: file.and_then(session_number),
+        file: file.map(str::to_string),
+        date,
+        start_time: text(&s.info.time),
+        track: text(&s.info.venue),
+        track_guid: None,
+        start_finish,
+        duration_ms: s.channels.iter().filter_map(|c| c.times_ms.last()).max().map(|&t| t.max(0) as u64),
+        laps: Some(s.laps.len() as u32),
+        best_lap_ms: best.map(|l| l.duration_ms() as u64),
+        best_lap_number: best.map(|l| l.number as u32),
+        // No RPM wire reads 0 throughout; the logger leaves the field empty then.
+        max_rpm: rpm.and_then(|c| c.values.iter().copied().reduce(f64::max)).map(|v| v as u32).filter(|&v| v > 0),
+        max_speed: s.gps.as_ref().and_then(|g| g.speed_kmh.iter().copied().reduce(f64::max)),
+        max_lateral_g: None,
+        model: s.info.logger_model_id.and_then(crate::mychron_model).map(str::to_string),
+        driver: text(&s.info.driver),
+        vehicle: text(&s.info.vehicle),
+        championship: None,
+    }
+}
+
+/// Writes a summary as an `.xri`, in the logger's own format (`parse_xri`
+/// reads it back), so an imported session sits in the library exactly like
+/// one downloaded from the logger. It's marked as written by Mychronix.
+pub fn to_xri(s: &SessionSummary) -> Vec<u8> {
+    let record = |tag: &str, fields: &[(&str, String)]| {
+        let body: String = fields.iter().map(|(k, v)| format!("\r\n{k}={}|", v.replace(['|', '\r', '\n'], " "))).collect::<String>() + "\r\n";
+        let sum: u64 = body.bytes().map(|b| b as u64).sum();
+        format!("<h{tag:<4}{:010}a>{body}<{tag:<4}{:06}>", body.len(), sum % 1_000_000)
+    };
+    let opt = |v: &Option<String>| v.clone().unwrap_or_default();
+    let e7 = |d: f64| ((d * 1e7).round() as i64).to_string();
+    let (lat, lon) = s.start_finish.map(|(a, b)| (e7(a), e7(b))).unwrap_or(("0".into(), "0".into()));
+    let mut out = String::from("<hIMEM0000000000a>");
+    out += &record("USR", &[("pilota", opt(&s.driver)), ("veicolo", opt(&s.vehicle)), ("campionato", opt(&s.championship)), ("written_by", "Mychronix".into())]);
+    out += &record(
+        "TINF",
+        &[
+            ("sess_num", s.number.map(|n| n.to_string()).unwrap_or_default()),
+            ("date", s.date.map(|d| format!("{:02}/{:02}/{:04}", d.day, d.month, d.year)).unwrap_or_default()),
+            ("hour", opt(&s.start_time)),
+        ],
+    );
+    out += &record("TRK", &[("track_name", opt(&s.track)), ("track_lat_0", lat), ("track_lon_0", lon), ("track_guid", opt(&s.track_guid))]);
+    out += &record("TDUR", &[("test_dur", s.duration_ms.map(|d| d.to_string()).unwrap_or_default())]);
+    let num = |v: Option<u64>| v.map(|n| n.to_string()).unwrap_or_default();
+    out += &record(
+        "LAPS",
+        &[
+            ("nlap", num(s.laps.map(u64::from))),
+            ("maxrpm", num(s.max_rpm.map(u64::from))),
+            ("maxvel", s.max_speed.map(|v| format!("{v:.1}")).unwrap_or_default()),
+            ("best", num(s.best_lap_ms)),
+            ("nbest", num(s.best_lap_number.map(u64::from))),
+        ],
+    );
+    out += "<IMEM000000>";
+    out.into_bytes()
+}
+
 /// `a_0035.xrz` → 35.
 pub fn session_number(file: &str) -> Option<u32> {
     let stem = file.rsplit('/').next()?.split('.').next()?;
@@ -211,6 +291,37 @@ pub fn session_number(file: &str) -> Option<u32> {
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+#[cfg(test)]
+mod xri_tests {
+    use super::*;
+
+    #[test]
+    fn a_written_xri_reads_back() {
+        let s = SessionSummary {
+            number: Some(7),
+            date: Some(Date { year: 2026, month: 9, day: 19 }),
+            start_time: Some("09:11:41".into()),
+            track: Some("Club Circuit".into()),
+            start_finish: Some((45.5000001, 9.2500002)),
+            duration_ms: Some(512_000),
+            laps: Some(16),
+            best_lap_ms: Some(24_390),
+            best_lap_number: Some(9),
+            max_rpm: Some(10_521),
+            driver: Some("Alex".into()),
+            ..Default::default()
+        };
+        let back = parse_xri(&to_xri(&s)).unwrap();
+        assert_eq!(back.number, Some(7));
+        assert_eq!(back.date, s.date);
+        assert_eq!(back.start_time, s.start_time);
+        assert_eq!(back.track, s.track);
+        assert_eq!(back.start_finish, s.start_finish);
+        assert_eq!((back.laps, back.best_lap_ms, back.best_lap_number, back.max_rpm), (Some(16), Some(24_390), Some(9), Some(10_521)));
+        assert_eq!(back.driver.as_deref(), Some("Alex"));
+    }
 }
 
 #[cfg(test)]

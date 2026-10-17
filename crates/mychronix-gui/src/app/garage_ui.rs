@@ -201,6 +201,12 @@ fn avatar(ui: &mut Ui, name: &str, size: f32, color: Color32) {
 impl App {
     pub(super) fn garage_page(&mut self, ui: &mut Ui) {
         self.device_poll(&ui.ctx().clone());
+        self.key_poll(&ui.ctx().clone());
+        // Nothing here yet: the welcome, with the two ways to start.
+        if self.first_run() {
+            self.welcome_page(ui);
+            return;
+        }
         let lib = self.library.take().unwrap_or_else(Library::load);
         let profiles = self.profiles.take().unwrap_or_else(Profiles::load);
         let baselines = self.setup_baselines.take().unwrap_or_else(Baselines::load);
@@ -255,6 +261,8 @@ impl App {
             });
         });
         ui.add_space(18.0);
+
+        self.import_banner(ui);
 
         // MyChrons that need a home: whose they are and which kart.
         for u in self.unplaced_mychrons(&lib, &profiles) {

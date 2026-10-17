@@ -20,6 +20,7 @@ fastframe-fonts.workspace = true
 fastframe-icons.workspace = true
 egui_extras.workspace = true
 jiff = "0.2"
+flate2 = "1"
 walkers.workspace = true
 aim-track.workspace = true
 serde.workspace = true
