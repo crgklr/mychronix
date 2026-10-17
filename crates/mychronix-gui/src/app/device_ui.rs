@@ -180,8 +180,11 @@ impl App {
             (Some(_), false) => 1,
             (Some(_), true) => 2,
         };
+        // Found, and not on a kart yet: the window offers to set it up.
+        let to_set_up = if step == 2 { self.found_needs_setup(flow.way) } else { None };
         let mut next = Some(flow);
         let mut close = false;
+        let mut set_up = false;
         let width = (ctx.content_rect().width() - 160.0).clamp(720.0, 1080.0);
         let dismissed = look::dialog(ctx, "add_mychron", width, |ui| {
             let series = if flow.series.is_empty() { "MyChron" } else { flow.series };
@@ -245,7 +248,11 @@ impl App {
                 }
             });
             look::footer_row(ui, |ui| {
-                let back = if step == 1 { "Back" } else { "Close" };
+                let back = match step {
+                    1 => "Back",
+                    2 if to_set_up.is_some() => "Skip for now",
+                    _ => "Close",
+                };
                 if look::big_button(ui, back, None, Kind::Quiet, true) {
                     if step == 1 {
                         next = Some(AddMyChron { way: None, series: "" });
@@ -254,13 +261,34 @@ impl App {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if step == 2 && look::big_button(ui, "See its sessions", Some(Icon::ChevronRight), Kind::Primary, true) {
+                    if step == 2 && to_set_up.is_some() {
+                        if look::big_button(ui, "Set it up", Some(Icon::ChevronRight), Kind::Primary, true) {
+                            set_up = true;
+                        }
+                    } else if step == 2 && look::big_button(ui, "See its sessions", Some(Icon::ChevronRight), Kind::Primary, true) {
                         close = true;
                     }
                 });
             });
         });
-        self.add_mychron = if close || dismissed { None } else { next };
+        self.add_mychron = if close || dismissed || set_up { None } else { next };
+        // On to "Whose MyChron is it?" and "Which kart?".
+        if let (true, Some((id, model))) = (set_up, to_set_up) {
+            self.mychron_setup = Some(garage_manage_ui::MyChronSetup::new(&id, &model));
+        }
+    }
+
+    /// The MyChron just found (its id and model), when it isn't on a kart yet.
+    fn found_needs_setup(&mut self, way: Option<Way>) -> Option<(String, String)> {
+        let (id, model) = match way {
+            Some(Way::Wifi) => (
+                self.dev_logger.as_ref().and_then(|b| b.logger_id)?.to_string(),
+                self.dev_joined.as_deref().or(self.dev_current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron"),
+            ),
+            _ => (self.key.listing.as_ref()?.0.clone(), "MyChron 4"),
+        };
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+        profiles.mounted_on(&id).is_none().then(|| (id, model.to_string()))
     }
 
     /// The four series as cards, two to a row. Returns the one picked.
@@ -441,7 +469,7 @@ impl App {
             ui.label(RichText::new(detail).font(regular(16.0)).color(SECONDARY));
             if new_to_us {
                 ui.add_space(14.0);
-                ui.label(RichText::new("It's new to Mychronix: the Garage will ask whose it is and which kart it's on.").font(regular(14.5)).color(DIM));
+                ui.label(RichText::new("It's new to Mychronix. Next, tell it whose MyChron this is and which kart it's on.").font(regular(14.5)).color(DIM));
             }
         });
     }
