@@ -91,6 +91,39 @@ pub struct Kart {
     /// Taken out of the Garage. Its sessions still show it and its setup.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removed: bool,
+    /// Baselines it had before, oldest first. Changing a kart's baseline
+    /// means "what it runs from now on": the old one stays in force for
+    /// the sessions it had then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub past_baselines: Vec<PastBaseline>,
+}
+
+/// A baseline a kart had: it applies to the kart's sessions up to `until`
+/// (the start of its newest session when the baseline was changed, as
+/// `stamp` writes it). Later sessions use the next one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PastBaseline {
+    pub setup: crate::setup::Setup,
+    pub until: String,
+}
+
+impl Kart {
+    /// Sets its baseline to `new`. If it had sessions under the old one
+    /// (`newest`: the start of its newest session), they keep it.
+    pub fn change_baseline(&mut self, new: crate::setup::Setup, newest: Option<String>) {
+        if new == self.baseline {
+            return;
+        }
+        if let Some(until) = newest.filter(|n| !n.is_empty()) {
+            // Two changes with no session between them: the first never applied to anything.
+            match self.past_baselines.last_mut() {
+                Some(p) if p.until == until => {}
+                _ => self.past_baselines.push(PastBaseline { setup: self.baseline.clone(), until }),
+            }
+        }
+        self.baseline = new;
+    }
 }
 
 /// A MyChron a kart had: its sessions recorded up to `until` (the start of

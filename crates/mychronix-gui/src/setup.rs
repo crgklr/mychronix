@@ -270,6 +270,10 @@ pub fn implied_drive_teeth(rpm_per_kmh: f64, driven: f64, tires: &str) -> Option
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Baselines {
     pub loggers: BTreeMap<String, Setup>,
+    /// Earlier baselines (from the karts), oldest first: each applies to
+    /// sessions that started up to its `until`.
+    #[serde(skip)]
+    pub past: BTreeMap<String, Vec<crate::profiles::PastBaseline>>,
 }
 
 impl Baselines {
@@ -293,8 +297,23 @@ impl Baselines {
             if k.baseline != Setup::default() {
                 saved.loggers.insert(kart_key(k.id), k.baseline.clone());
             }
+            if !k.past_baselines.is_empty() {
+                saved.past.insert(kart_key(k.id), k.past_baselines.clone());
+            }
         }
         saved
+    }
+
+    /// The baseline for `key` at a session that started at `stamp`, with
+    /// which one it is (0 the oldest): an earlier one if the session came
+    /// before that baseline was changed, else the current one.
+    fn at(&self, key: &str, stamp: &str) -> (usize, Option<Setup>) {
+        let past = self.past.get(key).map(Vec::as_slice).unwrap_or_default();
+        let some = |s: &Setup| Some(s.clone()).filter(|s| *s != Setup::default());
+        match past.iter().position(|p| !stamp.is_empty() && stamp <= p.until.as_str()) {
+            Some(k) => (k, some(&past[k].setup)),
+            None => (past.len(), self.loggers.get(key).and_then(some)),
+        }
     }
 }
 
@@ -327,7 +346,11 @@ fn kart_key(id: u32) -> String {
 pub fn resolve(lib: &Library, baselines: &Baselines) -> Vec<Resolved> {
     let own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
     let order = chronological(lib);
-    resolve_with(&own, &keys(lib), &order, baselines)
+    resolve_with(&own, &keys(lib), &stamps(lib), &order, baselines)
+}
+
+fn stamps(lib: &Library) -> Vec<String> {
+    lib.sessions.iter().map(|s| s.start()).collect()
 }
 
 fn chronological(lib: &Library) -> Vec<usize> {
@@ -339,25 +362,28 @@ fn chronological(lib: &Library) -> Vec<usize> {
     order
 }
 
-fn resolve_with(own: &[Option<Setup>], loggers: &[String], order: &[usize], baselines: &Baselines) -> Vec<Resolved> {
+fn resolve_with(own: &[Option<Setup>], loggers: &[String], stamps: &[String], order: &[usize], baselines: &Baselines) -> Vec<Resolved> {
     let mut out = vec![Resolved { setup: Setup::default(), source: Source::Unknown, changes: vec![] }; own.len()];
-    // Per logger: the setup in force and where it came from.
-    let mut current: BTreeMap<&str, (Setup, Source)> = BTreeMap::new();
+    // Per logger: the setup in force, where it came from, and under which baseline.
+    let mut current: BTreeMap<&str, (Setup, Source, usize)> = BTreeMap::new();
     for &i in order {
         let logger = loggers[i].as_str();
-        let before = current
-            .get(logger)
-            .cloned()
-            .or_else(|| baselines.loggers.get(logger).map(|b| (b.carried(), Source::Baseline)));
+        let (era, base) = baselines.at(logger, &stamps[i]);
+        // A setup carries over within one baseline; the first session after
+        // the baseline was changed starts from the new one.
+        let before = match current.get(logger) {
+            Some((setup, source, e)) if *e == era => Some((setup.clone(), source.clone())),
+            _ => base.map(|b| (b.carried(), Source::Baseline)),
+        };
         out[i] = match &own[i] {
             Some(sheet) => {
                 let changes = before.as_ref().map(|(b, _)| sheet.changes_from(b)).unwrap_or_default();
-                current.insert(logger, (sheet.carried(), Source::From(i)));
+                current.insert(logger, (sheet.carried(), Source::From(i), era));
                 Resolved { setup: sheet.clone(), source: Source::Own, changes }
             }
             None => match before {
                 Some((setup, source)) => {
-                    current.insert(logger, (setup.clone(), source.clone()));
+                    current.insert(logger, (setup.clone(), source.clone(), era));
                     Resolved { setup, source, changes: vec![] }
                 }
                 None => Resolved { setup: Setup::default(), source: Source::Unknown, changes: vec![] },
@@ -392,7 +418,8 @@ mod tests {
         changed.notes = "Went up one for the long straight".into();
         let own = vec![None, Some(changed), None, None];
         let loggers = vec!["A".to_string(), "A".into(), "A".into(), "B".into()];
-        let r = resolve_with(&own, &loggers, &[0, 1, 2, 3], &baselines);
+        let stamps = vec![String::new(); 4];
+        let r = resolve_with(&own, &loggers, &stamps, &[0, 1, 2, 3], &baselines);
         assert_eq!(r[0].source, Source::Baseline);
         assert_eq!(r[0].setup.driven_teeth, "80");
         assert_eq!(r[1].source, Source::Own);
@@ -403,6 +430,32 @@ mod tests {
         assert!(r[2].setup.notes.is_empty());
         // Another logger has nothing.
         assert_eq!(r[3].source, Source::Unknown);
+    }
+
+    #[test]
+    fn a_changed_baseline_applies_from_then_on() {
+        // Three sessions on 80, then the baseline changed to 82, then two more.
+        let mut kart = crate::profiles::Kart { baseline: gearing("10", "80"), ..Default::default() };
+        kart.change_baseline(gearing("10", "82"), Some("2026-10-11 02:21:31".into()));
+        let mut baselines = Baselines::default();
+        baselines.loggers.insert("K".into(), kart.baseline.clone());
+        baselines.past.insert("K".into(), kart.past_baselines.clone());
+        let stamps: Vec<String> = ["2026-10-10 14:00:00", "2026-10-11 01:00:00", "2026-10-11 02:21:31", "2026-10-18 10:00:00", "2026-10-18 11:00:00"].map(String::from).to_vec();
+        let loggers = vec!["K".to_string(); 5];
+        // The second session had its own sheet (81): it carries on only until the baseline change.
+        let own = vec![None, Some(gearing("10", "81")), None, None, None];
+        let r = resolve_with(&own, &loggers, &stamps, &[0, 1, 2, 3, 4], &baselines);
+        let teeth: Vec<&str> = r.iter().map(|x| x.setup.driven_teeth.as_str()).collect();
+        assert_eq!(teeth, ["80", "81", "81", "82", "82"]);
+        assert_eq!(r[3].source, Source::Baseline);
+        // Changing it again before any new session doesn't add a step.
+        kart.change_baseline(gearing("10", "84"), Some("2026-10-11 02:21:31".into()));
+        assert_eq!(kart.past_baselines.len(), 1);
+        assert_eq!(kart.past_baselines[0].setup.driven_teeth, "80");
+        // A kart with no sessions yet just takes the new baseline.
+        let mut fresh = crate::profiles::Kart { baseline: gearing("10", "80"), ..Default::default() };
+        fresh.change_baseline(gearing("10", "82"), None);
+        assert!(fresh.past_baselines.is_empty());
     }
 
     #[test]
@@ -428,7 +481,7 @@ mod tests {
 pub fn before(lib: &Library, baselines: &Baselines, i: usize) -> Setup {
     let mut own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
     own[i] = None;
-    resolve_with(&own, &keys(lib), &chronological(lib), baselines)[i].setup.carried()
+    resolve_with(&own, &keys(lib), &stamps(lib), &chronological(lib), baselines)[i].setup.carried()
 }
 
 /// What each session's setup carries over within: its kart (whichever
@@ -443,13 +496,14 @@ pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u
     let resolved = resolve(lib, baselines);
     let key = kart.map(kart_key).unwrap_or_else(|| logger.to_string());
     let keys = keys(lib);
-    chronological(lib)
-        .into_iter()
-        .rev()
-        .find(|&i| keys[i] == key)
-        .map(|i| resolved[i].setup.carried())
-        .or_else(|| baselines.loggers.get(&key).map(|b| b.carried()))
-        .unwrap_or_default()
+    let newest = chronological(lib).into_iter().rev().find(|&i| keys[i] == key);
+    // A baseline changed since the newest session is what runs now.
+    let now = baselines.past.get(&key).map_or(0, Vec::len);
+    match newest {
+        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => Some(resolved[i].setup.carried()),
+        _ => baselines.loggers.get(&key).map(|b| b.carried()),
+    }
+    .unwrap_or_default()
 }
 
 /// Median engine RPM per km/h above 30 km/h (clutch locked), from RPM and GPS speed.

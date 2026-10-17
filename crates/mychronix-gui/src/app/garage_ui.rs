@@ -634,15 +634,17 @@ impl App {
             let id = edit.id.unwrap_or_else(|| profiles.next_kart_id());
             // Its MyChron history stays as it was; the MyChron is changed below.
             let before = profiles.karts.iter().find(|k| k.id == id).cloned().unwrap_or_default();
-            let kart = Kart {
+            // A new baseline is what the kart runs from now on: its sessions so far keep the old one.
+            let newest_of_kart = self.library.get_or_insert_with(Library::load).sessions.iter().filter(|s| s.kart == Some(id)).map(|s| s.start()).max();
+            let mut kart = Kart {
                 id,
                 name: name.clone(),
                 engine: edit.engine.trim().to_string(),
                 driver: edit.driver,
-                baseline: edit.baseline.carried(),
                 clutch_rpm: edit.clutch_rpm.trim().to_string(),
                 ..before
             };
+            kart.change_baseline(edit.baseline.carried(), newest_of_kart);
             match profiles.karts.iter_mut().find(|k| k.id == id) {
                 Some(k) => *k = kart,
                 None => profiles.karts.push(kart),
@@ -1074,6 +1076,8 @@ fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Pro
         });
         ui.add_space(6.0);
         let s = match (row.newest, &row.kart) {
+            // The baseline was changed after the newest session: that's what it runs now.
+            (Some(i), Some(k)) if k.past_baselines.last().is_some_and(|p| p.until.as_str() >= lib.sessions[i].start().as_str()) => k.baseline.clone(),
             (Some(i), _) => resolved[i].setup.clone(),
             (None, Some(k)) => k.baseline.clone(),
             (None, None) => Setup::default(),
