@@ -215,7 +215,6 @@ impl App {
                 (if ok { Icon::CircleCheck } else { Icon::FolderOpen }).image(tint, 22.0).paint_at(ui, Rect::from_center_size(r0.center(), Vec2::splat(22.0)));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
-                    let plural = |n: usize, w: &str| format!("{n} {w}{}", if n == 1 { "" } else { "s" });
                     let title = if ok {
                         format!("Imported {} from {}", plural(r.added, "session"), plural(r.loggers.len(), "MyChron"))
                     } else if r.already > 0 {

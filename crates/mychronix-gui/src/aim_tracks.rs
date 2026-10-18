@@ -48,7 +48,7 @@ struct State {
 
 /// `~/Mychronix/aim-tracks`.
 pub fn dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("aim-tracks"))
+    crate::paths::data("aim-tracks")
 }
 
 /// The saved track list, once there is one.
@@ -68,12 +68,7 @@ pub fn mychron_list_path() -> Option<PathBuf> {
 }
 
 fn enabled() -> bool {
-    let setting = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join("Mychronix").join("settings.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("aim_tracks").and_then(|w| w.as_bool()));
-    setting != Some(false)
+    crate::settings::get().aim_tracks
 }
 
 /// A track id as AiM writes them: eight lowercase letters and digits. Anything
@@ -102,19 +97,13 @@ fn wanted(old: &[u8], new: &[u8], has_file: impl Fn(&str) -> bool) -> Vec<String
 
 /// Writes `data` to `path` by way of a temporary file, so a half-written
 /// file is never left under the real name.
-fn write(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(tmp, path)
-}
-
 /// Syncs in the background; events report progress.
 pub fn spawn(ctx: eframe::egui::Context) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
     if !enabled() {
         return rx;
     }
-    std::thread::spawn(move || match sync(&tx, &ctx) {
+    crate::jobs::spawn("aim-tracks", move || match sync(&tx, &ctx) {
         Ok(changed) => {
             let _ = tx.send(Event::Finished { changed });
             ctx.request_repaint();
@@ -182,7 +171,7 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
 
     // On the first run, save the list now so the tracks show while their outlines arrive.
     if old.is_empty() {
-        write(&list, &new).map_err(|e| e.to_string())?;
+        crate::storage::write_atomic(&list, &new).map_err(|e| e.to_string())?;
         let _ = tx.send(Event::List);
         ctx.request_repaint();
     }
@@ -200,7 +189,8 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
                     match client.get(format!("{BASE}Tracks/{id}.tkk")).send() {
                         Ok(r) if r.status().is_success() => match r.bytes() {
                             Ok(b) if !b.is_empty() => {
-                                if write(&dir.join(format!("{id}.tkk")), &b).is_err() {
+                                if let Err(e) = crate::storage::write_atomic(&dir.join(format!("{id}.tkk")), &b) {
+                                    log::warn!("AiM tracks: couldn't save {id}.tkk: {e}");
                                     failed.fetch_add(1, Ordering::Relaxed);
                                 }
                             }
@@ -245,7 +235,7 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
     for id in records(&old).keys().filter(|id| !current.contains_key(*id)) {
         let _ = std::fs::remove_file(dir.join(format!("{id}.tkk")));
     }
-    write(&list, &new).map_err(|e| e.to_string())?;
+    crate::storage::write_atomic(&list, &new).map_err(|e| e.to_string())?;
     state.etag = etag;
     crate::storage::save(&state_path, &state).map_err(|e| e.to_string())?;
     log::info!("AiM tracks: up to date ({total} downloaded)");

@@ -40,12 +40,7 @@ fn now() -> u64 {
 }
 
 fn enabled() -> bool {
-    let setting = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join("Mychronix").join("settings.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("update_check").and_then(|w| w.as_bool()));
-    setting != Some(false)
+    crate::settings::get().update_check
 }
 
 /// "v0.10.2" → (0, 10, 2); None if it isn't a version.
@@ -109,7 +104,7 @@ pub fn spawn(ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<Release> {
     if !enabled() {
         return rx;
     }
-    std::thread::spawn(move || {
+    crate::jobs::spawn("update-check", move || {
         let path = cache_path();
         let mut cache: Cache = crate::storage::load_or_default(path.clone());
         // MYCHRONIX_UPDATE_TEST=<release JSON file> pretends GitHub answered with it (development only).

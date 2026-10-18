@@ -25,6 +25,13 @@ mod sessions_filter_ui;
 mod setup_ui;
 mod welcome_ui;
 mod splits_ui;
+mod tracks_ui;
+mod device_page;
+mod compare_ui;
+
+use compare_ui::gain_color;
+use device_page::model_from_ssid;
+use tracks_ui::SpeedLap;
 
 use crate::splits;
 use crate::tracks::{self, Kind, Library};
@@ -267,7 +274,7 @@ pub struct App {
 
 impl App {
     pub fn load(&mut self, path: PathBuf) {
-        match Session::open(&path) {
+        match crate::jobs::open_session(&path) {
             Ok(mut session) => {
                 self.fill_names(&mut session, &path);
                 self.measured_ratio = crate::setup::measured_rpm_per_kmh(&session);
@@ -446,7 +453,7 @@ impl App {
     /// it with its companion files (see `import_rs2_files`). Returns the copy
     /// to open, or `path` as it was.
     fn import_rs2(&mut self, path: PathBuf) -> PathBuf {
-        let root = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Mychronix").join("sessions");
+        let root = crate::paths::sessions_dir().unwrap_or_default();
         match import_rs2_files(&path, &root) {
             Ok(Some(copy)) => {
                 self.library = None;
@@ -470,7 +477,7 @@ fn import_rs2_files(path: &std::path::Path, root: &std::path::Path) -> std::io::
     if !rs2 || path.starts_with(root) {
         return Ok(None);
     }
-    let Ok(session) = Session::open(path) else { return Ok(None) };
+    let Ok(session) = crate::jobs::open_session(path) else { return Ok(None) };
     let folder = root.join(session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "racestudio2".into()));
     let (Some(dir), Some(stem), Some(name)) = (path.parent(), path.file_stem(), path.file_name()) else { return Ok(None) };
     let dir = if dir.as_os_str().is_empty() { std::path::Path::new(".") } else { dir };
@@ -503,6 +510,17 @@ impl egui::DroppedFile for TestDrop {
 }
 
 impl eframe::App for App {
+    /// Quitting while joined to a MyChron: turn the other networks'
+    /// auto-connect back on and go back to the previous network now, rather
+    /// than leaving them paused until Mychronix next starts.
+    fn on_exit(&mut self) {
+        if crate::device::paused_networks() {
+            log::info!("quitting while joined to a MyChron: restoring WiFi");
+            crate::device::restore_wifi_on_quit();
+        }
+        log::info!("Mychronix quitting");
+    }
+
     /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames;
     /// "frame:x,y:dy" scrolls the wheel there by dy points instead (for testing).
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -596,7 +614,7 @@ impl eframe::App for App {
             self.wifi_check = now;
             if crate::device::paused_networks() {
                 // Does nothing while the computer is still on the MyChron's network.
-                std::thread::spawn(crate::device::restore_after_crash);
+                crate::jobs::spawn("wifi-restore", crate::device::restore_after_crash);
             }
         }
         // Everything shown as an error or a device message also goes to the log, once.
@@ -622,6 +640,7 @@ impl eframe::App for App {
 
         self.status_bar(ui, session.as_deref());
         self.update_bar(ui);
+        self.error_bar(ui);
 
         // The icon rail's space; the rail itself is drawn over the page (it slides out on hover).
         let rail_space = egui::Panel::left("rail")
@@ -689,7 +708,12 @@ impl App {
             }
         }
         self.import_poll();
-        while let Some(e) = self.aim_tracks_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        let (events, ended) = crate::jobs::drain(self.aim_tracks_rx.as_ref());
+        // The sync ended without finishing (it crashed): drop its progress bar.
+        if ended && self.aim_tracks_progress.is_some() && events.is_empty() {
+            self.aim_tracks_progress = None;
+        }
+        for e in events {
             use crate::aim_tracks::Event;
             match e {
                 Event::List => {
@@ -776,6 +800,35 @@ impl App {
         }
     }
 
+    /// Something went wrong (a save failed, a file couldn't be opened): a bar
+    /// across the top that stays until dismissed. Also in the log.
+    fn error_bar(&mut self, ui: &mut Ui) {
+        let Some(err) = self.error.clone() else { return };
+        let mut dismiss = false;
+        egui::Panel::top("error")
+            .show_separator_line(false)
+            .frame(Frame::new().fill(theme::DANGER.gamma_multiply(0.16)).inner_margin(Margin::symmetric(16, 9)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.add(Icon::TriangleAlert.image(theme::DANGER, 15.0));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let x = ui.add(Icon::X.image(SECONDARY, 13.0).sense(Sense::click())).on_hover_text("Dismiss");
+                        if x.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        dismiss = x.clicked();
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(egui::Label::new(RichText::new(err).font(medium(13.5)).color(TEXT)).wrap());
+                        });
+                    });
+                });
+            });
+        if dismiss {
+            self.error = None;
+        }
+    }
+
     fn status_bar(&self, ui: &mut Ui, session: Option<&Session>) {
         egui::Panel::bottom("status")
             .exact_size(30.0)
@@ -810,9 +863,6 @@ impl App {
                             ui.label(RichText::new(format!("{} channels  ·  {} samples", s.channels.len(), group_thousands(samples))).size(12.0).color(DIM));
                             ui.add_space(10.0);
                             ui.label(RichText::new(file_name(path)).size(12.0).color(DIM));
-                        }
-                        if let Some(err) = &self.error {
-                            ui.label(RichText::new(err).size(12.0).color(ui.visuals().error_fg_color));
                         }
                         if let Some((done, total)) = self.import_progress.filter(|p| p.1 > 0) {
                             ui.add_space(10.0);
@@ -1182,7 +1232,7 @@ fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best
         let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
         p.text(pos2(r, top), egui::Align2::RIGHT_CENTER, best, medium(14.5), if is_day_best { theme::GOOD } else { TEXT });
         let laps = sum.laps.unwrap_or(0);
-        let mut facts = vec![format!("{laps} lap{}", if laps == 1 { "" } else { "s" })];
+        let mut facts = vec![plural(laps as usize, "lap")];
         if let Some(d) = sum.duration_ms {
             facts.push(format_duration(d as i64));
         }
@@ -1229,1755 +1279,6 @@ fn long_date(d: aim_xrk::summary::Date) -> String {
     let y = if d.month < 3 { d.year as i32 - 1 } else { d.year as i32 };
     let dow = (y + y / 4 - y / 100 + y / 400 + t[d.month as usize - 1] + d.day as i32).rem_euclid(7) as usize;
     format!("{}, {} {}, {}", DAYS[dow], MONTHS[d.month as usize - 1], d.day, d.year)
-}
-
-// ---------------------------------------------------------------------------
-// Tracks page
-
-impl App {
-    fn tracks_page(&mut self, ui: &mut Ui) {
-        let mut lib = self.library.take().unwrap_or_else(Library::load);
-        // Full names, cities and outlines arrive from a background reader.
-        if self.track_details.is_none() {
-            self.track_details = Some(tracks::load_details(lib.pending_details(), ui.ctx().clone()));
-        }
-        if let Some(rx) = &self.track_details {
-            let mut got = false;
-            while let Ok((i, d)) = rx.try_recv() {
-                lib.apply_details(i, d);
-                got = true;
-            }
-            if got {
-                ui.ctx().request_repaint();
-            }
-        }
-        if self.track_sel.is_none() && !lib.tracks.is_empty() {
-            // MYCHRONIX_TRACK=<name> preselects a track (for screenshots).
-            match std::env::var("MYCHRONIX_MAP").as_deref() {
-                Ok("splits") => self.track_map = MapMode::Splits,
-                Ok("elevation") => self.track_map = MapMode::Elevation,
-                _ => {}
-            }
-            if std::env::var("MYCHRONIX_SATELLITE").is_ok() {
-                self.map_satellite = true;
-            }
-            let wanted = std::env::var("MYCHRONIX_TRACK").ok();
-            let i = wanted.and_then(|n| lib.tracks.iter().position(|t| t.name == n)).unwrap_or(0);
-            self.select_track(&lib, i);
-        }
-
-        let visited = lib.tracks.iter().filter(|t| !t.sessions.is_empty()).count();
-        ui.label(RichText::new("Tracks").font(semibold(28.0)).color(TEXT));
-        ui.label(
-            RichText::new(format!(
-                "{} AiM tracks  ·  {} custom  ·  {} with your sessions",
-                group_thousands(lib.count(Kind::Aim)),
-                lib.count(Kind::Custom),
-                visited
-            ))
-            .font(regular(14.5))
-            .color(SECONDARY),
-        );
-        ui.add_space(18.0);
-        self.aim_tracks_banner(ui, &lib);
-
-        if lib.tracks.is_empty() {
-            // The banner above already says why (downloading, or offline).
-            if self.aim_tracks_progress.is_none() && !self.aim_tracks_offline {
-                card(ui, |ui| {
-                    ui.label(RichText::new("No tracks yet").font(semibold(17.0)).color(TEXT));
-                    ui.label(RichText::new("AiM's track database downloads automatically when Mychronix is online, and tracks learned on your MyChron are copied when you connect it.").color(SECONDARY));
-                });
-            }
-            self.library = Some(lib);
-            return;
-        }
-
-        let gap = 14.0;
-        let height = ui.available_height();
-        let list_w = (ui.available_width() * 0.36).clamp(280.0, 380.0);
-        let detail_w = ui.available_width() - list_w - gap;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            let column = Layout::top_down(Align::Min);
-            ui.allocate_ui_with_layout(vec2(list_w, height), column, |ui| {
-                ui.set_width(list_w);
-                self.track_list(ui, &lib);
-            });
-            ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
-                ui.set_width(detail_w);
-                if let Some(i) = self.track_sel {
-                    // The detail scrolls as one column; the map keeps a fixed share of the view.
-                    let map_h = (height * 0.5).clamp(300.0, 620.0);
-                    let mut scroll = egui::ScrollArea::vertical().id_salt("track_detail").auto_shrink([false, false]);
-                    // MYCHRONIX_DETAIL_SCROLL=<px> starts the detail scrolled down (for screenshots).
-                    if self.frames < 2 {
-                        if let Some(px) = std::env::var("MYCHRONIX_DETAIL_SCROLL").ok().and_then(|v| v.parse().ok()) {
-                            scroll = scroll.vertical_scroll_offset(px);
-                        }
-                    }
-                    scroll.show(ui, |ui| {
-                        self.track_detail(ui, &lib, i, map_h);
-                    });
-                }
-            });
-        });
-        self.library = Some(lib);
-    }
-
-    fn select_track(&mut self, lib: &Library, i: usize) {
-        self.track_sel = Some(i);
-        let t = &lib.tracks[i];
-        self.track_file = t.tkk.as_ref().and_then(|p| aim_track::read_tkk(p).ok()).map(|f| (i, f));
-        if let Some(sf) = t.start_finish {
-            self.map_memory.center_at(walkers::lat_lon(sf.lat, sf.lon));
-            let _ = self.map_memory.set_zoom(16.5);
-        }
-        self.fit_map = true;
-        // Your fastest lap here, for the speed map.
-        if !t.sessions.is_empty() && !self.speed_laps.contains_key(&t.guid) {
-            self.speed_laps.insert(t.guid.clone(), speed_lap(lib, t));
-        }
-    }
-
-    fn track_list(&mut self, ui: &mut Ui, lib: &Library) {
-        let favorites = self.favorites.get_or_insert_with(tracks::Favorites::load).clone();
-        // Tabs.
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let count = |f: &dyn Fn(&tracks::Track) -> bool| lib.tracks.iter().filter(|t| f(t)).count();
-            for (view, label, n) in [
-                (TrackView::All, "All", lib.tracks.len()),
-                (TrackView::Favorites, "Favorites", count(&|t| favorites.contains(&t.guid))),
-                (TrackView::Custom, "Custom", count(&|t| t.kind == Kind::Custom)),
-                (TrackView::Raced, "Raced", count(&|t| !t.sessions.is_empty())),
-            ] {
-                if chip(ui, &format!("{label}  {}", group_thousands(n)), self.track_view == view).clicked() {
-                    self.track_view = view;
-                }
-            }
-        });
-        ui.add_space(8.0);
-        search_field(ui, &mut self.track_filter, "Search tracks, cities, regions");
-        ui.add_space(8.0);
-
-        let needle = self.track_filter.to_lowercase();
-        let searching = !needle.is_empty();
-        let in_view = |t: &tracks::Track| match self.track_view {
-            TrackView::All => true,
-            TrackView::Favorites => favorites.contains(&t.guid),
-            TrackView::Custom => t.kind == Kind::Custom,
-            TrackView::Raced => !t.sessions.is_empty(),
-        };
-        let matches = |t: &tracks::Track| {
-            in_view(t)
-                && (!searching
-                    || t.name.to_lowercase().contains(&needle)
-                    || t.region.to_lowercase().contains(&needle)
-                    || t.city.as_deref().is_some_and(|c| c.to_lowercase().contains(&needle))
-                    || t.full_name.as_deref().is_some_and(|c| c.to_lowercase().contains(&needle))
-                    || country_label(&t.country).to_lowercase().contains(&needle))
-        };
-        let by_name = |a: &usize, b: &usize| {
-            let key = |i: usize| lib.tracks[i].full_name.clone().unwrap_or_else(|| lib.tracks[i].name.clone()).to_lowercase();
-            key(*a).cmp(&key(*b))
-        };
-
-        // Rows: the All tab groups by country under collapsible headers; the
-        // other tabs are short, flat lists.
-        #[derive(Clone)]
-        enum Row {
-            Header(String, String, usize, bool),
-            Track(usize),
-        }
-        const HEADER_H: f32 = 44.0;
-        const TRACK_H: f32 = 76.0;
-        let mut rows: Vec<Row> = Vec::new();
-        let mut system_header = None;
-        let system = crate::countries::system_country();
-        if self.track_view == TrackView::All {
-            // Open the system country first (MYCHRONIX_TRACKS_COLLAPSED=1 skips that, for screenshots).
-            if !self.track_list_ready && std::env::var("MYCHRONIX_TRACKS_COLLAPSED").is_err() {
-                if let Some(code) = &system {
-                    self.track_groups_open.insert(code.clone());
-                }
-            }
-            let mut by_country: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
-            for (i, t) in lib.tracks.iter().enumerate() {
-                if matches(t) {
-                    by_country.entry(t.country.clone()).or_default().push(i);
-                }
-            }
-            let mut groups: Vec<(String, String, Vec<usize>)> =
-                by_country.into_iter().map(|(code, mut v)| { v.sort_by(by_name); let l = country_label(&code); (code, l, v) }).collect();
-            groups.sort_by(|a, b| a.1.cmp(&b.1));
-            for (code, label, members) in groups {
-                let open = searching || self.track_groups_open.contains(&code);
-                if system.as_deref() == Some(code.as_str()) {
-                    system_header = Some(rows.len());
-                }
-                rows.push(Row::Header(code.clone(), label, members.len(), open));
-                if open {
-                    rows.extend(members.into_iter().map(Row::Track));
-                }
-            }
-        } else {
-            let mut v: Vec<usize> = (0..lib.tracks.len()).filter(|&i| matches(&lib.tracks[i])).collect();
-            v.sort_by(by_name);
-            rows.extend(v.into_iter().map(Row::Track));
-        }
-
-        // Variable-height rows, drawn only where visible.
-        let heights: Vec<f32> = rows.iter().map(|r| if matches!(r, Row::Header(..)) { HEADER_H } else { TRACK_H }).collect();
-        let mut tops = Vec::with_capacity(rows.len());
-        let mut y = 0.0;
-        for h in &heights {
-            tops.push(y);
-            y += h;
-        }
-        let total = y;
-
-        let mut scroll = egui::ScrollArea::vertical().id_salt(("track_list", self.track_view as u8)).auto_shrink([false, false]);
-        if !self.track_list_ready {
-            if let Some(r) = system_header {
-                scroll = scroll.vertical_scroll_offset(tops[r]);
-            }
-            self.track_list_ready = true;
-        }
-
-        let mut clicked = None;
-        let mut toggled = None;
-        let mut starred = None;
-        scroll.show_viewport(ui, |ui, viewport| {
-            let full = ui.max_rect();
-            ui.set_height(total);
-            let first = tops.partition_point(|&t| t + TRACK_H < viewport.min.y);
-            for k in first..rows.len() {
-                if tops[k] > viewport.max.y {
-                    break;
-                }
-                let rect = Rect::from_min_size(pos2(full.left(), full.top() + tops[k]), vec2(full.width(), heights[k]));
-                let response = ui.interact(rect, ui.id().with(("track_row", k)), Sense::click());
-                if response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                let p = ui.painter();
-                match &rows[k] {
-                    Row::Header(code, label, count, open) => {
-                        if response.hovered() {
-                            p.rect_filled(rect.shrink2(vec2(0.0, 3.0)), CornerRadius::same(theme::RADIUS_SMALL + 2), SURFACE_HOVER);
-                        }
-                        let chevron = if *open { Icon::ChevronDown } else { Icon::ChevronRight };
-                        chevron.image(SECONDARY, 16.0).paint_at(ui, Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), Vec2::splat(16.0)));
-                        p.text(pos2(rect.left() + 32.0, rect.center().y), egui::Align2::LEFT_CENTER, label, semibold(14.5), TEXT);
-                        p.text(pos2(rect.right() - 12.0, rect.center().y), egui::Align2::RIGHT_CENTER, group_thousands(*count), regular(12.5), DIM);
-                        if response.clicked() && !searching {
-                            toggled = Some(code.clone());
-                        }
-                    }
-                    Row::Track(i) => {
-                        let i = *i;
-                        let t = &lib.tracks[i];
-                        let fill = if self.track_sel == Some(i) { Some(SURFACE_ACTIVE) } else if response.hovered() { Some(SURFACE_HOVER) } else { None };
-                        if let Some(fill) = fill {
-                            p.rect_filled(rect.shrink2(vec2(0.0, 2.0)), CornerRadius::same(theme::RADIUS_SMALL + 2), fill);
-                        }
-                        let indent = if self.track_view == TrackView::All { 8.0 } else { 0.0 };
-                        let thumb = Rect::from_min_size(pos2(rect.left() + 8.0 + indent, rect.top() + 8.0), vec2(64.0, TRACK_H - 16.0));
-                        outline_thumbnail(p, thumb, &t.outline, if t.kind == Kind::Custom { SERIES[1] } else { SECONDARY });
-                        let left = thumb.right() + 12.0;
-                        let title = t.full_name.as_deref().unwrap_or(&t.name);
-                        let name_w = (rect.right() - left - 120.0).max(60.0);
-                        p.galley(pos2(left, rect.top() + 9.0), p.layout_job(single_line(title, medium(14.0), TEXT, name_w)), TEXT);
-                        let place = if self.track_view == TrackView::All {
-                            t.locality()
-                        } else {
-                            [t.locality(), country_label(&t.country)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ")
-                        };
-                        p.text(pos2(left, rect.top() + 39.0), egui::Align2::LEFT_CENTER, place, regular(12.5), SECONDARY);
-                        p.text(pos2(left, rect.top() + 57.0), egui::Align2::LEFT_CENTER, t.description(), regular(12.0), DIM);
-                        // Right: favorite star, then the name on the device; custom tag and sessions below.
-                        let star = Rect::from_center_size(pos2(rect.right() - 20.0, rect.top() + 18.0), Vec2::splat(26.0));
-                        let star_resp = ui.interact(star, ui.id().with(("track_star", k)), Sense::click());
-                        let fav = favorites.contains(&t.guid);
-                        let (icon, tint) = if fav { (Icon::StarFilled, theme::FAVORITE) } else if star_resp.hovered() { (Icon::Star, TEXT) } else { (Icon::Star, DIM) };
-                        icon.image(tint, 16.0).paint_at(ui, Rect::from_center_size(star.center(), Vec2::splat(16.0)));
-                        if star_resp.clicked() {
-                            starred = Some(t.guid.clone());
-                        }
-                        let p = ui.painter();
-                        p.text(pos2(star.left() - 4.0, rect.top() + 18.0), egui::Align2::RIGHT_CENTER, &t.name, regular(12.0), DIM);
-                        let mut right = rect.right() - 12.0;
-                        if !t.sessions.is_empty() {
-                            let n = t.sessions.len();
-                            let g = p.text(pos2(right, rect.top() + 50.0), egui::Align2::RIGHT_CENTER, format!("{n} session{}", if n == 1 { "" } else { "s" }), regular(12.5), SECONDARY);
-                            right = g.left() - 8.0;
-                        }
-                        if t.kind == Kind::Custom {
-                            let galley = p.layout_no_wrap("Custom".into(), semibold(11.0), TEXT);
-                            let r = Rect::from_min_size(pos2(right - galley.size().x - 14.0, rect.top() + 40.0), galley.size() + vec2(14.0, 6.0));
-                            p.rect_stroke(r, CornerRadius::same(255), Stroke::new(1.0, DIM), egui::StrokeKind::Inside);
-                            p.galley(r.center() - galley.size() / 2.0, galley, TEXT);
-                        }
-                        if response.clicked() && !star_resp.clicked() {
-                            clicked = Some(i);
-                        }
-                    }
-                }
-            }
-        });
-        if rows.is_empty() {
-            let msg = match self.track_view {
-                TrackView::Favorites if !searching => "No favorites yet. Star a track to keep it here.",
-                TrackView::Custom if !searching => "No custom tracks yet. They come over from your MyChron when you connect.",
-                _ => "No tracks match.",
-            };
-            ui.label(RichText::new(msg).color(DIM));
-        }
-        if let Some(code) = toggled {
-            if !self.track_groups_open.remove(&code) {
-                self.track_groups_open.insert(code);
-            }
-        }
-        if let Some(guid) = starred {
-            if let Some(f) = self.favorites.as_mut() {
-                if let Err(e) = f.toggle(&guid) {
-                    self.error = Some(format!("Couldn't save favorites: {e}"));
-                }
-            }
-        }
-        if let Some(i) = clicked {
-            self.select_track(lib, i);
-        }
-    }
-
-    fn track_detail(&mut self, ui: &mut Ui, lib: &Library, i: usize, map_h: f32) {
-        let t = &lib.tracks[i];
-        let file = self.track_file.as_ref().filter(|(j, _)| *j == i).map(|(_, f)| f);
-        let info = file.map(|f| &f.info);
-
-        // AiM's details for the venue, laid out like RaceStudio's track view.
-        section(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                let logo_w = 150.0;
-                let text_w = ui.available_width() - logo_w - 12.0;
-                ui.allocate_ui_with_layout(vec2(text_w, 0.0), Layout::top_down(Align::Min), |ui| {
-                    ui.set_width(text_w);
-                    ui.spacing_mut().item_spacing.y = 3.0;
-                    let title = t.full_name.as_deref().unwrap_or(&t.name);
-                    let fav = self.favorites.get_or_insert_with(tracks::Favorites::load).contains(&t.guid);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(title).font(semibold(22.0)).color(TEXT));
-                        let (icon, label) = if fav { (Icon::StarFilled, "Favorite") } else { (Icon::Star, "Add to favorites") };
-                        if button_with(ui, Some(icon), fav.then_some(theme::FAVORITE), label, false).clicked() {
-                            if let Err(e) = self.favorites.as_mut().unwrap().toggle(&t.guid) {
-                                self.error = Some(format!("Couldn't save favorites: {e}"));
-                            }
-                        }
-                    });
-                    let kind = if t.kind == Kind::Custom { "Custom track" } else { "AiM track" };
-                    ui.label(RichText::new(format!("{kind}  ·  name on device: {}", t.name)).size(13.0).color(SECONDARY));
-                    ui.add_space(6.0);
-                    let address = [
-                        info.and_then(|i| i.address.clone()),
-                        info.and_then(|i| i.postcode.clone()),
-                        info.and_then(|i| i.city.clone()).or(t.city.clone()),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("  ·  ");
-                    if !address.is_empty() {
-                        ui.label(RichText::new(address).color(TEXT));
-                    }
-                    let place = [t.region.clone(), country_label(&t.country)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ");
-                    ui.label(RichText::new(place).color(TEXT));
-                    if let Some(phone) = info.and_then(|i| i.phone.as_deref()) {
-                        ui.label(RichText::new(phone).color(SECONDARY));
-                    }
-                    if let Some(url) = info.and_then(|i| i.website.as_deref()) {
-                        ui.hyperlink_to(RichText::new(url).color(SERIES[0]), url);
-                    }
-                    ui.add_space(6.0);
-                    let desc = t.description();
-                    if !desc.is_empty() {
-                        ui.label(RichText::new(desc).font(medium(14.0)).color(TEXT));
-                    }
-                    if let Some(tz) = file.and_then(|f| f.timezone.as_deref()) {
-                        ui.label(RichText::new(format!("Time zone: {tz}")).size(13.0).color(SECONDARY));
-                    }
-                    if let Some(sf) = t.start_finish {
-                        let ns = if sf.lat >= 0.0 { "N" } else { "S" };
-                        let ew = if sf.lon >= 0.0 { "E" } else { "W" };
-                        ui.label(
-                            RichText::new(format!("Start/finish: {:.7}° {ns}, {:.7}° {ew}", sf.lat.abs(), sf.lon.abs()))
-                                .size(13.0)
-                                .color(SECONDARY),
-                        );
-                    }
-                    if let Some(comment) = info.and_then(|i| i.comment.as_deref()) {
-                        ui.label(RichText::new(comment).size(13.0).color(SECONDARY));
-                    }
-                    // Everything AiM stores for the track, verbatim.
-                    egui::CollapsingHeader::new(RichText::new("All AiM fields").size(13.0).color(SECONDARY))
-                        .id_salt(("aim_fields", i))
-                        .show(ui, |ui| {
-                            egui::Grid::new(("aim_fields_grid", i)).num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
-                                let mut row = |k: &str, v: String| {
-                                    ui.label(RichText::new(k).size(12.5).color(DIM));
-                                    ui.label(RichText::new(v).size(12.5).color(TEXT));
-                                    ui.end_row();
-                                };
-                                row("AiM id", t.id.clone());
-                                row("Track guid", t.guid.clone());
-                                if let Some(l) = t.length_m {
-                                    row("Length", format!("{l:.1} m ({:.3} mi)", l / 1609.344));
-                                }
-                                row("Type", t.track_kind.label());
-                                if let Some(f) = file {
-                                    row("Outline", format!("{} points", f.outline.len()));
-                                }
-                                for (k, v) in info.map(|i| i.fields.clone()).unwrap_or_default() {
-                                    row(&k, v);
-                                }
-                            });
-                        });
-                });
-                if let Some(png) = file.and_then(|f| f.logo_png.clone()) {
-                    ui.add(
-                        egui::Image::from_bytes(format!("bytes://track-logo-{}.png", t.id), png)
-                            .max_size(vec2(logo_w, 110.0))
-                            .corner_radius(CornerRadius::same(6)),
-                    );
-                }
-            });
-        });
-        ui.add_space(10.0);
-
-        // Map: OpenStreetMap with the track drawn on top.
-        let file_outline = self.track_file.as_ref().filter(|(j, _)| *j == i).map(|(_, f)| f.outline.clone()).unwrap_or_default();
-        let outline: Vec<aim_track::LatLon> = if !t.outline.is_empty() { t.outline.clone() } else { file_outline };
-        let lap = self.speed_laps.get(&t.guid).and_then(Option::as_ref);
-
-        // Speed / splits / outline switch, when there's a lap to show.
-        if self.split_count < 2 {
-            self.split_count = 3;
-        }
-        // Elevation comes with the track file's outline (every AiM track has it).
-        let elevation: Vec<f32> = self
-            .track_file
-            .as_ref()
-            .filter(|(j, f)| *j == i && f.elevation_m.len() == outline.len())
-            .map(|(_, f)| f.elevation_m.clone())
-            .unwrap_or_default();
-        let mut modes = Vec::new();
-        if lap.is_some() {
-            modes.extend([(MapMode::Speed, "Your speed"), (MapMode::Splits, "Splits")]);
-        }
-        if !elevation.is_empty() {
-            modes.push((MapMode::Elevation, "Elevation"));
-        }
-        modes.push((MapMode::Outline, "Outline"));
-        if !modes.iter().any(|(m, _)| *m == self.track_map) {
-            // e.g. Your speed on a track you haven't raced: fall back to what this track has.
-            self.track_map = modes[0].0;
-        }
-        if modes.len() > 1 {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                for (mode, label) in &modes {
-                    if chip(ui, label, self.track_map == *mode).clicked() {
-                        self.track_map = *mode;
-                    }
-                }
-                if self.track_map == MapMode::Splits {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        for n in (2..=6).rev() {
-                            if chip(ui, &n.to_string(), self.split_count == n).clicked() {
-                                self.split_count = n;
-                            }
-                        }
-                        ui.label(RichText::new("Sectors").size(12.5).color(DIM));
-                    });
-                }
-            });
-            ui.add_space(8.0);
-        }
-        let mode = self.track_map;
-        let show_speed = mode == MapMode::Speed;
-        // Splits are placed along the track's own outline when it has one, else along your lap.
-        let sectors = (mode == MapMode::Splits)
-            .then(|| {
-                let reference = if !outline.is_empty() { outline.clone() } else { lap.map(|l| l.points.clone()).unwrap_or_default() };
-                splits::Sectors::even(&reference, t.start_finish, self.split_count)
-            })
-            .flatten();
-        let overlay = TrackOverlay {
-            outline: if mode == MapMode::Outline {
-                if !outline.is_empty() { outline.clone() } else { lap.map(|l| l.points.clone()).unwrap_or_default() }
-            } else {
-                Vec::new()
-            },
-            outline_color: if t.kind == Kind::Custom { SERIES[1] } else { SERIES[0] },
-            speed: show_speed.then(|| lap.cloned()).flatten(),
-            sectors: sectors.as_ref().map(|s| (s.path.clone(), s.boundaries.clone())),
-            elevation: (mode == MapMode::Elevation).then(|| (outline.clone(), elevation.clone())),
-            start_finish: t.start_finish,
-        };
-
-        let options = || walkers::HttpOptions {
-            cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
-            user_agent: Some(walkers::HeaderValue::from_static("Mychronix/0.1 (AiM MyChron data analysis; Linux desktop)")),
-            ..Default::default()
-        };
-        if self.map_tiles.is_none() {
-            self.map_tiles = Some(walkers::HttpTiles::with_options(walkers::sources::OpenStreetMap, options(), ui.ctx().clone()));
-        }
-        if self.map_satellite && self.sat_tiles.is_none() {
-            self.sat_tiles = Some(walkers::HttpTiles::with_options(EsriImagery, options(), ui.ctx().clone()));
-        }
-        let center = t.start_finish.map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
-        // Zoom to fit the drawn track once per selection.
-        if std::mem::take(&mut self.fit_map) {
-            let drawn: Vec<aim_track::LatLon> = match (&overlay.speed, &overlay.sectors, &overlay.elevation) {
-                (Some(l), _, _) => l.points.clone(),
-                (None, Some((path, _)), _) => path.clone(),
-                (None, None, Some((path, _))) => path.clone(),
-                _ => overlay.outline.clone(),
-            };
-            if let Some((c, zoom)) = fit_view(&drawn, vec2(ui.available_width(), map_h)) {
-                self.map_memory.center_at(walkers::lat_lon(c.lat, c.lon));
-                let _ = self.map_memory.set_zoom(zoom);
-            }
-        }
-        let mut toggle = false;
-        Frame::new().corner_radius(CornerRadius::same(theme::RADIUS)).fill(SURFACE).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_height(map_h);
-            let tiles: &mut walkers::HttpTiles = if self.map_satellite { self.sat_tiles.as_mut().unwrap() } else { self.map_tiles.as_mut().unwrap() };
-            let map = ui.add(walkers::Map::new(Some(tiles), &mut self.map_memory, center).with_plugin(overlay));
-            // Map / Satellite switch in the map's top-right corner.
-            let corner = Rect::from_min_size(map.rect.right_top() + vec2(-190.0, 10.0), vec2(180.0, 36.0));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(corner).layout(Layout::right_to_left(Align::Center)), |ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if chip(ui, "Satellite", self.map_satellite).clicked() && !self.map_satellite {
-                    toggle = true;
-                }
-                if chip(ui, "Map", !self.map_satellite).clicked() && self.map_satellite {
-                    toggle = true;
-                }
-            });
-        });
-        if toggle {
-            self.map_satellite = !self.map_satellite;
-        }
-        let credit = if self.map_satellite { "Imagery © Esri, Maxar, Earthstar Geographics." } else { "Map data © OpenStreetMap contributors." };
-        // Offline, maps viewed before come from the cache; others draw the track on a blank background.
-        let credit = if self.aim_tracks_offline { format!("{credit}  Offline: maps you haven't viewed before appear once you're online.") } else { credit.to_string() };
-        let credit = credit.as_str();
-
-        ui.add_space(6.0);
-        match (mode, lap) {
-            (MapMode::Speed, Some(lap)) => {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{:.0}", crate::units::speed(lap.min_kmh))).size(12.0).color(DIM));
-                    let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
-                    for k in 0..40 {
-                        let r = Rect::from_min_size(pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
-                        ui.painter().rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
-                    }
-                    ui.label(RichText::new(format!("{:.0} {}", crate::units::speed(lap.max_kmh), crate::units::speed_unit())).size(12.0).color(DIM));
-                    ui.add_space(14.0);
-                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                    ui.painter().circle_filled(dot.center(), 8.0, TEXT);
-                    ui.painter().text(dot.center(), egui::Align2::CENTER_CENTER, "1", semibold(10.5), ON_TEXT);
-                    ui.label(RichText::new("Corners, at their slowest point (numbered as in Analysis → Corners)").size(12.0).color(DIM));
-                });
-                ui.label(RichText::new(format!("{}  {credit}", lap.source)).size(11.5).color(DIM));
-            }
-            (MapMode::Splits, Some(lap)) => {
-                if let Some(sec) = &sectors {
-                    ui.horizontal(|ui| {
-                        for k in 0..sec.count() {
-                            let (sw, _) = ui.allocate_exact_size(vec2(18.0, 10.0), Sense::hover());
-                            ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(4.0, SERIES[k % SERIES.len()]));
-                            ui.label(RichText::new(format!("S{}", k + 1)).size(12.5).color(SECONDARY));
-                            ui.add_space(6.0);
-                        }
-                    });
-                }
-                ui.label(
-                    RichText::new(format!("Splits placed by Mychronix at equal distances from the start/finish, timed from your GPS.  {credit}"))
-                        .size(11.5)
-                        .color(DIM),
-                );
-                ui.add_space(10.0);
-                if let Some(sec) = &sectors {
-                    split_table(ui, lap, sec);
-                }
-            }
-            (MapMode::Elevation, _) => {
-                let (lo, hi) = elevation.iter().fold((f32::MAX, f32::MIN), |(a, b), &e| (a.min(e), b.max(e)));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{lo:.0}")).size(12.0).color(DIM));
-                    let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
-                    for k in 0..40 {
-                        let r = Rect::from_min_size(pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
-                        ui.painter().rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
-                    }
-                    ui.label(RichText::new(format!("{hi:.0} m above sea level  ·  {:.0} m between lowest and highest point", hi - lo)).size(12.0).color(DIM));
-                });
-                ui.label(RichText::new(format!("Elevation from AiM's track file, as in RaceStudio's track preview.  {credit}")).size(11.5).color(DIM));
-            }
-            _ => {
-                let note = if outline.is_empty() {
-                    "AiM tracks give the start/finish only; record a session here to see the shape."
-                } else if t.kind == Kind::Custom {
-                    "Outline from the custom track file."
-                } else {
-                    "Outline from AiM's track file."
-                };
-                ui.label(RichText::new(format!("{note}  {credit}")).size(11.5).color(DIM));
-            }
-        }
-        ui.add_space(10.0);
-
-        // Sessions recorded here.
-        let mut open = None;
-        section(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Your sessions here").font(semibold(16.0)).color(TEXT));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(best) = t.best_lap_ms(lib) {
-                        ui.label(RichText::new(format_lap_time(best as i64)).font(semibold(16.0)).color(theme::GOOD));
-                    }
-                });
-            });
-            ui.add_space(6.0);
-            if t.sessions.is_empty() {
-                ui.label(RichText::new("None yet. Sessions you download from your MyChron show up here.").color(SECONDARY));
-                return;
-            }
-            let track_best = t.best_lap_ms(lib);
-            // Part of the page (no scroll box of its own), so scrolling the page reaches every session.
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for &si in &t.sessions {
-                    let s = &lib.sessions[si];
-                    let sum = &s.summary;
-                    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
-                    if ui.is_rect_visible(rect) {
-                        let p = ui.painter();
-                        if response.hovered() {
-                            p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), SURFACE_HOVER);
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
-                        let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
-                        p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.0), TEXT);
-                        let when = [sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
-                        p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, when, regular(12.5), DIM);
-                        let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
-                        let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
-                        p.text(pos2(r, top), egui::Align2::RIGHT_CENTER, best, medium(14.0), if is_best { theme::GOOD } else { TEXT });
-                        let laps = sum.laps.unwrap_or(0);
-                        p.text(pos2(r, bottom), egui::Align2::RIGHT_CENTER, format!("{laps} lap{}", if laps == 1 { "" } else { "s" }), regular(12.5), DIM);
-                    }
-                    if response.clicked() {
-                        open = Some(s.path.clone());
-                    }
-                }
-            });
-        });
-        if let Some(path) = open {
-            self.load(path);
-        }
-    }
-}
-
-fn country_label(code: &str) -> String {
-    match crate::countries::name(code) {
-        Some(name) => name.to_string(),
-        None if code.is_empty() => "Unknown country".to_string(),
-        None => code.to_string(),
-    }
-}
-
-/// One line of text cut to `width` with an ellipsis.
-fn single_line(text: &str, font: egui::FontId, color: Color32, width: f32) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
-    job.wrap = egui::text::TextWrapping { max_width: width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-    job
-}
-
-/// A small drawing of a track's outline, fitted into `rect`.
-fn outline_thumbnail(p: &egui::Painter, rect: Rect, outline: &[aim_track::LatLon], color: Color32) {
-    p.rect_filled(rect, CornerRadius::same(6), WINDOW);
-    if outline.len() < 2 {
-        return;
-    }
-    let lat0 = outline[0].lat;
-    let kx = lat0.to_radians().cos();
-    let xy: Vec<(f64, f64)> = outline.iter().map(|q| (q.lon * kx, q.lat)).collect();
-    let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-    for &(x, y) in &xy {
-        x0 = x0.min(x);
-        x1 = x1.max(x);
-        y0 = y0.min(y);
-        y1 = y1.max(y);
-    }
-    let area = rect.shrink(6.0);
-    let scale = (area.width() as f64 / (x1 - x0).max(1e-9)).min(area.height() as f64 / (y1 - y0).max(1e-9));
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    let pts: Vec<_> = xy
-        .iter()
-        .map(|&(x, y)| pos2(area.center().x + ((x - cx) * scale) as f32, area.center().y - ((y - cy) * scale) as f32))
-        .collect();
-    p.add(egui::Shape::line(pts, Stroke::new(1.5, color)));
-}
-
-/// Your fastest lap at a track: where you drove, how fast, and where you braked hardest.
-#[derive(Clone)]
-struct SpeedLap {
-    points: Vec<aim_track::LatLon>,
-    kmh: Vec<f64>,
-    min_kmh: f64,
-    max_kmh: f64,
-    brakes: Vec<Brake>,
-    /// Which lap this is, for the caption.
-    source: String,
-    /// The whole session it came from, for timing splits on every lap.
-    session_number: u32,
-    session_laps: Vec<aim_xrk::Lap>,
-    session_times: Vec<i64>,
-    session_points: Vec<aim_track::LatLon>,
-}
-
-/// A corner on the speed map, numbered as on Analysis → Corners.
-#[derive(Clone, Copy)]
-struct Brake {
-    /// Index into `points` of the corner's slowest point.
-    at: usize,
-    number: usize,
-}
-
-/// The best lap of your best session at `t`; if the logger timed no laps
-/// there, one loop cut from your longest session.
-fn speed_lap(lib: &Library, t: &tracks::Track) -> Option<SpeedLap> {
-    let timed = t
-        .sessions
-        .iter()
-        .filter(|&&i| lib.sessions[i].summary.best_lap_ms.is_some())
-        .min_by_key(|&&i| lib.sessions[i].summary.best_lap_ms);
-    let longest = t.sessions.iter().max_by_key(|&&i| lib.sessions[i].summary.duration_ms.unwrap_or(0));
-    let pick = *timed.or(longest)?;
-    let session = Session::open(&lib.sessions[pick].path).ok()?;
-    let gps = session.gps.as_ref()?;
-    let all: Vec<(i64, aim_track::LatLon, f64)> = (0..gps.len())
-        .map(|i| (gps.times_ms[i], aim_track::LatLon { lat: gps.latitude[i], lon: gps.longitude[i] }, gps.speed_kmh[i]))
-        .collect();
-    let number = lib.sessions[pick].summary.number.unwrap_or(0);
-    let (range, source) = match session.best_lap(MIN_LAP_MS) {
-        Some(lap) => {
-            let lo = all.partition_point(|p| p.0 < lap.start_ms);
-            let hi = all.partition_point(|p| p.0 <= lap.end_ms);
-            (lo..hi, format!("Your best lap here: session {number}, lap {} ({}).", lap.number, format_lap_time(lap.duration_ms())))
-        }
-        None => (one_loop(&all), format!("One lap from session {number} (no timed laps here).")),
-    };
-    let lap = &all[range];
-    if lap.len() < 10 {
-        return None;
-    }
-    let times: Vec<i64> = lap.iter().map(|p| p.0).collect();
-    let kmh = smooth(&lap.iter().map(|p| p.2).collect::<Vec<_>>(), 3);
-    let (min_kmh, max_kmh) = robust_range(kmh.iter().copied());
-    Some(SpeedLap {
-        points: lap.iter().map(|p| p.1).collect(),
-        brakes: corner_points(&times, &lap.iter().map(|p| p.2).collect::<Vec<_>>()),
-        kmh,
-        min_kmh,
-        max_kmh,
-        source,
-        session_number: number,
-        session_laps: session.complete_laps().to_vec(),
-        session_times: all.iter().map(|p| p.0).collect(),
-        session_points: all.iter().map(|p| p.1).collect(),
-    })
-}
-
-/// Centered moving average over `±half` samples.
-fn smooth(v: &[f64], half: usize) -> Vec<f64> {
-    (0..v.len())
-        .map(|i| {
-            let (a, b) = (i.saturating_sub(half), (i + half + 1).min(v.len()));
-            v[a..b].iter().sum::<f64>() / (b - a) as f64
-        })
-        .collect()
-}
-
-/// Each corner's slowest point, found and numbered the same way as on
-/// Analysis → Corners (braking from the highest speed to the lowest).
-fn corner_points(times_ms: &[i64], kmh: &[f64]) -> Vec<Brake> {
-    crate::braking::find_zones(times_ms, kmh, |_| 0.0)
-        .iter()
-        .enumerate()
-        .map(|(n, z)| Brake { at: times_ms.partition_point(|&t| t < z.apex_ms).min(times_ms.len() - 1), number: n + 1 })
-        .collect()
-}
-
-/// Sector times for every complete lap of the session, best per sector in
-/// green, with the ideal lap (best sectors added up).
-fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
-    let points = sectors.split_points();
-    let rows: Vec<(i32, i64, Vec<i64>)> = lap
-        .session_laps
-        .iter()
-        .filter_map(|l| {
-            splits::sector_times(&lap.session_times, &lap.session_points, l.start_ms, l.end_ms, &points)
-                .map(|t| (l.number, l.duration_ms(), t))
-        })
-        .collect();
-    section(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("Sector times  ·  session {}", lap.session_number)).font(semibold(16.0)).color(TEXT));
-        });
-        ui.add_space(6.0);
-        if rows.is_empty() {
-            ui.label(RichText::new("No complete laps in this session pass every split.").color(SECONDARY));
-            return;
-        }
-        let n = sectors.count();
-        let best: Vec<i64> = (0..n).map(|k| rows.iter().map(|r| r.2[k]).min().unwrap_or(0)).collect();
-        let best_lap = rows.iter().map(|r| r.1).min().unwrap_or(0);
-        let ideal: i64 = best.iter().sum();
-        let secs = |ms: i64| format!("{:.3}", ms as f64 / 1000.0);
-        egui::Grid::new("split_table").num_columns(n + 2).spacing([28.0, 6.0]).striped(false).show(ui, |ui| {
-            ui.label(RichText::new("Lap").size(12.5).color(DIM));
-            for k in 0..n {
-                ui.horizontal(|ui| {
-                    let (sw, _) = ui.allocate_exact_size(vec2(12.0, 10.0), Sense::hover());
-                    ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(3.0, SERIES[k % SERIES.len()]));
-                    ui.label(RichText::new(format!("S{}", k + 1)).size(12.5).color(DIM));
-                });
-            }
-            ui.label(RichText::new("Lap time").size(12.5).color(DIM));
-            ui.end_row();
-            for (number, total, times) in &rows {
-                ui.label(RichText::new(number.to_string()).color(SECONDARY));
-                for (k, t) in times.iter().enumerate() {
-                    let color = if *t == best[k] { theme::GOOD } else { TEXT };
-                    ui.label(RichText::new(secs(*t)).font(medium(14.0)).color(color));
-                }
-                let color = if *total == best_lap { theme::GOOD } else { TEXT };
-                ui.label(RichText::new(format_lap_time(*total)).font(medium(14.0)).color(color));
-                ui.end_row();
-            }
-            ui.label(RichText::new("Ideal").font(semibold(14.0)).color(TEXT));
-            for t in &best {
-                ui.label(RichText::new(secs(*t)).font(semibold(14.0)).color(theme::GOOD));
-            }
-            ui.label(RichText::new(format_lap_time(ideal)).font(semibold(14.0)).color(theme::GOOD));
-            ui.end_row();
-        });
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(format!("Ideal lap is {} faster than your best ({}).", secs(best_lap - ideal), format_lap_time(best_lap)))
-                .size(12.5)
-                .color(SECONDARY),
-        );
-    });
-}
-
-/// Esri World Imagery: satellite and aerial photos. Free for personal,
-/// non-commercial use with attribution.
-struct EsriImagery;
-
-impl walkers::sources::TileSource for EsriImagery {
-    fn tile_url(&self, id: walkers::TileId) -> String {
-        format!("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}", id.zoom, id.y, id.x)
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        walkers::sources::Attribution {
-            text: "Esri, Maxar, Earthstar Geographics",
-            url: "https://www.esri.com/",
-            logo_light: None,
-            logo_dark: None,
-        }
-    }
-}
-
-/// Center and web-map zoom that fit `points` into a `size` pixel view with a margin.
-fn fit_view(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f64)> {
-    if points.len() < 2 {
-        return None;
-    }
-    let (mut lat0, mut lat1, mut lon0, mut lon1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-    for p in points {
-        lat0 = lat0.min(p.lat);
-        lat1 = lat1.max(p.lat);
-        lon0 = lon0.min(p.lon);
-        lon1 = lon1.max(p.lon);
-    }
-    let c = aim_track::LatLon { lat: (lat0 + lat1) / 2.0, lon: (lon0 + lon1) / 2.0 };
-    let width_m = aim_track::LatLon { lat: c.lat, lon: lon0 }.distance_m(&aim_track::LatLon { lat: c.lat, lon: lon1 }).max(20.0);
-    let height_m = aim_track::LatLon { lat: lat0, lon: c.lon }.distance_m(&aim_track::LatLon { lat: lat1, lon: c.lon }).max(20.0);
-    // Meters per pixel at zoom z (256-px tiles): 156543.03 × cos(lat) / 2^z.
-    let mpp = (width_m / (size.x as f64 * 0.75)).max(height_m / (size.y as f64 * 0.75));
-    let zoom = (156_543.03 * c.lat.to_radians().cos() / mpp).log2().clamp(3.0, 19.5);
-    Some((c, zoom))
-}
-
-/// Speed color: viridis, dark purple when slow to yellow when fast. Its
-/// lightness rises steadily, so slow and fast stay apart for colorblind
-/// viewers too.
-fn speed_color(t: f32) -> Color32 {
-    const STOPS: [Color32; 5] = [
-        Color32::from_rgb(0x44, 0x01, 0x54),
-        Color32::from_rgb(0x3b, 0x52, 0x8b),
-        Color32::from_rgb(0x21, 0x91, 0x8c),
-        Color32::from_rgb(0x5e, 0xc9, 0x62),
-        Color32::from_rgb(0xfd, 0xe7, 0x25),
-    ];
-    let x = t.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
-    let i = (x.floor() as usize).min(STOPS.len() - 2);
-    mix(STOPS[i], STOPS[i + 1], x - i as f32)
-}
-
-/// The first closed loop in a GPS trace: from the first moment the kart is
-/// moving to where it first comes back within 15 m after covering 250 m.
-fn one_loop(points: &[(i64, aim_track::LatLon, f64)]) -> std::ops::Range<usize> {
-    let Some(start) = points.iter().position(|(_, _, kmh)| *kmh > 20.0) else {
-        return 0..points.len();
-    };
-    let origin = points[start].1;
-    let mut traveled = 0.0;
-    for j in start + 1..points.len() {
-        traveled += points[j - 1].1.distance_m(&points[j].1);
-        if traveled > 250.0 && points[j].1.distance_m(&origin) < 15.0 {
-            return start..j + 1;
-        }
-    }
-    start..points.len()
-}
-
-/// Draws a track on the map: your speed (with braking points) or its outline, and the start/finish.
-struct TrackOverlay {
-    outline: Vec<aim_track::LatLon>,
-    outline_color: Color32,
-    speed: Option<SpeedLap>,
-    /// Splits view: the reference path and where each sector after the first begins.
-    sectors: Option<(Vec<aim_track::LatLon>, Vec<usize>)>,
-    /// Elevation view: the outline and each point's height in meters.
-    elevation: Option<(Vec<aim_track::LatLon>, Vec<f32>)>,
-    start_finish: Option<aim_track::LatLon>,
-}
-
-impl walkers::Plugin for TrackOverlay {
-    fn run(self: Box<Self>, ui: &mut Ui, response: &egui::Response, projector: &walkers::Projector, _memory: &walkers::MapMemory) {
-        // Draw only inside the map's visible area (it may be partly scrolled out of view).
-        ui.set_clip_rect(response.rect.intersect(ui.clip_rect()));
-        let painter = ui.painter();
-        let to_screen = |p: &aim_track::LatLon| projector.project(walkers::lat_lon(p.lat, p.lon)).to_pos2();
-        let casing = Stroke::new(8.0, Color32::from_black_alpha(120));
-        if let Some(lap) = &self.speed {
-            let pts: Vec<_> = lap.points.iter().map(to_screen).collect();
-            painter.add(egui::Shape::line(pts.clone(), casing));
-            let span = (lap.max_kmh - lap.min_kmh).max(1.0);
-            for k in 0..pts.len() - 1 {
-                let t = ((lap.kmh[k] - lap.min_kmh) / span) as f32;
-                painter.line_segment([pts[k], pts[k + 1]], Stroke::new(5.0, speed_color(t)));
-            }
-            // Corner numbers at each corner's slowest point, as on Analysis → Corners.
-            for b in &lap.brakes {
-                let c = pts[b.at];
-                painter.circle_filled(c, 12.0, Color32::from_black_alpha(170));
-                painter.circle_filled(c, 10.0, TEXT);
-                painter.text(c, egui::Align2::CENTER_CENTER, b.number.to_string(), semibold(12.0), ON_TEXT);
-            }
-        } else if let Some((path, heights)) = &self.elevation {
-            let pts: Vec<_> = path.iter().map(to_screen).collect();
-            painter.add(egui::Shape::line(pts.clone(), casing));
-            let (lo, hi) = heights.iter().fold((f32::MAX, f32::MIN), |(a, b), &e| (a.min(e), b.max(e)));
-            let span = (hi - lo).max(0.5);
-            for k in 0..pts.len().saturating_sub(1) {
-                painter.line_segment([pts[k], pts[k + 1]], Stroke::new(5.0, speed_color((heights[k] - lo) / span)));
-            }
-        } else if let Some((path, boundaries)) = &self.sectors {
-            let pts: Vec<_> = path.iter().map(to_screen).collect();
-            painter.add(egui::Shape::line(pts.clone(), casing));
-            let mut sector = 0;
-            for k in 0..pts.len() - 1 {
-                while sector < boundaries.len() && k >= boundaries[sector] {
-                    sector += 1;
-                }
-                painter.line_segment([pts[k], pts[k + 1]], Stroke::new(5.0, SERIES[sector % SERIES.len()]));
-            }
-            for (n, &b) in boundaries.iter().enumerate() {
-                let c = pts[b];
-                painter.circle_filled(c, 8.0, Color32::from_black_alpha(170));
-                painter.circle_filled(c, 5.5, TEXT);
-                let galley = painter.layout_no_wrap(format!("S{}", n + 2), semibold(11.5), TEXT);
-                let r = Rect::from_min_size(c + vec2(10.0, -galley.size().y / 2.0 - 3.0), galley.size() + vec2(10.0, 6.0));
-                painter.rect_filled(r, CornerRadius::same(4), Color32::from_black_alpha(190));
-                painter.galley(r.min + vec2(5.0, 3.0), galley, TEXT);
-            }
-        } else if self.outline.len() > 1 {
-            let pts: Vec<_> = self.outline.iter().map(to_screen).collect();
-            painter.add(egui::Shape::line(pts.clone(), Stroke::new(7.0, Color32::from_black_alpha(110))));
-            painter.add(egui::Shape::line(pts, Stroke::new(4.0, self.outline_color)));
-        }
-        if let Some(sf) = &self.start_finish {
-            let c = to_screen(sf);
-            painter.circle_filled(c, 9.0, Color32::from_black_alpha(140));
-            painter.circle_filled(c, 7.0, TEXT);
-            Icon::Flag.image(ON_TEXT, 10.0).paint_at(ui, Rect::from_center_size(c, Vec2::splat(10.0)));
-        }
-    }
-}
-
-impl App {
-    /// Applies what the MyChron worker has finished and keeps scanning for a
-    /// logger (the Device page and the Garage both show its status).
-    fn device_poll(&mut self, ctx: &egui::Context) {
-        use crate::device::{Command, Event};
-        let ctx = ctx.clone();
-        let worker = self.dev.get_or_insert_with(|| crate::device::Worker::spawn(ctx.clone()));
-
-        // Apply whatever the worker has finished.
-        let mut events = Vec::new();
-        let mut worker_died = false;
-        loop {
-            match worker.rx.try_recv() {
-                Ok(e) => events.push(e),
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    worker_died = true;
-                    break;
-                }
-            }
-        }
-        // The worker stopped (it crashed; see crash.log beside the log): start a new one.
-        if worker_died {
-            self.dev = None;
-            self.dev_busy = None;
-            self.dev_scanning = false;
-            self.dev_progress = None;
-            self.dev_message = Some((false, "The connection to the MyChron stopped unexpectedly and has been restarted. Try again.".into()));
-            return;
-        }
-        for e in events {
-            match e {
-                Event::Scanned { logger, networks, current } => {
-                    self.dev_scanning = false;
-                    // Switched to another network some other way (e.g. GNOME's menu):
-                    // undo the pause on the other networks' auto-connect.
-                    if self.dev_joined.is_some() && current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
-                        let _ = self.dev.as_ref().unwrap().tx.send(Command::Leave);
-                        self.dev_message = Some((true, format!("You're back on {}. Your networks will connect automatically again.", current.clone().unwrap_or_default())));
-                    }
-                    let newly = logger.is_some() && self.dev_logger.is_none();
-                    self.dev_logger = logger;
-                    self.dev_networks = networks;
-                    self.dev_current_wifi = current;
-                    if self.dev_busy.as_deref() == Some("Looking for your MyChron…") {
-                        self.dev_busy = None;
-                    }
-                    // Remember which MyChron model this logger is, from its WiFi name.
-                    if let (Some(id), Some(ssid)) = (self.dev_logger.as_ref().and_then(|b| b.logger_id), self.dev_current_wifi.as_deref()) {
-                        let model = model_from_ssid(ssid);
-                        if model.starts_with("MyChron") {
-                            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-                            let entry = profiles.loggers.entry(id.to_string()).or_default();
-                            if entry.model != model {
-                                entry.model = model.to_string();
-                                let _ = profiles.save();
-                            }
-                        }
-                    }
-                    if newly {
-                        self.dev_busy = Some("Reading the session list…".into());
-                        let _ = self.dev.as_ref().unwrap().tx.send(Command::List);
-                    }
-                }
-                Event::Joined { ssid } => {
-                    self.dev_joined = Some(ssid);
-                    self.dev_busy = Some("Looking for your MyChron…".into());
-                    self.dev_scanning = true;
-                    let _ = self.dev.as_ref().unwrap().tx.send(Command::Scan);
-                }
-                Event::Left => {
-                    self.dev_joined = None;
-                    self.dev_logger = None;
-                    self.dev_files.clear();
-                    self.dev_summaries.clear();
-                    self.dev_busy = None;
-                }
-                Event::Listed { files, summaries, new_tracks } => {
-                    self.dev_files = files;
-                    self.dev_summaries = summaries;
-                    self.dev_busy = None;
-                    if new_tracks > 0 {
-                        self.library = None; // pick up the new custom tracks
-                        self.dev_message = Some((true, format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" })));
-                    }
-                    self.dev_selected = self.new_on_logger().into_iter().map(|e| e.name).collect();
-                    // Why each session counts as new or already downloaded.
-                    let dir = self.logger_dir();
-                    let sessions: Vec<_> = self.dev_files.iter().filter(|e| e.is_session()).collect();
-                    log::info!("{} of {} sessions on the logger are new (compared with {:?})", self.dev_selected.len(), sessions.len(), dir);
-                    for e in sessions {
-                        let local = dir.as_ref().and_then(|d| std::fs::metadata(d.join(&e.name)).ok()).map(|m| m.len());
-                        log::debug!("  {}: logger {} bytes, here {:?} → {}", e.name, e.size, local, if local == Some(e.size) { "downloaded" } else { "new" });
-                    }
-                }
-                Event::Progress { index, count, file, done, total } => {
-                    self.dev_progress = Some((index, count, file, done, total));
-                }
-                Event::Downloaded { saved } => {
-                    if let Some((path, setup)) = self.pending_setup.take() {
-                        if let Err(e) = setup.save(&path) {
-                            self.error = Some(format!("Couldn't save the setup: {e}"));
-                        }
-                    }
-                    self.dev_busy = None;
-                    self.dev_progress = None;
-                    self.dev_message = Some((true, format!("Downloaded {saved} session{}. They're on the Sessions page.", if saved == 1 { "" } else { "s" })));
-                    // Check the new sessions' sensors in the background.
-                    if let (Some(dir), Some(id)) = (self.logger_dir(), self.dev_logger.as_ref().and_then(|b| b.logger_id)) {
-                        let paths = self.dev_selected.iter().map(|n| dir.join(n)).filter(|p| p.exists()).collect();
-                        self.check_downloaded(paths, &id.to_string(), &ctx);
-                    }
-                    self.library = None; // reload sessions and tracks
-                    self.dev_selected.clear();
-                }
-                Event::Error(msg) => {
-                    self.dev_busy = None;
-                    self.dev_progress = None;
-                    self.dev_message = Some((false, msg));
-                }
-            }
-        }
-
-        // MYCHRONIX_FAKE_DEVICE=<logger id> shows that logger's downloaded sessions as if it were
-        // connected, for checking this page's layout without the MyChron (development only).
-        if self.dev_logger.is_none() {
-            if let Some(id) = std::env::var("MYCHRONIX_FAKE_DEVICE").ok().and_then(|v| v.parse::<u32>().ok()) {
-                let mut raw = vec![0u8; 236];
-                raw[0] = 0xec;
-                raw[84..87].copy_from_slice(b"idn");
-                raw[96..100].copy_from_slice(&id.to_le_bytes());
-                self.dev_logger = aim_link::Beacon::parse(AP_ADDRESS_FAKE, std::time::Duration::from_millis(3), raw).ok();
-                self.dev_current_wifi = Some(format!("AiM-MYC6-{:06}", id % 1_000_000));
-                if let Some(dir) = self.logger_dir() {
-                    let mut files = Vec::new();
-                    let mut summaries = Vec::new();
-                    for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                        let p = e.path();
-                        let name = p.file_name().unwrap().to_string_lossy().into_owned();
-                        if name.ends_with(".xrz") {
-                            files.push(aim_link::DirEntry { name: name.clone(), size: e.metadata().map(|m| m.len()).unwrap_or(0), date: String::new(), time: String::new() });
-                            if let Some(mut sum) = std::fs::read(p.with_extension("xri")).ok().and_then(|b| aim_xrk::parse_xri(&b).ok()) {
-                                sum.file = Some(name);
-                                summaries.push(sum);
-                            }
-                        }
-                    }
-                    // Pretend the newest two aren't downloaded yet.
-                    files.sort_by(|a, b| a.name.cmp(&b.name));
-                    if let Some(last) = files.last_mut() {
-                        last.size += 1;
-                    }
-                    self.dev_files = files;
-                    self.dev_summaries = summaries;
-                    self.dev_selected = self.new_on_logger().into_iter().map(|e| e.name).collect();
-                }
-                self.dev_last_scan = f64::MAX;
-            }
-        }
-
-        // Keep looking while nothing is connected; check now and then that a logger is still there.
-        let now = ctx.input(|i| i.time);
-        let every = if self.dev_logger.is_some() { 15.0 } else { 4.0 };
-        if self.dev_busy.is_none() && !self.dev_scanning && self.dev_last_scan != f64::MAX && now - self.dev_last_scan > every {
-            self.dev_last_scan = now;
-            self.dev_scanning = true;
-            let _ = self.dev.as_ref().unwrap().tx.send(Command::Scan);
-        }
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
-    }
-
-    fn device_page(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
-        self.device_poll(&ctx);
-
-
-        ui.label(RichText::new("Device").font(semibold(28.0)).color(TEXT));
-        ui.label(RichText::new("Your MyChrons, how to download from them, and their sessions.").font(regular(14.5)).color(SECONDARY));
-        ui.add_space(18.0);
-
-        if let Some((ok, msg)) = self.dev_message.clone() {
-            let color = if ok { theme::GOOD } else { ui.visuals().error_fg_color };
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(msg).color(color));
-                if ui.add(Icon::X.image(DIM, 14.0).sense(Sense::click())).clicked() {
-                    self.dev_message = None;
-                }
-            });
-            ui.add_space(8.0);
-        }
-
-        if std::env::var("MYCHRONIX_FAKE_DIALOG").is_ok() && self.dev_dialog.is_none() && self.frames < 3 && self.dev_logger.is_some() {
-            let multi = std::env::var("MYCHRONIX_FAKE_DIALOG").as_deref() == Ok("multi");
-            let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-            let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
-            self.dev_dialog = Some(DownloadDialog {
-                meta: crate::device::SessionMeta {
-                    driver: p.driver,
-                    kart: p.kart,
-                    championship: p.championship,
-                    track: if multi { String::new() } else { "Club Circuit".into() },
-                    ..Default::default()
-                },
-                detected: if multi { vec!["Club North".into(), "Club Circuit".into()] } else { vec!["Club Circuit".into()] },
-                setup: self.latest_setup(&id),
-                setup_before: self.latest_setup(&id),
-                setup_open: false,
-            });
-        }
-        // MYCHRONIX_ADD_MYCHRON=wifi|key opens the "Add a MyChron" window at its steps (for testing).
-        if self.frames < 3 && self.add_mychron.is_none() {
-            match std::env::var("MYCHRONIX_ADD_MYCHRON").as_deref() {
-                Ok("wifi") => self.open_add_mychron(Some(device_ui::Way::Wifi), "MyChron 6"),
-                Ok("key") => self.open_add_mychron(Some(device_ui::Way::DataKey), "MyChron 4"),
-                Ok(_) => self.open_add_mychron(None, ""),
-                Err(_) => {}
-            }
-        }
-        self.unplaced_connected(ui);
-        self.key_panel(ui);
-        if self.dev_logger.is_some() {
-            self.device_status(ui);
-            ui.add_space(14.0);
-            self.device_sessions(ui);
-        } else {
-            self.device_guide(ui);
-        }
-        self.download_dialog(&ctx);
-        if self.dev_dialog.is_none() {
-            self.add_mychron_dialog(&ctx);
-        }
-        self.mychron_setup_dialog(&ctx);
-    }
-
-    /// The Garage's "New MyChron detected" card, here too, for a connected
-    /// MyChron (WiFi or data key) that isn't on a kart yet.
-    fn unplaced_connected(&mut self, ui: &mut Ui) {
-        let lib = self.library.take().unwrap_or_else(crate::tracks::Library::load);
-        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
-        let connected: Vec<String> = self
-            .dev_logger
-            .as_ref()
-            .and_then(|b| b.logger_id)
-            .map(|i| i.to_string())
-            .into_iter()
-            .chain(self.key.listing.as_ref().filter(|_| self.key.present).map(|(s, ..)| s.clone()))
-            .collect();
-        let wifi_id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
-        let wifi_model = self.dev_current_wifi.as_deref().map(model_from_ssid).filter(|m| m.starts_with("MyChron"));
-        let cards: Vec<_> = self
-            .unplaced_mychrons(&lib, &profiles)
-            .into_iter()
-            .filter(|u| connected.contains(&u.logger))
-            .map(|u| {
-                let model = Some(profiles.for_logger(&u.logger).model)
-                    .filter(|m| !m.is_empty())
-                    .or_else(|| wifi_model.filter(|_| wifi_id.as_deref() == Some(u.logger.as_str())).map(String::from))
-                    .or_else(|| lib.sessions.iter().filter(|s| s.logger == u.logger).find_map(|s| s.summary.model.clone()))
-                    .unwrap_or_else(|| "MyChron".into());
-                (u, model)
-            })
-            .collect();
-        self.library = Some(lib);
-        self.profiles = Some(profiles);
-        for (u, model) in cards {
-            self.unplaced_card(ui, &u, &model);
-            ui.add_space(14.0);
-        }
-    }
-
-    fn logger_dir(&self) -> Option<PathBuf> {
-        let id = self.dev_logger.as_ref()?.logger_id?;
-        Some(PathBuf::from(std::env::var_os("HOME")?).join("Mychronix").join("sessions").join(id.to_string()))
-    }
-
-    /// Sessions on the logger not yet saved here (see `device::downloaded`).
-    fn new_on_logger(&self) -> Vec<aim_link::DirEntry> {
-        let dir = self.logger_dir();
-        self.dev_files
-            .iter()
-            .filter(|e| e.is_session())
-            .filter(|e| !dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
-            .cloned()
-            .collect()
-    }
-
-    fn device_status(&mut self, ui: &mut Ui) {
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        card(ui, |ui| {
-            match &self.dev_logger {
-                Some(b) => {
-                    let id = b.logger_id.map(|i| i.to_string()).unwrap_or_default();
-                    let model = self.dev_joined.as_deref().or(self.dev_current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron");
-                    let who = profiles.get(&id).map(|p| p.driver.clone()).filter(|d| !d.is_empty());
-                    ui.horizontal(|ui| {
-                        ui.add(Icon::Mychron.image(theme::GOOD, 32.0));
-                        ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("{model} connected")).font(semibold(17.0)).color(TEXT));
-                            let line = [Some(format!("Logger {id}")), who, self.dev_current_wifi.clone(), Some(format!("answered in {} ms", b.round_trip.as_millis()))]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join("  ·  ");
-                            ui.label(RichText::new(line).color(SECONDARY));
-                        });
-                        if self.dev_joined.is_some() {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if button(ui, Some(Icon::Wifi), "Disconnect", false).clicked() && self.dev_busy.is_none() {
-                                    self.dev_busy = Some("Reconnecting to your network…".into());
-                                    let _ = self.dev.as_ref().unwrap().tx.send(crate::device::Command::Leave);
-                                }
-                            });
-                        }
-                    });
-                }
-                None => {
-                    ui.horizontal(|ui| {
-                        ui.add(Icon::Mychron.image(DIM, 32.0));
-                        ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("No MyChron found yet").font(semibold(17.0)).color(TEXT));
-                            let hint = match &self.dev_busy {
-                                Some(b) => b.clone(),
-                                None => crate::device::JOIN_HINT.into(),
-                            };
-                            ui.label(RichText::new(hint).color(SECONDARY));
-                        });
-                    });
-                    if !self.dev_networks.is_empty() {
-                        ui.add_space(12.0);
-                        hairline(ui);
-                        ui.add_space(10.0);
-                        let current = self.dev_current_wifi.clone().unwrap_or_else(|| "your current network".into());
-                        ui.label(RichText::new(format!("MyChrons in range. Joining one takes this computer off {current} until you disconnect.")).size(12.5).color(DIM));
-                        ui.add_space(6.0);
-                        for (ssid, signal) in self.dev_networks.clone() {
-                            ui.horizontal(|ui| {
-                                ui.add(Icon::Wifi.image(SECONDARY, 18.0));
-                                ui.label(RichText::new(model_from_ssid(&ssid)).font(medium(14.5)).color(TEXT));
-                                ui.label(RichText::new(format!("{ssid}  ·  {signal}% signal")).color(DIM));
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if button(ui, None, "Join", true).clicked() && self.dev_busy.is_none() {
-                                        self.dev_busy = Some(format!("Joining {ssid}…"));
-                                        self.dev_message = None;
-                                        let _ = self.dev.as_ref().unwrap().tx.send(crate::device::Command::Join { ssid: ssid.clone() });
-                                    }
-                                });
-                            });
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    fn device_sessions(&mut self, ui: &mut Ui) {
-        let new: std::collections::BTreeSet<String> = self.new_on_logger().into_iter().map(|e| e.name).collect();
-        let sessions: Vec<aim_link::DirEntry> = {
-            let mut v: Vec<_> = self.dev_files.iter().filter(|e| e.is_session()).cloned().collect();
-            v.sort_by(|a, b| b.name.cmp(&a.name));
-            v
-        };
-        let logger_id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-        let setup_now = self.latest_setup(&logger_id);
-        let summary_of = |name: &str| self.dev_summaries.iter().find(|s| s.file.as_deref() == Some(name)).cloned();
-        card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Sessions on the logger").font(semibold(16.0)).color(TEXT));
-                ui.label(RichText::new(format!("{} total  ·  {} new", sessions.len(), new.len())).color(SECONDARY));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let n = self.dev_selected.len();
-                    let label = if n == 0 { "Download".to_string() } else { format!("Download {n}") };
-                    if button(ui, Some(Icon::FolderOpen), &label, true).clicked() && n > 0 && self.dev_busy.is_none() {
-                        let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-                        let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
-                        // The track comes from the logger: one track pre-fills the field, several defer to each session.
-                        let mut detected: Vec<String> = self.dev_selected.iter().filter_map(|n| summary_of(n)).filter_map(|s| s.track).filter(|t| !t.is_empty()).collect();
-                        detected.sort();
-                        detected.dedup();
-                        let track = if detected.len() == 1 { detected[0].clone() } else { String::new() };
-                        self.dev_dialog = Some(DownloadDialog {
-                            meta: crate::device::SessionMeta {
-                                driver: p.driver,
-                                kart: p.kart,
-                                championship: p.championship,
-                                track,
-                                ..Default::default()
-                            },
-                            detected,
-                            setup: setup_now.clone(),
-                            setup_before: setup_now.clone(),
-                            setup_open: false,
-                        });
-                    }
-                    if chip(ui, "None", false).clicked() {
-                        self.dev_selected.clear();
-                    }
-                    if chip(ui, "All new", false).clicked() {
-                        self.dev_selected = new.clone();
-                    }
-                });
-            });
-            if let Some((index, count, file, done, total)) = &self.dev_progress {
-                ui.add_space(8.0);
-                let frac = (*index as f32 + *done as f32 / (*total).max(1) as f32) / (*count).max(1) as f32;
-                ui.label(RichText::new(format!("Downloading {file}  ({} of {count})", index + 1)).color(SECONDARY));
-                let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-                ui.painter().rect_filled(bar, 3.0, SURFACE_ACTIVE);
-                ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 3.0, TEXT);
-            } else if let Some(b) = &self.dev_busy {
-                ui.add_space(6.0);
-                ui.label(RichText::new(b).color(SECONDARY));
-            }
-            ui.add_space(8.0);
-            egui::ScrollArea::vertical().id_salt("logger_sessions").auto_shrink([false, true]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for e in &sessions {
-                    let sum = summary_of(&e.name);
-                    let is_new = new.contains(&e.name);
-                    let mut on = self.dev_selected.contains(&e.name);
-                    let response = row(ui, false, |ui| {
-                        let (cb, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                        ui.painter().rect_stroke(cb, CornerRadius::same(4), Stroke::new(1.5, if on { TEXT } else { DIM }), egui::StrokeKind::Inside);
-                        if on {
-                            Icon::Check.image(TEXT, 14.0).paint_at(ui, cb.shrink(2.0));
-                        }
-                        ui.add_space(6.0);
-                        let number = aim_xrk::summary::session_number(&e.name).map(|n| format!("Session {n}")).unwrap_or(e.name.clone());
-                        ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                        let when = sum.as_ref().map(|s| [s.date.map(crate::events::us_short), s.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
-                        ui.label(RichText::new(when).color(DIM));
-                        if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
-                            ui.label(RichText::new(t).color(SECONDARY));
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if is_new {
-                                tag(ui, "New", TEXT);
-                            } else {
-                                ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
-                            }
-                            ui.label(RichText::new(format!("{:.1} MB", e.size as f64 / 1e6)).size(12.5).color(DIM));
-                            if let Some(s) = &sum {
-                                let best = s.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
-                                ui.label(RichText::new(best).font(medium(14.0)).color(TEXT));
-                                let laps = s.laps.unwrap_or(0);
-                                ui.label(RichText::new(format!("{laps} lap{}", if laps == 1 { "" } else { "s" })).size(12.5).color(DIM));
-                            }
-                        });
-                    });
-                    if response.clicked() {
-                        on = !on;
-                        if on {
-                            self.dev_selected.insert(e.name.clone());
-                        } else {
-                            self.dev_selected.remove(&e.name);
-                        }
-                    }
-                }
-            });
-        });
-    }
-
-    /// RaceStudio-style dialog: who, what, which championship, session type and
-    /// track, before downloading. Every field but the comment suggests values
-    /// already in use.
-    fn download_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut dlg) = self.dev_dialog.take() else { return };
-        let lib = self.library.take().unwrap_or_else(Library::load);
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let s = Suggestions::gather(&lib, &profiles);
-        self.library = Some(lib);
-        let tires = self.tire_suggestions();
-        let lib = self.library.take().unwrap();
-        let multiple = dlg.detected.len() > 1;
-        let mut open = true;
-        let mut go = false;
-        let mut cancel = false;
-        let n = self.dev_selected.len();
-        let field_w = 400.0;
-        egui::Window::new(RichText::new(format!("Download {n} session{}", if n == 1 { "" } else { "s" })).font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                ui.add_space(6.0);
-                egui::Grid::new("download_meta").num_columns(2).spacing([16.0, 12.0]).show(ui, |ui| {
-                    let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
-                    label(ui, "Driver");
-                    suggest_field(ui, "dl_driver", &mut dlg.meta.driver, "Driver name", &s.drivers, field_w);
-                    ui.end_row();
-                    label(ui, "Kart");
-                    suggest_field(ui, "dl_kart", &mut dlg.meta.kart, "Kart or class", &s.karts, field_w);
-                    ui.end_row();
-                    label(ui, "Championship");
-                    suggest_field(ui, "dl_champ", &mut dlg.meta.championship, "e.g. 2026 Club Championship", &s.championships, field_w);
-                    ui.end_row();
-                    label(ui, "Session type");
-                    suggest_field(ui, "dl_type", &mut dlg.meta.session_type, "Practice 1, Heat 2, Final…", &s.session_types, field_w);
-                    ui.end_row();
-                    label(ui, "Track");
-                    if multiple {
-                        ui.vertical(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut format!("Multiple tracks detected: {}", dlg.detected.join(", ")))
-                                    .font(regular(15.0))
-                                    .margin(Margin::symmetric(12, 9))
-                                    .desired_width(field_w)
-                                    .interactive(false),
-                            );
-                            ui.label(RichText::new("Each session keeps the track the MyChron recorded for it.").size(12.5).color(DIM));
-                        });
-                    } else {
-                        ui.vertical(|ui| {
-                            suggest_field(ui, "dl_track", &mut dlg.meta.track, "Track", &s.tracks, field_w);
-                            let from_logger = dlg.detected.first().cloned().unwrap_or_default();
-                            let note = if !from_logger.is_empty() && dlg.meta.track == from_logger {
-                                "From the MyChron.".to_string()
-                            } else if !from_logger.is_empty() {
-                                format!("The MyChron recorded {from_logger}; these sessions will be filed under {} instead.", dlg.meta.track)
-                            } else {
-                                "The MyChron didn't recognize a track for these sessions.".into()
-                            };
-                            ui.label(RichText::new(note).size(12.5).color(DIM));
-                        });
-                    }
-                    ui.end_row();
-                    label(ui, "Setup");
-                    ui.vertical(|ui| {
-                        let summary = dlg.setup.summary();
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(if summary.is_empty() { "None recorded yet".to_string() } else { summary }).color(TEXT));
-                            let toggle = if dlg.setup_open { "Done" } else { "Change" };
-                            if ui.add(egui::Label::new(RichText::new(toggle).color(theme::FAVORITE)).sense(Sense::click())).clicked() {
-                                dlg.setup_open = !dlg.setup_open;
-                            }
-                        });
-                        let changes = dlg.setup.changes_from(&dlg.setup_before);
-                        let note = if changes.is_empty() { "Same as last time.".to_string() } else { format!("Changed: {}", changes.join(", ")) };
-                        ui.label(RichText::new(note).size(12.5).color(if changes.is_empty() { DIM } else { theme::FAVORITE }));
-                    });
-                    ui.end_row();
-                    if dlg.setup_open {
-                        ui.label("");
-                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tires, field_w, true));
-                        ui.end_row();
-                    }
-                    label(ui, "Comment");
-                    ui.add(egui::TextEdit::multiline(&mut dlg.meta.comment).hint_text("Optional: conditions, setup, how it went").font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_rows(2).desired_width(field_w));
-                    ui.end_row();
-                });
-                ui.add_space(16.0);
-                ui.horizontal(|ui| {
-                    if button(ui, Some(Icon::FolderOpen), "Download", true).clicked() {
-                        go = true;
-                    }
-                    if button(ui, None, "Cancel", false).clicked() {
-                        cancel = true;
-                    }
-                });
-            });
-        self.library = Some(lib);
-        if go {
-            let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-            // Remember these for next time (not the comment or session type, which change every time).
-            // The MyChron is now on the kart named, so the kart's baseline applies to it.
-            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-            // A MyChron moving to another kart leaves its sessions so far with the old one.
-            let lib = self.library.get_or_insert_with(Library::load);
-            profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
-            if let Err(e) = profiles.save() {
-                self.error = Some(format!("Couldn't save the driver and kart: {e}"));
-            }
-            self.setup_baselines = None;
-            self.library = None;
-            // Each file gets the dialog's details; with several tracks, its own track from the logger.
-            let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
-                .dev_files
-                .iter()
-                .filter(|e| self.dev_selected.contains(&e.name))
-                .map(|e| {
-                    let mut meta = dlg.meta.clone();
-                    if multiple || meta.track.is_empty() {
-                        meta.track = self.dev_summaries.iter().find(|s| s.file.as_deref() == Some(e.name.as_str())).and_then(|s| s.track.clone()).unwrap_or_default();
-                    }
-                    (e.clone(), meta)
-                })
-                .collect();
-            // A setup sheet goes on the earliest session only, and only when there's something new.
-            let changed = !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
-            let earliest = files.iter().map(|(e, _)| e.name.clone()).min();
-            self.pending_setup = match (changed, earliest, self.logger_dir()) {
-                (true, Some(name), Some(dir)) => Some((dir.join(name), dlg.setup.clone())),
-                _ => None,
-            };
-            if std::env::var("MYCHRONIX_FAKE_DEVICE").is_ok() {
-                // Preview mode: there's no MyChron to download from.
-                self.dev_message = Some((true, format!(
-                    "Preview only: would download {} session{} with these details. Turn on the MyChron to do it for real.",
-                    files.len(),
-                    if files.len() == 1 { "" } else { "s" }
-                )));
-            } else if let Some(dir) = self.logger_dir() {
-                self.dev_busy = Some("Downloading…".into());
-                self.dev_message = None;
-                let _ = self.dev.as_ref().unwrap().tx.send(crate::device::Command::Download { files, dir });
-            }
-        } else if open && !cancel {
-            self.dev_dialog = Some(dlg);
-        }
-    }
-}
-
-/// Values already in use, offered while typing in the download dialog.
-struct Suggestions {
-    drivers: Vec<String>,
-    karts: Vec<String>,
-    championships: Vec<String>,
-    session_types: Vec<String>,
-    tracks: Vec<String>,
-}
-
-impl Suggestions {
-    fn gather(lib: &Library, profiles: &crate::profiles::Profiles) -> Self {
-        let mut s = Suggestions { drivers: vec![], karts: vec![], championships: vec![], session_types: vec![], tracks: vec![] };
-        s.drivers.extend(profiles.drivers.iter().map(|d| d.name.clone()));
-        s.karts.extend(profiles.karts.iter().map(|k| k.name.clone()));
-        s.championships.extend(profiles.loggers.values().map(|p| p.championship.clone()));
-        for m in lib.sessions.iter().filter_map(|x| x.meta.as_ref()) {
-            s.drivers.push(m.driver.clone());
-            s.karts.push(m.kart.clone());
-            s.championships.push(m.championship.clone());
-            s.session_types.push(m.session_type.clone());
-            s.tracks.push(m.track.clone());
-        }
-        // RaceStudio's session types.
-        s.session_types.extend(
-            [
-                "Generic testing", "Practice 1", "Practice 2", "Practice 3", "Practice 4", "Qualifying", "Qualifying 1", "Qualifying 2",
-                "Warm-up", "Heat", "Heat 1", "Heat 2", "Heat 3", "Pre-final", "Final", "1st Final", "2nd Final", "Race", "1st Race",
-                "2nd Race", "A-Main", "Test", "Engine Test", "Track Outing",
-            ]
-            .map(String::from),
-        );
-        // Tracks you've raced or made first, then every AiM track.
-        for t in lib.tracks.iter().filter(|t| !t.sessions.is_empty() || t.kind == Kind::Custom) {
-            s.tracks.push(t.name.clone());
-        }
-        for t in &lib.tracks {
-            s.tracks.push(t.name.clone());
-        }
-        for v in [&mut s.drivers, &mut s.karts, &mut s.championships, &mut s.session_types, &mut s.tracks] {
-            let mut seen = std::collections::HashSet::new();
-            v.retain(|x| !x.trim().is_empty() && seen.insert(x.to_lowercase()));
-        }
-        s
-    }
-}
-
-/// A text field that offers matching `suggestions` below it while focused.
-/// Picking one fills the field; typing anything else is fine too.
-fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggestions: &[String], width: f32) -> egui::Response {
-    let response = ui.add(
-        egui::TextEdit::singleline(value)
-            .id_salt(id)
-            .hint_text(RichText::new(hint).color(DIM))
-            .font(regular(16.5))
-            .margin(Margin::symmetric(14, 12))
-            .desired_width(width),
-    );
-    let popup_id = response.id.with("suggestions");
-    let ctx = ui.ctx().clone();
-    // Stay open while the pointer is over the list, so a click on it lands.
-    let last_rect: Option<Rect> = ctx.data(|d| d.get_temp(popup_id));
-    let over_list = last_rect.zip(ctx.pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
-    if !(response.has_focus() || over_list) {
-        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
-        return response;
-    }
-    // Empty, or already one of the suggestions: offer them all (to switch).
-    // Otherwise offer the ones containing what's typed.
-    let needle = value.to_lowercase();
-    let exact = suggestions.iter().any(|s| s.to_lowercase() == needle);
-    let matches: Vec<&String> = suggestions
-        .iter()
-        .filter(|s| needle.is_empty() || exact || s.to_lowercase().contains(&needle))
-        .take(40)
-        .collect();
-    if matches.is_empty() {
-        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
-        return response;
-    }
-    let mut picked = None;
-    let area = egui::Area::new(popup_id)
-        .order(egui::Order::Foreground)
-        .fixed_pos(response.rect.left_bottom() + vec2(0.0, 4.0))
-        .show(&ctx, |ui| {
-            Frame::new()
-                .fill(SURFACE_ACTIVE)
-                .corner_radius(CornerRadius::same(theme::RADIUS_SMALL + 2))
-                .inner_margin(Margin::same(4))
-                .show(ui, |ui| {
-                    ui.set_width(response.rect.width() - 8.0);
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    // Eight rows show; more scroll.
-                    egui::ScrollArea::vertical().max_height(34.0 * 8.0).show(ui, |ui| {
-                        for m in &matches {
-                            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-                            if resp.hovered() {
-                                ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-                            ui.painter().text(r.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, m.as_str(), regular(14.5), TEXT);
-                            if resp.clicked() {
-                                picked = Some((*m).clone());
-                            }
-                        }
-                    });
-                });
-        });
-    ctx.data_mut(|d| d.insert_temp(popup_id, area.response.rect));
-    if let Some(p) = picked {
-        *value = p;
-        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
-        ctx.memory_mut(|m| m.surrender_focus(response.id));
-    }
-    response
-}
-
-const AP_ADDRESS_FAKE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 1);
-
-/// "AiM-MYC6-345678" → "MyChron 6".
-fn model_from_ssid(ssid: &str) -> &'static str {
-    match ssid.split('-').nth(1).unwrap_or("") {
-        "MYC6" => "MyChron 6",
-        "MYC5S" => "MyChron 5S",
-        "MYC5" => "MyChron 5",
-        _ => "AiM logger",
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3061,7 +1362,7 @@ impl App {
                             if !units.is_empty() {
                                 ui.label(RichText::new(units).size(12.0).color(DIM));
                             }
-                            if let Some(v) = cursor_ms.and_then(|t| value_at(c, t)) {
+                            if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
                                 ui.label(RichText::new(format_value(v, c.decimals)).font(medium(13.5)).color(TEXT));
                             }
                         });
@@ -3087,370 +1388,6 @@ impl App {
             }
         });
     }
-}
-
-// ---------------------------------------------------------------------------
-// Lap comparison
-
-impl App {
-    /// Adds a lap of `session` to the comparison, or removes it if it's there.
-    fn toggle_compare(&mut self, session: &std::sync::Arc<Session>, lap: aim_xrk::Lap) {
-        let Some(path) = self.path.clone() else { return };
-        if let Some(i) = self.compare.iter().position(|c| c.lap == lap && c.path == path) {
-            self.compare.remove(i);
-            return;
-        }
-        self.add_compare_lap(path, session.clone(), lap);
-    }
-
-    fn add_compare_lap(&mut self, path: PathBuf, session: std::sync::Arc<Session>, lap: aim_xrk::Lap) {
-        if self.compare.len() >= SERIES.len() || self.compare.iter().any(|c| c.lap == lap && c.path == path) {
-            return;
-        }
-        let used: Vec<usize> = self.compare.iter().map(|c| c.slot).collect();
-        let slot = (0..SERIES.len()).find(|s| !used.contains(s)).unwrap_or(0);
-        let number = path.file_stem().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
-        let driver = session.info.driver.clone().filter(|d| !d.is_empty());
-        let label = [
-            Some(format!("S{} L{}", number.map(|n| n.to_string()).unwrap_or_else(|| "?".into()), lap.number)),
-            Some(format_lap_time(lap.duration_ms())),
-            driver,
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("  ·  ");
-        self.compare.push(crate::compare::CompareLap::new(path, session, lap, label, slot));
-    }
-
-    /// The best lap of each downloaded session at the current session's track, fastest first.
-    fn add_best_laps_here(&mut self, current: Option<std::sync::Arc<Session>>) {
-        let lib = self.library.take().unwrap_or_else(Library::load);
-        let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p)).and_then(|s| s.track);
-        if let Some(track) = here {
-            let mut sessions: Vec<&tracks::LocalSession> =
-                lib.sessions.iter().filter(|s| s.track == Some(track) && s.summary.best_lap_ms.is_some()).collect();
-            sessions.sort_by_key(|s| s.summary.best_lap_ms);
-            for s in sessions {
-                if self.compare.len() >= SERIES.len() {
-                    break;
-                }
-                // The open session is set aside while the page draws, so it's passed in.
-                let session = if self.path.as_ref() == Some(&s.path) {
-                    current.clone().or_else(|| self.session.clone())
-                } else {
-                    let path = s.path.clone();
-                    Session::open(&path).ok().map(|mut x| {
-                        self.fill_names(&mut x, &path);
-                        std::sync::Arc::new(x)
-                    })
-                };
-                let Some(session) = session else { continue };
-                if let Some(best) = session.best_lap(MIN_LAP_MS).copied() {
-                    self.add_compare_lap(s.path.clone(), session, best);
-                }
-            }
-        }
-        self.library = Some(lib);
-    }
-
-    fn compare_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        self.compare_mode_toggle(ui);
-        if self.compare_mode == compare_drivers_ui::CompareMode::Drivers {
-            self.compare_drivers_bar(ui, session);
-        } else {
-            // This session's laps, to add or remove with a click.
-            self.lap_strip(ui, session, true);
-            ui.add_space(12.0);
-        }
-        // Lap chips: color, label, reference marker; click to make reference, × to remove.
-        let mut make_ref = None;
-        let mut remove = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            for (k, c) in self.compare.iter().enumerate() {
-                Frame::new()
-                    .fill(if k == 0 { SURFACE_ACTIVE } else { SURFACE })
-                    .corner_radius(CornerRadius::same(255))
-                    .inner_margin(Margin { left: 12, right: 8, top: 6, bottom: 6 })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let (sw, _) = ui.allocate_exact_size(vec2(16.0, 12.0), Sense::hover());
-                            ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(3.0, SERIES[c.slot]));
-                            let r = ui.add(egui::Label::new(RichText::new(&c.label).font(medium(13.5)).color(TEXT)).sense(Sense::click()));
-                            if k == 0 {
-                                ui.label(RichText::new("Reference").size(12.0).color(DIM));
-                            } else if r.on_hover_text("Make this the reference").clicked() {
-                                make_ref = Some(k);
-                            }
-                            if ui.add(Icon::X.image(DIM, 12.0).sense(Sense::click())).on_hover_text("Remove").clicked() {
-                                remove = Some(k);
-                            }
-                        });
-                    });
-            }
-            if self.compare_mode == compare_drivers_ui::CompareMode::Laps {
-                if button(ui, Some(Icon::Flag), "Add best laps at this track", false).clicked() {
-                    self.add_best_laps_here(Some(session.clone()));
-                }
-                if !self.compare.is_empty() && button(ui, None, "Clear", false).clicked() {
-                    self.compare.clear();
-                }
-            }
-        });
-        if let Some(k) = make_ref {
-            let lap = self.compare.remove(k);
-            self.compare.insert(0, lap);
-        }
-        if let Some(k) = remove {
-            self.compare.remove(k);
-        }
-        ui.add_space(12.0);
-        self.compare_calculated_notes(ui);
-
-        if self.compare.len() < 2 {
-            card(ui, |ui| {
-                ui.set_min_height(160.0);
-                ui.label(RichText::new("Pick laps to compare").font(semibold(17.0)).color(TEXT));
-                ui.label(
-                    RichText::new("Click laps in the strip above to add them; open another session (Sessions page) to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
-                        .color(SECONDARY),
-                );
-            });
-            return;
-        }
-        if self.compare.iter().any(|c| c.profile.is_none()) {
-            card(ui, |ui| {
-                ui.label(RichText::new("Some of these laps have no GPS, so they can't be lined up by distance yet.").color(SECONDARY));
-            });
-            return;
-        }
-
-        let reference = self.compare[0].profile.clone().unwrap();
-        let ref_len = reference.length();
-        // A new reference lap starts the graphs at its full length.
-        let reset = self.compare_window != Some(ref_len.to_bits());
-        self.compare_window = Some(ref_len.to_bits());
-        let channels: Vec<String> = self.selected.keys().filter_map(|&i| session.channels.get(i)).map(|c| c.name.clone()).collect();
-        let gap = 12.0;
-        let height = ui.available_height();
-        let map_w = (ui.available_width() * 0.36).clamp(280.0, 520.0);
-        let graphs_w = ui.available_width() - map_w - gap;
-        let mut hovered = None;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            let column = Layout::top_down(Align::Min);
-            ui.allocate_ui_with_layout(vec2(graphs_w, height), column, |ui| {
-                ui.set_width(graphs_w);
-                let n = (channels.len() + 1) as f32;
-                let card_h = ((ui.available_height() - 10.0 * (n - 1.0)) / n).max(150.0);
-                let link = ui.id().with("compare_x");
-                egui::ScrollArea::vertical().id_salt("compare_graphs").show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 10.0;
-                    // Time gap to the reference.
-                    let gaps: Vec<(usize, Vec<[f64; 2]>)> = self.compare[1..]
-                        .iter()
-                        .map(|c| (c.slot, crate::compare::time_gap(c.profile.as_ref().unwrap(), &reference, 600)))
-                        .collect();
-                    if let Some(h) = self.compare_graph(ui, "Time gap to reference", "s", card_h, link, false, &gaps, ref_len, true, reset) {
-                        hovered = Some(h);
-                    }
-                    for (k, name) in channels.iter().enumerate() {
-                        let lines: Vec<(usize, Vec<[f64; 2]>)> = self
-                            .compare
-                            .iter()
-                            .filter_map(|c| {
-                                same_channel(&c.session, name).map(|ch| (c.slot, crate::compare::channel_on_distance(c, ch, ref_len)))
-                            })
-                            .collect();
-                        let units = session.channels.iter().find(|c| &c.name == name).map(|c| pretty_units(&c.units).to_string()).unwrap_or_default();
-                        if let Some(h) = self.compare_graph(ui, name, &units, card_h, link, k + 1 == channels.len(), &lines, ref_len, false, reset) {
-                            hovered = Some(h);
-                        }
-                    }
-                });
-            });
-            ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
-                ui.set_width(map_w);
-                // The map needs the reference lap's GPS; without it, the lap breakdown.
-                let lap = &self.compare[0];
-                let has_map = lap.session.gps.as_ref().is_some_and(|g| g.times_ms.iter().filter(|&&t| t >= lap.lap.start_ms && t <= lap.lap.end_ms).nth(2).is_some());
-                if has_map {
-                    self.compare_map(ui, &reference);
-                } else {
-                    egui::ScrollArea::vertical().id_salt("compare_breakdown").show(ui, |ui| self.compare_breakdown(ui, &reference));
-                }
-            });
-        });
-        if hovered.is_some() {
-            self.compare_cursor_m = hovered;
-        }
-    }
-
-    /// One graph card over distance: a line per lap, readouts at the cursor in the header.
-    #[allow(clippy::too_many_arguments)]
-    fn compare_graph(
-        &self,
-        ui: &mut Ui,
-        title: &str,
-        units: &str,
-        height: f32,
-        link: egui::Id,
-        x_axis: bool,
-        lines: &[(usize, Vec<[f64; 2]>)],
-        ref_len: f64,
-        zero_line: bool,
-        reset: bool,
-    ) -> Option<f64> {
-        let mut hovered = None;
-        let cursor = self.compare_cursor_m;
-        graph_card(ui, height, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(title).font(medium(14.5)).color(TEXT));
-                if !units.is_empty() {
-                    ui.label(RichText::new(units).size(13.0).color(DIM));
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(x) = cursor {
-                        for (slot, pts) in lines.iter().rev() {
-                            let i = pts.partition_point(|p| p[0] < x).min(pts.len().saturating_sub(1));
-                            if let Some(p) = pts.get(i) {
-                                let text = if zero_line { format!("{:+.2}", p[1]) } else { format!("{:.0}", p[1]) };
-                                ui.label(RichText::new(text).font(semibold(14.0)).color(TEXT));
-                                let (sw, _) = ui.allocate_exact_size(vec2(12.0, 10.0), Sense::hover());
-                                ui.painter().line_segment([sw.left_center(), sw.right_center()], Stroke::new(3.0, SERIES[*slot]));
-                            }
-                        }
-                    }
-                });
-            });
-            let mut plot = Plot::new(("compare", title));
-            if reset {
-                plot = plot.reset();
-            }
-            let response = plot
-                .height(ui.available_height())
-                .show_background(false)
-                .grid_color(GRID)
-                .show_axes([x_axis, true])
-                .y_axis_min_width(46.0)
-                .show_x(false)
-                .show_y(false)
-                .cursor_color(DIM)
-                .link_axis(link, [true, false])
-                .link_cursor(link, [true, false])
-                .allow_zoom([true, false])
-                .allow_drag([true, false])
-                .allow_scroll(false)
-                .auto_bounds([false, true])
-                .default_x_bounds(0.0, ref_len.max(0.001))
-                .x_axis_formatter(|mark, _| format!("{:.0} m", mark.value))
-                .show(ui, |plot| {
-                    if zero_line {
-                        plot.hline(egui_plot::HLine::new("level", 0.0).color(DIM).width(1.0));
-                    }
-                    for (slot, pts) in lines {
-                        plot.line(Line::new(format!("lap{slot}"), PlotPoints::from(pts.clone())).color(SERIES[*slot]).width(2.0));
-                    }
-                    if let Some(x) = cursor {
-                        plot.vline(VLine::new("cursor", x).color(SECONDARY).width(1.0));
-                    }
-                    plot.pointer_coordinate()
-                });
-            if let Some(p) = response.inner {
-                hovered = Some(p.x.clamp(0.0, ref_len));
-            }
-        });
-        hovered
-    }
-
-    /// The reference lap's line, colored by where the second lap gains (blue)
-    /// or loses (red) time against it, with the cursor.
-    fn compare_map(&mut self, ui: &mut Ui, reference: &crate::compare::DistanceProfile) {
-        let ref_lap = self.compare[0].clone();
-        let other = self.compare[1].clone();
-        let Some(gps) = ref_lap.session.gps.as_ref() else { return };
-        let lo = gps.times_ms.partition_point(|&t| t < ref_lap.lap.start_ms);
-        let hi = gps.times_ms.partition_point(|&t| t <= ref_lap.lap.end_ms);
-        if hi < lo + 2 {
-            return;
-        }
-        let gaps = crate::compare::time_gap(other.profile.as_ref().unwrap(), reference, 600);
-        // Rate the gap changes per meter: positive means the other lap is losing time there.
-        let rate_at = |d: f64| {
-            let i = gaps.partition_point(|p| p[0] < d).clamp(1, gaps.len() - 1);
-            let (a, b) = (gaps[i - 1], gaps[i]);
-            (b[1] - a[1]) / (b[0] - a[0]).max(1e-6)
-        };
-        let rates: Vec<f64> = (lo..hi).map(|i| rate_at(reference.dist_at(gps.times_ms[i] as f64))).collect();
-        let scale = rates.iter().map(|r| r.abs()).fold(0.0_f64, f64::max).max(1e-6) * 0.6;
-
-        Frame::new()
-            .fill(SURFACE)
-            .corner_radius(CornerRadius::same(theme::RADIUS))
-            .inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 12 })
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.set_height(ui.available_height() - 24.0);
-                ui.horizontal(|ui| {
-                    ui.add(Icon::MapPin.image(DIM, 16.0));
-                    ui.label(RichText::new("Where time changes").font(medium(14.5)).color(TEXT));
-                });
-                ui.label(RichText::new(format!("{} against the reference", other.label)).size(12.5).color(SECONDARY));
-                let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), (ui.available_height() - 40.0).max(120.0)), Sense::hover());
-                let (lat0, lon0) = (gps.latitude[lo], gps.longitude[lo]);
-                let kx = 111_320.0 * lat0.to_radians().cos();
-                let xy: Vec<(f64, f64)> = (lo..hi).map(|i| ((gps.longitude[i] - lon0) * kx, (gps.latitude[i] - lat0) * 110_540.0)).collect();
-                let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-                for &(x, y) in &xy {
-                    x0 = x0.min(x);
-                    x1 = x1.max(x);
-                    y0 = y0.min(y);
-                    y1 = y1.max(y);
-                }
-                let area = rect.shrink(12.0);
-                let s = (area.width() as f64 / (x1 - x0).max(1.0)).min(area.height() as f64 / (y1 - y0).max(1.0));
-                let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-                let pts: Vec<egui::Pos2> =
-                    xy.iter().map(|&(x, y)| pos2(area.center().x + ((x - cx) * s) as f32, area.center().y - ((y - cy) * s) as f32)).collect();
-                let painter = ui.painter_at(rect);
-                for k in 0..pts.len() - 1 {
-                    painter.line_segment([pts[k], pts[k + 1]], Stroke::new(4.0, gain_color((rates[k] / scale) as f32)));
-                }
-                // Hover the map to move the cursor.
-                if let Some(pointer) = response.hover_pos() {
-                    let (k, d) = pts.iter().enumerate().map(|(k, p)| (k, p.distance_sq(pointer))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
-                    if d < 28.0 * 28.0 {
-                        self.compare_cursor_m = Some(reference.dist_at(gps.times_ms[lo + k] as f64));
-                    }
-                }
-                if let Some(m) = self.compare_cursor_m {
-                    let t = reference.time_at(m);
-                    let k = gps.times_ms[lo..hi].partition_point(|&g| (g as f64) < t).min(pts.len() - 1);
-                    painter.circle_filled(pts[k], 7.0, SURFACE);
-                    painter.circle_filled(pts[k], 5.0, TEXT);
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Gaining").size(12.0).color(DIM));
-                    let (bar, _) = ui.allocate_exact_size(vec2(140.0, 8.0), Sense::hover());
-                    for j in 0..40 {
-                        let r = Rect::from_min_size(pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
-                        ui.painter().rect_filled(r, 0.0, gain_color(-1.0 + 2.0 * j as f32 / 39.0));
-                    }
-                    ui.label(RichText::new("Losing time").size(12.0).color(DIM));
-                });
-            });
-    }
-}
-
-/// Diverging color for time gained (−1, blue) through even (0, gray) to lost (+1, red).
-fn gain_color(t: f32) -> Color32 {
-    const GAIN: Color32 = Color32::from_rgb(0x39, 0x87, 0xe5);
-    const EVEN: Color32 = Color32::from_rgb(0x58, 0x5e, 0x66);
-    const LOSE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
-    let t = t.clamp(-1.0, 1.0);
-    if t < 0.0 { mix(EVEN, GAIN, -t) } else { mix(EVEN, LOSE, t) }
 }
 
 // ---------------------------------------------------------------------------
@@ -3596,7 +1533,7 @@ impl App {
                                 remove = Some(i);
                             }
                             ui.add_space(6.0);
-                            if let Some(v) = cursor_ms.and_then(|t| value_at(c, t)) {
+                            if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
                                 ui.label(RichText::new(format_value(v, c.decimals)).font(semibold(16.0)).color(TEXT));
                             }
                         });
@@ -3849,7 +1786,7 @@ impl App {
                 // (the logger records occasional sensor spikes).
                 let channel = color_ch.map(|i| &session.channels[i]);
                 let values: Vec<Option<f64>> = (lo..hi)
-                    .map(|i| channel.and_then(|c| value_at(c, gps.times_ms[i])))
+                    .map(|i| channel.and_then(|c| sample_at(c, gps.times_ms[i])))
                     .collect();
                 let (vmin, vmax) = robust_range(values.iter().flatten().copied());
                 let ramp = |v: f64| {
@@ -3904,7 +1841,7 @@ impl App {
                     if let Some(c) = &gap_curve {
                         let g = c[c.partition_point(|p| p.0 < t as f64).min(c.len() - 1)].2;
                         line = if g >= 0.0 { format!("+{g:.3} s") } else { format!("−{:.3} s", -g) };
-                    } else if let Some(v) = channel.and_then(|c| value_at(c, t)) {
+                    } else if let Some(v) = channel.and_then(|c| sample_at(c, t)) {
                         line = format!("{} {units}", format_value(v, dec));
                     }
                     if let Some(i) = gps.index_at(t) {
@@ -3992,6 +1929,138 @@ fn summary_tiles(ui: &mut Ui, session: &Session) {
 
 // ---------------------------------------------------------------------------
 // Widgets
+
+/// Values already in use, offered while typing in the download dialog.
+struct Suggestions {
+    drivers: Vec<String>,
+    karts: Vec<String>,
+    championships: Vec<String>,
+    session_types: Vec<String>,
+    tracks: Vec<String>,
+}
+
+impl Suggestions {
+    fn gather(lib: &Library, profiles: &crate::profiles::Profiles) -> Self {
+        let mut s = Suggestions { drivers: vec![], karts: vec![], championships: vec![], session_types: vec![], tracks: vec![] };
+        s.drivers.extend(profiles.drivers.iter().map(|d| d.name.clone()));
+        s.karts.extend(profiles.karts.iter().map(|k| k.name.clone()));
+        s.championships.extend(profiles.loggers.values().map(|p| p.championship.clone()));
+        for m in lib.sessions.iter().filter_map(|x| x.meta.as_ref()) {
+            s.drivers.push(m.driver.clone());
+            s.karts.push(m.kart.clone());
+            s.championships.push(m.championship.clone());
+            s.session_types.push(m.session_type.clone());
+            s.tracks.push(m.track.clone());
+        }
+        // RaceStudio's session types.
+        s.session_types.extend(
+            [
+                "Generic testing", "Practice 1", "Practice 2", "Practice 3", "Practice 4", "Qualifying", "Qualifying 1", "Qualifying 2",
+                "Warm-up", "Heat", "Heat 1", "Heat 2", "Heat 3", "Pre-final", "Final", "1st Final", "2nd Final", "Race", "1st Race",
+                "2nd Race", "A-Main", "Test", "Engine Test", "Track Outing",
+            ]
+            .map(String::from),
+        );
+        // Tracks you've raced or made first, then every AiM track.
+        for t in lib.tracks.iter().filter(|t| !t.sessions.is_empty() || t.kind == Kind::Custom) {
+            s.tracks.push(t.name.clone());
+        }
+        for t in &lib.tracks {
+            s.tracks.push(t.name.clone());
+        }
+        for v in [&mut s.drivers, &mut s.karts, &mut s.championships, &mut s.session_types, &mut s.tracks] {
+            let mut seen = std::collections::HashSet::new();
+            v.retain(|x| !x.trim().is_empty() && seen.insert(x.to_lowercase()));
+        }
+        s
+    }
+}
+
+/// A text field that offers matching `suggestions` below it while focused.
+/// Picking one fills the field; typing anything else is fine too.
+fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggestions: &[String], width: f32) -> egui::Response {
+    let response = ui.add(
+        egui::TextEdit::singleline(value)
+            .id_salt(id)
+            .hint_text(RichText::new(hint).color(DIM))
+            .font(regular(16.5))
+            .margin(Margin::symmetric(14, 12))
+            .desired_width(width),
+    );
+    let popup_id = response.id.with("suggestions");
+    let ctx = ui.ctx().clone();
+    // Stay open while the pointer is over the list, so a click on it lands.
+    let last_rect: Option<Rect> = ctx.data(|d| d.get_temp(popup_id));
+    let over_list = last_rect.zip(ctx.pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+    if !(response.has_focus() || over_list) {
+        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
+        return response;
+    }
+    // Empty, or already one of the suggestions: offer them all (to switch).
+    // Otherwise offer the ones containing what's typed.
+    let needle = value.to_lowercase();
+    let exact = suggestions.iter().any(|s| s.to_lowercase() == needle);
+    let matches: Vec<&String> = suggestions
+        .iter()
+        .filter(|s| needle.is_empty() || exact || s.to_lowercase().contains(&needle))
+        .take(40)
+        .collect();
+    if matches.is_empty() {
+        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
+        return response;
+    }
+    let mut picked = None;
+    let area = egui::Area::new(popup_id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(response.rect.left_bottom() + vec2(0.0, 4.0))
+        .show(&ctx, |ui| {
+            Frame::new()
+                .fill(SURFACE_ACTIVE)
+                .corner_radius(CornerRadius::same(theme::RADIUS_SMALL + 2))
+                .inner_margin(Margin::same(4))
+                .show(ui, |ui| {
+                    ui.set_width(response.rect.width() - 8.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // Eight rows show; more scroll.
+                    egui::ScrollArea::vertical().max_height(34.0 * 8.0).show(ui, |ui| {
+                        for m in &matches {
+                            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            ui.painter().text(r.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, m.as_str(), regular(14.5), TEXT);
+                            if resp.clicked() {
+                                picked = Some((*m).clone());
+                            }
+                        }
+                    });
+                });
+        });
+    ctx.data_mut(|d| d.insert_temp(popup_id, area.response.rect));
+    if let Some(p) = picked {
+        *value = p;
+        ctx.data_mut(|d| d.remove::<Rect>(popup_id));
+        ctx.memory_mut(|m| m.surrender_focus(response.id));
+    }
+    response
+}
+/// Speed color: viridis, dark purple when slow to yellow when fast. Its
+/// lightness rises steadily, so slow and fast stay apart for colorblind
+/// viewers too.
+fn speed_color(t: f32) -> Color32 {
+    const STOPS: [Color32; 5] = [
+        Color32::from_rgb(0x44, 0x01, 0x54),
+        Color32::from_rgb(0x3b, 0x52, 0x8b),
+        Color32::from_rgb(0x21, 0x91, 0x8c),
+        Color32::from_rgb(0x5e, 0xc9, 0x62),
+        Color32::from_rgb(0xfd, 0xe7, 0x25),
+    ];
+    let x = t.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
+    let i = (x.floor() as usize).min(STOPS.len() - 2);
+    mix(STOPS[i], STOPS[i + 1], x - i as f32)
+}
+
 
 
 fn hairline(ui: &mut Ui) {
@@ -4237,6 +2306,11 @@ fn file_name(path: &std::path::Path) -> String {
     path.file_name().unwrap_or_default().to_string_lossy().into_owned()
 }
 
+/// "1 lap", "3 laps".
+fn plural(n: usize, word: &str) -> String {
+    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
 fn group_thousands(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
@@ -4352,8 +2426,9 @@ fn default_channels(session: &Session) -> Vec<usize> {
     picks
 }
 
-/// Sample value at or just before `t_ms`.
-fn value_at(c: &Channel, t_ms: i64) -> Option<f64> {
+/// The sample at or just before `t_ms` (no interpolation; see
+/// `charts::value_at` for that).
+fn sample_at(c: &Channel, t_ms: i64) -> Option<f64> {
     let i = c.times_ms.partition_point(|&t| t <= t_ms);
     i.checked_sub(1).map(|i| c.values[i])
 }

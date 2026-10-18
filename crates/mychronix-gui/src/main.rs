@@ -14,6 +14,7 @@
 mod aim_tracks;
 mod app;
 mod import;
+mod jobs;
 mod braking;
 mod charts;
 mod compare;
@@ -25,6 +26,7 @@ mod paths;
 mod events;
 mod profiles;
 mod report;
+mod settings;
 mod setup;
 mod split_report;
 mod sensor_check;

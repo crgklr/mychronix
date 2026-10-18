@@ -14,7 +14,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use aim_xrk::Session;
 
 pub enum Event {
     Progress { done: usize, total: usize },
@@ -108,9 +107,9 @@ fn seen(known: &mut HashSet<Key>, k: Key) -> bool {
 /// Imports in the background; events report progress.
 pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egui::Context) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
-    let Some(root) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("sessions")) else { return rx };
+    let Some(root) = crate::paths::sessions_dir() else { return rx };
     let mut known: HashSet<_> = lib.sessions.iter().filter_map(|s| key(&s.logger, &s.summary)).collect();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("import", move || {
         let files = collect(&paths, &root);
         let total = files.len();
         log::info!("import: {total} session files found under {paths:?}");
@@ -123,7 +122,7 @@ pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egu
         };
         for (i, f) in files.iter().enumerate() {
             // A file that trips up a reader counts as unreadable; the import carries on.
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| import_one(f, &root, &mut known))).unwrap_or_else(|_| Err("couldn't be read".into()));
+            let outcome = crate::jobs::guard(&f.display().to_string(), || import_one(f, &root, &mut known)).unwrap_or_else(|| Err("couldn't be read".into()));
             match outcome {
                 Ok(Some(logger)) => {
                     report.added += 1;
@@ -162,10 +161,7 @@ fn free_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 
 /// Imports one session. Some(logger) when added, None when already there.
 fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Option<String>, String> {
-    let session = Session::open(path).map_err(|e| e.to_string())?;
-    if session.channels.iter().all(|c| c.values.is_empty()) {
-        return Err("no recorded data".into());
-    }
+    let session = crate::jobs::open_session(path)?;
     let logger = session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "imported".into());
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "session".into());
     let dir = root.join(&logger);
@@ -214,8 +210,7 @@ fn write_new(path: &Path, data: &[u8]) -> Result<(), String> {
     if path.exists() {
         return Err(format!("{} already exists", path.display()));
     }
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, data).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| e.to_string())
+    crate::storage::write_atomic(path, data).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

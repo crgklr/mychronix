@@ -56,7 +56,7 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(RichText::new("Events").font(semibold(28.0)).color(TEXT));
                 let n_up = all.iter().filter(|e| upcoming(e)).count();
-                let mut sub = format!("{} event{}", all.len(), if all.len() == 1 { "" } else { "s" });
+                let mut sub = plural(all.len(), "event");
                 if n_up > 0 {
                     sub.push_str(&format!("  ·  {n_up} coming up"));
                 }
@@ -288,7 +288,7 @@ impl App {
             let (tx, merged) = std::sync::mpsc::channel();
             for r in [old, Some(rx)].into_iter().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || {
+                crate::jobs::spawn("event-forward", move || {
                     while let Ok(m) = r.recv() {
                         if tx.send(m).is_err() {
                             break;
@@ -384,7 +384,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.add(Icon::Calendar.image(SECONDARY, 16.0));
                 ui.label(RichText::new(long_date(day)).font(semibold(16.0)).color(TEXT));
-                ui.label(RichText::new(format!("{} session{}", in_day.len(), if in_day.len() == 1 { "" } else { "s" })).color(SECONDARY));
+                ui.label(RichText::new(plural(in_day.len(), "session")).color(SECONDARY));
             });
             ui.add_space(6.0);
             // Newest first, like the Sessions page.
@@ -718,7 +718,7 @@ fn season_card(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles,
         for (name, n, tracks) in &drivers {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(name).font(medium(14.0)).color(TEXT));
-                ui.label(RichText::new(format!("{n} event{}", if *n == 1 { "" } else { "s" })).size(12.5).color(DIM));
+                ui.label(RichText::new(plural(*n, "event")).size(12.5).color(DIM));
             });
             for (track, best) in tracks {
                 ui.horizontal(|ui| {
@@ -777,7 +777,7 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
                 let n = events::days(e.start) - events::days(today);
                 (if n > 1 { format!("in {n} days") } else if n == 1 { "tomorrow".into() } else if n == 0 { "today".into() } else { "planned".into() }, SECONDARY)
             }
-            (None, false) => (format!("{} session{}", e.sessions.len(), if e.sessions.len() == 1 { "" } else { "s" }), DIM),
+            (None, false) => (plural(e.sessions.len(), "session"), DIM),
         };
         p.text(pos2(r, top), egui::Align2::RIGHT_CENTER, right, medium(14.0), color);
     }

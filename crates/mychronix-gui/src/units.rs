@@ -3,7 +3,6 @@
 //! (`"units": "imperial"` or `"metric"`), else from the Mac's measurement
 //! setting or the system's country.
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aim_xrk::Channel;
@@ -14,12 +13,7 @@ const MPH_PER_KMH: f64 = 0.621_371;
 
 /// Reads the setting (or the locale) once at startup.
 pub fn init() {
-    let setting = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join("Mychronix").join("settings.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("units").and_then(|u| u.as_str()).map(str::to_owned));
-    let imperial = match setting.as_deref() {
+    let imperial = match crate::settings::get().units.as_deref() {
         Some("imperial") => true,
         Some("metric") => false,
         // The countries that use miles per hour and Fahrenheit day to day. The

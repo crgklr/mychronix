@@ -16,6 +16,8 @@ pub(super) struct SensorState {
     /// Session digests (lap times, sensors), loaded once and filled in the background.
     pub digests: Option<Digests>,
     pub digest_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Digest)>>,
+    /// Sessions already looked up (digest known, or asked for), so the pages
+    /// that want digests on every frame don't touch the disk again for them.
     pub digests_asked: std::collections::HashSet<PathBuf>,
     /// Weather being fetched, and the sessions already asked about this run.
     pub weather_rx: Option<std::sync::mpsc::Receiver<(PathBuf, crate::weather::Weather)>>,
@@ -110,7 +112,18 @@ impl App {
                 }
             }
         }
-        let need: Vec<PathBuf> = paths.filter(|p| digests.get(p).is_none() && !self.sensors.digests_asked.contains(p)).collect();
+        // Only sessions not seen before: looking one up reads its file's size.
+        let mut need = Vec::new();
+        for p in paths {
+            if self.sensors.digests_asked.contains(&p) {
+                continue;
+            }
+            if digests.get(&p).is_none() {
+                need.push(p);
+            } else {
+                self.sensors.digests_asked.insert(p);
+            }
+        }
         if !need.is_empty() && self.sensors.digest_rx.is_none() {
             self.sensors.digests_asked.extend(need.iter().cloned());
             self.sensors.digest_rx = Some(crate::digest::spawn(need, ctx.clone()));

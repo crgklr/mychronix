@@ -113,7 +113,7 @@ impl Worker {
     pub fn spawn(ctx: eframe::egui::Context) -> Self {
         let (cmd_tx, cmd_rx) = channel::<Command>();
         let (ev_tx, ev_rx) = channel::<Event>();
-        std::thread::spawn(move || {
+        crate::jobs::spawn("mychron", move || {
             let send = |e: Event| {
                 let _ = ev_tx.send(e);
                 ctx.request_repaint();
@@ -204,10 +204,9 @@ fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
 /// sessions recorded on them have a track to attach to. RaceStudio does the
 /// same while connecting. Returns how many were copied.
 fn copy_custom_tracks(logger: &mut Logger) -> usize {
-    let Some(dir) = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("tracks").join("custom")) else { return 0 };
+    let Some(dir) = crate::paths::data("tracks/custom") else { return 0 };
     let Ok(index) = logger.read_file("0:/tkk/dev.ria", |_, _| {}) else { return 0 };
     let Ok(tracks) = aim_track::parse_ria(&index) else { return 0 };
-    let _ = std::fs::create_dir_all(&dir);
     let mut copied = 0;
     for t in tracks {
         // The track id comes from the logger: only plain names make a file name.
@@ -218,10 +217,13 @@ fn copy_custom_tracks(logger: &mut Logger) -> usize {
         if target.exists() {
             continue;
         }
-        if let Ok(bytes) = logger.read_file(&format!("0:/tkk/o/{}.tkk", t.id), |_, _| {}) {
-            if aim_track::parse_tkk(&bytes).is_ok() && std::fs::write(&target, bytes).is_ok() {
-                copied += 1;
-            }
+        match logger.read_file(&format!("0:/tkk/o/{}.tkk", t.id), |_, _| {}) {
+            Ok(bytes) if aim_track::parse_tkk(&bytes).is_ok() => match crate::storage::write_atomic(&target, &bytes) {
+                Ok(()) => copied += 1,
+                Err(e) => log::warn!("couldn't save custom track {}: {e}", target.display()),
+            },
+            Ok(_) => log::warn!("the MyChron's custom track {} couldn't be read as a track; skipped", t.id),
+            Err(e) => log::warn!("couldn't read custom track {} from the MyChron: {e}", t.id),
         }
     }
     copied
@@ -235,11 +237,14 @@ fn copy_track_list(logger: &mut Logger) {
     if target.exists() {
         return;
     }
-    if let Ok(bytes) = logger.read_file("0:/tkk/al.ria", |_, _| {}) {
-        if aim_track::parse_ria(&bytes).is_ok_and(|r| !r.is_empty()) {
-            let _ = target.parent().map(std::fs::create_dir_all);
-            let _ = std::fs::write(&target, bytes);
+    match logger.read_file("0:/tkk/al.ria", |_, _| {}) {
+        Ok(bytes) if aim_track::parse_ria(&bytes).is_ok_and(|r| !r.is_empty()) => {
+            if let Err(e) = crate::storage::write_atomic(&target, &bytes) {
+                log::warn!("couldn't save the MyChron's track list to {}: {e}", target.display());
+            }
         }
+        Ok(_) => log::warn!("the MyChron's track list couldn't be read; not saved"),
+        Err(e) => log::warn!("couldn't read the MyChron's track list: {e}"),
     }
 }
 
@@ -261,13 +266,18 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
             .read_file(&path, |done, total| send(Event::Progress { index, count, file: entry.name.clone(), done, total }))
             .map_err(|e| format!("Downloading {} failed: {e}", entry.name))?;
         let target = target_for(dir, entry);
-        let partial = target.with_extension("part");
-        std::fs::write(&partial, &data).and_then(|_| std::fs::rename(&partial, &target)).map_err(|e| e.to_string())?;
+        crate::storage::write_atomic(&target, &data).map_err(|e| format!("Couldn't save {}: {e}", target.display()))?;
         log::info!("saved {} ({} bytes)", target.display(), data.len());
-        // The small summary beside it, used by the Sessions and Tracks pages.
+        // The small summary beside it, used by the Sessions and Tracks pages
+        // (without it, Mychronix works the summary out from the session).
         let xri = Path::new(&entry.name).with_extension("xri");
-        if let Ok(bytes) = logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}) {
-            let _ = std::fs::write(target.with_extension("xri"), bytes);
+        match logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}) {
+            Ok(bytes) => {
+                if let Err(e) = crate::storage::write_atomic(&target.with_extension("xri"), &bytes) {
+                    log::warn!("couldn't save the summary beside {}: {e}", target.display());
+                }
+            }
+            Err(e) => log::warn!("couldn't read {} from the MyChron: {e}", xri.display()),
         }
         let meta = SessionMeta { listed: listed(entry), ..meta.clone() };
         meta.save(&target).map_err(|e| e.to_string())?;
@@ -279,7 +289,7 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
 // ---------------------------------------------------------------------------
 // WiFi: NetworkManager on Linux; on a Mac you join from the menu bar.
 
-pub use wifi::{JOIN_HINT, paused_networks, restore_after_crash, restore_wifi_now};
+pub use wifi::{JOIN_HINT, paused_networks, restore_after_crash, restore_wifi_now, restore_wifi_on_quit};
 use wifi::{aim_networks, current_wifi, join, leave};
 
 #[cfg(not(target_os = "macos"))]
@@ -291,7 +301,7 @@ mod wifi {
 
 
     fn restore_file() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("wifi-restore.json"))
+        crate::paths::data("wifi-restore.json")
     }
 
     #[derive(Serialize, Deserialize, Default)]
@@ -345,31 +355,43 @@ mod wifi {
         nets
     }
 
+    /// The WiFi connection in use (its NetworkManager name, which for a
+    /// MyChron is its SSID). Read from the active connections rather than
+    /// the scan list, which can be momentarily empty mid-scan.
     pub(super) fn current_wifi() -> Option<String> {
-        nmcli(&["-t", "-f", "ACTIVE,SSID", "device", "wifi"])
+        nmcli(&["-t", "-f", "NAME,TYPE", "connection", "show", "--active"])
             .ok()?
             .lines()
             .map(split_terse)
-            .find(|f| f.first().is_some_and(|a| a == "yes"))
-            .and_then(|f| f.get(1).cloned())
+            .find(|f| f.get(1).is_some_and(|t| t == "802-11-wireless"))
+            .and_then(|f| f.first().cloned())
             .filter(|s| !s.is_empty())
     }
 
+    fn load_restore() -> Option<Restore> {
+        restore_file().and_then(|p| crate::storage::load(&p))
+    }
+
     pub(super) fn join(ssid: &str) -> Result<(), String> {
-        let previous = current_wifi().filter(|s| !s.starts_with("AiM-"));
+        // Already paused by an earlier join that wasn't undone: keep its list
+        // and network to go back to, which a fresh look can no longer see.
+        let earlier = load_restore().unwrap_or_default();
+        let previous = earlier.previous.or_else(|| current_wifi().filter(|s| !s.starts_with("AiM-")));
+        let mut paused = earlier.paused;
         // Stop other WiFi profiles from pulling the computer back to the internet.
-        let mut paused = Vec::new();
         for line in nmcli(&["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"])?.lines() {
             let f = split_terse(line);
             if f.len() >= 3 && f[1] == "802-11-wireless" && f[2] == "yes" && f[0] != ssid {
-                if nmcli(&["connection", "modify", &f[0], "connection.autoconnect", "no"]).is_ok() {
+                if nmcli(&["connection", "modify", &f[0], "connection.autoconnect", "no"]).is_ok() && !paused.contains(&f[0]) {
                     paused.push(f[0].clone());
                 }
             }
         }
+        log::info!("paused auto-connect for {} networks; will go back to {}", paused.len(), previous.as_deref().unwrap_or("whichever reconnects"));
         if let Some(path) = restore_file() {
-            let _ = std::fs::create_dir_all(path.parent().unwrap());
-            let _ = std::fs::write(&path, serde_json::to_string(&Restore { paused: paused.clone(), previous }).unwrap_or_default());
+            if let Err(e) = crate::storage::save(&path, &Restore { paused, previous }) {
+                log::error!("couldn't save {}: {e}", path.display());
+            }
         }
         if let Err(e) = nmcli(&["device", "wifi", "connect", ssid]) {
             leave();
@@ -394,27 +416,38 @@ mod wifi {
         leave();
     }
 
+    /// Mychronix is quitting while joined to a MyChron.
+    pub fn restore_wifi_on_quit() {
+        leave();
+    }
+
     pub(super) fn leave() {
         let Some(path) = restore_file() else { return };
-        let Some(restore) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Restore>(&s).ok()) else { return };
+        let Some(restore) = load_restore() else { return };
+        let mut failed = 0;
         for name in &restore.paused {
-            let _ = nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]);
-        }
-        // Already back on a network of your choosing: leave it be.
-        let current = current_wifi();
-        if current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
-            let _ = std::fs::remove_file(path);
-            return;
-        }
-        match &restore.previous {
-            Some(ssid) => {
-                let _ = nmcli(&["connection", "up", ssid]).or_else(|_| nmcli(&["device", "wifi", "connect", ssid]));
-            }
-            None => {
-                let _ = nmcli(&["device", "disconnect", "wifi"]);
+            if nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]).is_err() {
+                failed += 1;
             }
         }
-        let _ = std::fs::remove_file(path);
+        log::info!("turned auto-connect back on for {} of {} networks", restore.paused.len() - failed, restore.paused.len());
+        // Still on the MyChron's network: go back. (Already on a network of
+        // your choosing: leave it be.)
+        if let Some(aim) = current_wifi().filter(|c| c.starts_with("AiM-")) {
+            let back = restore.previous.as_deref().is_some_and(|ssid| nmcli(&["connection", "up", ssid]).is_ok());
+            if !back {
+                // Drop only the MyChron's connection; NetworkManager then joins
+                // the best known network itself. (Disconnecting the WiFi device
+                // would stop it auto-connecting at all until joined by hand.)
+                let _ = nmcli(&["connection", "down", &aim]);
+            }
+        }
+        // Kept if some couldn't be turned back on, so the next try covers them.
+        if failed == 0 {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("couldn't remove {}: {e}", path.display());
+            }
+        }
     }
 
     /// True while Mychronix has other networks' auto-connect paused.
@@ -494,6 +527,7 @@ mod wifi {
     pub(super) fn leave() {}
 
     pub fn restore_wifi_now() {}
+    pub fn restore_wifi_on_quit() {}
 
     pub fn paused_networks() -> bool {
         false

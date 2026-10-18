@@ -20,7 +20,7 @@ pub struct Ignored {
 
 impl Ignored {
     fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("sensor-check.json"))
+        crate::paths::data("sensor-check.json")
     }
 
     pub fn load() -> Self {
@@ -123,7 +123,7 @@ pub fn summary(p: &Problem) -> String {
 /// issue worth reporting.
 pub fn spawn(paths: Vec<PathBuf>, known: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<Vec<Checked>> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("sensor-check", move || {
         let mut digests = crate::digest::Digests::load();
         for path in known.iter().chain(&paths) {
             digests.ensure(path);

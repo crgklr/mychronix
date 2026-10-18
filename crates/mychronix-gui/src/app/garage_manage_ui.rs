@@ -327,10 +327,6 @@ fn short_day(stamp: &str) -> String {
     }
 }
 
-fn plural(n: usize, word: &str) -> String {
-    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
-}
-
 impl App {
     /// Every known MyChron's model ("MyChron 4"), by ID: from its WiFi name,
     /// else its session summaries, else their digests.
