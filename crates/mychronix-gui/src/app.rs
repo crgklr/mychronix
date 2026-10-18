@@ -1258,16 +1258,9 @@ pub(super) fn calculated_note(ui: &mut Ui) {
     );
 }
 
-/// Channels that measure the same thing under different names on different
-/// loggers (a MyChron 4's "Engine" is a MyChron 6's "RPM").
-const SAME_CHANNEL: [&[&str]; 2] = [&["RPM", "Engine"], &["GPS Speed", crate::setup::SPEED_FROM_RPM]];
-
-/// `session`'s channel `name`, or its equivalent under another name.
+/// `session`'s channel `name`, or its equivalent under another name (see `report::channel`).
 fn same_channel<'a>(session: &'a Session, name: &str) -> Option<&'a aim_xrk::Channel> {
-    session.channel(name).or_else(|| {
-        let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
-        group.iter().find_map(|n| session.channel(n))
-    })
+    crate::report::channel(session, name)
 }
 
 /// "Saturday, October 10, 2026".
