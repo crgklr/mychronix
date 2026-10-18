@@ -9,6 +9,8 @@ use crate::braking::{self, Zone};
 #[derive(Default)]
 pub(super) struct CornersState {
     pub hovered: Option<usize>,
+    /// Bumps for (session, best lap start), worked out once.
+    bumps: Option<(usize, i64, Vec<crate::bumps::Bump>)>,
 }
 
 impl App {
@@ -51,6 +53,11 @@ impl App {
         let steering = reference.iter().any(|z| z.steering.is_some());
         let map_w = (ui.available_width() * if steering { 0.21 } else { 0.27 }).clamp(220.0, 480.0);
         let table_w = ui.available_width() - map_w - gap;
+        let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
+        if self.corners.bumps.as_ref().is_none_or(|b| (b.0, b.1) != key) {
+            self.corners.bumps = Some((key.0, key.1, crate::bumps::recurring(session, &best)));
+        }
+        let bumps = self.corners.bumps.as_ref().map(|b| b.2.clone()).unwrap_or_default();
         let mut hovered = None;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -66,7 +73,7 @@ impl App {
             });
             ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
                 ui.set_width(map_w);
-                corners_map(ui, session, &best, &reference, self.corners.hovered);
+                corners_map(ui, session, &best, &reference, &ref_profile, &bumps, self.corners.hovered);
             });
         });
         self.corners.hovered = hovered;
@@ -265,8 +272,9 @@ fn corners_table(
     hovered
 }
 
-/// The best lap's line with each braking zone drawn heavier and its corner number at the apex.
-fn corners_map(ui: &mut Ui, session: &Session, best: &aim_xrk::Lap, zones: &[Zone], highlighted: Option<usize>) {
+/// The best lap's line with each braking zone drawn heavier, its corner number
+/// at the apex, and a small diamond at each bump or curb hit on most laps.
+fn corners_map(ui: &mut Ui, session: &Session, best: &aim_xrk::Lap, zones: &[Zone], profile: &crate::compare::DistanceProfile, bumps: &[crate::bumps::Bump], highlighted: Option<usize>) {
     let Some(gps) = &session.gps else { return };
     let lo = gps.times_ms.partition_point(|&t| t < best.start_ms);
     let hi = gps.times_ms.partition_point(|&t| t <= best.end_ms);
@@ -282,6 +290,9 @@ fn corners_map(ui: &mut Ui, session: &Session, best: &aim_xrk::Lap, zones: &[Zon
                 ui.label(RichText::new("Corners").font(medium(14.5)).color(TEXT));
                 ui.label(RichText::new("on the best lap  ·  braking in red").size(12.5).color(DIM));
             });
+            if !bumps.is_empty() {
+                ui.label(RichText::new("◆  bumps or curbs hit on most laps").size(12.5).color(DIM));
+            }
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), (ui.available_height() - 8.0).max(120.0)), Sense::hover());
             if hi <= lo + 1 {
                 return;
@@ -311,6 +322,20 @@ fn corners_map(ui: &mut Ui, session: &Session, best: &aim_xrk::Lap, zones: &[Zon
                     None => (GRID.gamma_multiply(2.5), 3.0),
                 };
                 painter.line_segment([pts[k], pts[k + 1]], Stroke::new(width, color));
+            }
+            // Bumps and curbs hit on most laps: small, neutral, explained on hover.
+            for b in bumps {
+                let t = profile.time_at(b.at * profile.length()) as i64;
+                let k = gps.times_ms[lo..hi].partition_point(|&x| x < t).min(pts.len() - 1);
+                let p = pts[k];
+                let d = 6.0;
+                let diamond = vec![pos2(p.x, p.y - d), pos2(p.x + d, p.y), pos2(p.x, p.y + d), pos2(p.x - d, p.y)];
+                painter.add(egui::Shape::convex_polygon(diamond, TEXT, Stroke::new(1.5, SURFACE)));
+                let r = ui.interact(Rect::from_center_size(p, vec2(16.0, 16.0)), ui.id().with(("bump", k)), Sense::hover());
+                r.on_hover_text(format!(
+                    "A bump or curb hit on {} of {} laps (jolts up to {:.1} g). Curbs can be fast if the kart stays settled; a bump on the line is worth avoiding.",
+                    b.laps, b.of, b.peak_g
+                ));
             }
             // Corner numbers at the apexes.
             for (n, z) in zones.iter().enumerate() {

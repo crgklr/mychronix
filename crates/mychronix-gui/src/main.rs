@@ -16,6 +16,7 @@ mod app;
 mod import;
 mod jobs;
 mod braking;
+mod bumps;
 mod charts;
 mod compare;
 mod countries;
