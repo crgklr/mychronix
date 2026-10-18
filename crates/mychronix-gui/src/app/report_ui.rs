@@ -31,7 +31,13 @@ impl App {
         if config.columns.is_empty() {
             config.columns = Preset::Default.columns(session);
         }
-        let columns: Vec<Column> = config.columns.iter().filter(|c| session.channels.iter().any(|ch| ch.name == c.channel)).cloned().collect();
+        let mut columns: Vec<Column> = config.columns.iter().filter(|c| report::channel(session, &c.channel).is_some()).cloned().collect();
+        // A layout picked on another logger that hardly fits this session (GPS
+        // g-forces on a MyChron 4 without GPS): show the overview instead, and
+        // keep the saved layout for the sessions it suits.
+        if columns.len() < 2 && config.columns.len() >= 2 {
+            columns = Preset::Default.columns(session);
+        }
         let mut changed = false;
 
         ui.label(
@@ -100,10 +106,10 @@ impl App {
         let summaries: Vec<Option<[f64; 4]>> =
             (0..n_cols).map(|k| report::summary(&included.iter().filter_map(|&i| cells[i][k]).collect::<Vec<_>>())).collect();
         let decimals: Vec<usize> = std::iter::once(3)
-            .chain(columns.iter().map(|c| if c.stat.is_share() || c.stat == Stat::Corrections { 0 } else { session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| ch.decimals.min(2) as usize).unwrap_or(1) }))
+            .chain(columns.iter().map(|c| if c.stat.is_share() || c.stat == Stat::Corrections { 0 } else { report::channel(session, &c.channel).map(|ch| ch.decimals.min(2) as usize).unwrap_or(1) }))
             .collect();
         let units: Vec<String> = std::iter::once("s".to_string())
-            .chain(columns.iter().map(|c| if c.stat.is_share() { "% of lap".to_string() } else if c.stat == Stat::Corrections { "per lap".to_string() } else { session.channels.iter().find(|ch| ch.name == c.channel).map(|ch| pretty_units(&ch.units).to_string()).unwrap_or_default() }))
+            .chain(columns.iter().map(|c| if c.stat.is_share() { "% of lap".to_string() } else if c.stat == Stat::Corrections { "per lap".to_string() } else { report::channel(session, &c.channel).map(|ch| pretty_units(&ch.units).to_string()).unwrap_or_default() }))
             .collect();
         let fmt = |k: usize, v: f64| match k {
             0 => format_lap_time((v * 1000.0).round() as i64),
@@ -114,6 +120,11 @@ impl App {
         let mut remove = None;
         let mut toggle = None;
         let mut hovered = None;
+        // A column filled by speed worked out from RPM says so.
+        if columns.iter().any(|c| report::channel(session, &c.channel).is_some_and(|ch| super::is_calculated(&ch.name))) {
+            super::calculated_note(ui);
+            ui.add_space(6.0);
+        }
         let height = ui.available_height();
         // The graph keeps a readable height; the table gets the rest.
         let graph_h = 230.0;

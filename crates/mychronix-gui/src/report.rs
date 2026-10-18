@@ -176,10 +176,25 @@ impl Preset {
         };
         wanted
             .iter()
-            .filter(|(name, _)| session.channels.iter().any(|c| c.name == *name))
+            .filter(|(name, _)| channel(session, name).is_some())
             .map(|(name, stat)| Column::new(name, *stat))
             .collect()
     }
+}
+
+/// Channels that measure the same thing under different names on different
+/// loggers: a MyChron 4 (through RaceStudio 2) records "Engine" and
+/// "Battery" where a MyChron 6 records "RPM" and "Internal Batt"; without
+/// GPS, speed is worked out from RPM.
+const SAME_CHANNEL: [&[&str]; 3] = [&["RPM", "Engine"], &["GPS Speed", crate::setup::SPEED_FROM_RPM], &["Internal Batt", "Battery"]];
+
+/// `session`'s channel `name`, or the same thing under another name.
+pub fn channel<'a>(session: &'a Session, name: &str) -> Option<&'a Channel> {
+    let real = |c: &&Channel| c.values.len() > 1;
+    session.channels.iter().filter(real).find(|c| c.name == name).or_else(|| {
+        let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
+        group.iter().find_map(|n| session.channels.iter().filter(real).find(|c| c.name == *n))
+    })
 }
 
 /// Lateral g for cornering and coasting: from GPS as RaceStudio does, else
@@ -188,7 +203,7 @@ const LATERAL: [&str; 2] = ["GPS LatAcc", "AccelerometerY"];
 
 /// A report cell: `column` over [start_ms, end_ms].
 pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> Option<f64> {
-    let channel = session.channels.iter().find(|c| c.name == column.channel)?;
+    let channel = self::channel(session, &column.channel)?;
     if column.stat == Stat::Corrections {
         let lo = channel.times_ms.partition_point(|&t| t < start_ms);
         let hi = channel.times_ms.partition_point(|&t| t <= end_ms);
