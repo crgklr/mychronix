@@ -24,10 +24,13 @@ mod report_ui;
 mod sessions_filter_ui;
 mod setup_ui;
 mod welcome_ui;
+mod settings_ui;
 mod splits_ui;
 mod tracks_ui;
 mod device_page;
 mod compare_ui;
+
+pub(crate) use sessions_filter_ui::{session_driver, session_track};
 
 use compare_ui::gain_color;
 use device_page::model_from_ssid;
@@ -43,7 +46,7 @@ use crate::theme::{
 /// Points drawn per channel; longer series are min/max-decimated to this many buckets.
 const MAX_POINTS: usize = 4000;
 /// Laps shorter than this are out/in laps cut by the session start or end.
-const MIN_LAP_MS: i64 = 10_000;
+pub(crate) const MIN_LAP_MS: i64 = 10_000;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -54,6 +57,7 @@ enum Page {
     Analysis,
     Tracks,
     Device,
+    Settings,
 }
 
 /// The download dialog's state.
@@ -232,6 +236,8 @@ pub struct App {
     dev_progress: Option<(usize, usize, String, u64, u64)>,
     dev_message: Option<(bool, String)>,
     dev_last_scan: f64,
+    /// The Settings page's last word on connecting an AI assistant.
+    mcp_message: Option<(bool, String)>,
     /// A scan is with the worker: don't queue another (one takes several seconds).
     dev_scanning: bool,
     /// The download dialog, while open.
@@ -404,6 +410,10 @@ impl App {
 
     pub fn show_analysis_page(&mut self) {
         self.page = Page::Analysis;
+    }
+
+    pub fn show_settings_page(&mut self) {
+        self.page = Page::Settings;
     }
 
     pub fn show_garage_page(&mut self) {
@@ -662,6 +672,7 @@ impl eframe::App for App {
                 (Page::Events, _, _) => self.events_page(ui),
                 (Page::Tracks, _, _) => self.tracks_page(ui),
                 (Page::Device, _, _) => self.device_page(ui),
+                (Page::Settings, _, _) => self.settings_page(ui),
             });
 
         self.rail(&ui.ctx().clone(), rail_space);
@@ -1220,7 +1231,7 @@ fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best
         }
         let track = s.track.map(|t| lib.tracks[t].name.clone()).or(sum.track.clone()).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
-        let line = [sum.start_time.as_deref().map(crate::events::us_time), Some(driver.to_string()), Some(track), championship]
+        let line = [sum.start_time.as_deref().map(crate::events::clock_time), Some(driver.to_string()), Some(track), championship]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -1245,7 +1256,7 @@ fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best
 }
 
 /// Channels Mychronix works out rather than the logger measuring them.
-pub(super) fn is_calculated(name: &str) -> bool {
+pub(crate) fn is_calculated(name: &str) -> bool {
     name == crate::setup::SPEED_FROM_RPM
 }
 
@@ -2349,7 +2360,7 @@ fn pretty_units(units: &str) -> &str {
 /// run to or from the ends of the recording, plus any lap far off the pace
 /// (cool-downs, cautions): shorter than `MIN_LAP_MS` or 15% slower than the
 /// median complete lap.
-fn slow_laps(session: &Session) -> Vec<bool> {
+pub(crate) fn slow_laps(session: &Session) -> Vec<bool> {
     let n = session.laps.len();
     let mut times: Vec<i64> = session.complete_laps().iter().map(|l| l.duration_ms()).filter(|&d| d >= MIN_LAP_MS).collect();
     times.sort_unstable();

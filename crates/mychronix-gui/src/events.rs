@@ -239,11 +239,18 @@ pub fn us_short(d: Date) -> String {
     format!("{} {}, {}", M[(d.month.clamp(1, 12) - 1) as usize], d.day, d.year)
 }
 
-/// "2:19 PM" from the logger's "14:19:05".
-pub fn us_time(t: &str) -> String {
+/// "2:19 PM" (or "14:19" on a 24-hour clock, see Settings) from the logger's "14:19:05".
+pub fn clock_time(t: &str) -> String {
+    format_time(t, crate::settings::clock_24())
+}
+
+fn format_time(t: &str, h24: bool) -> String {
     let mut p = t.split(':');
     let (Some(Ok(h)), Some(m)) = (p.next().map(|h| h.trim().parse::<u32>()), p.next()) else { return t.to_string() };
     let m = m.get(..2).unwrap_or(m);
+    if h24 {
+        return format!("{h:02}:{m}");
+    }
     let (h12, ampm) = match h { 0 => (12, "AM"), 1..=11 => (h, "AM"), 12 => (12, "PM"), _ => (h - 12, "PM") };
     format!("{h12}:{m} {ampm}")
 }
@@ -286,9 +293,11 @@ mod tests {
         assert_eq!(parse_date("10/17/2026"), Some(d(2026, 10, 17)));
         assert_eq!(us_numeric(d(2026, 1, 7)), "1/7/2026");
         assert_eq!(us_short(d(2026, 10, 17)), "Oct 17, 2026");
-        assert_eq!(us_time("14:19:05"), "2:19 PM");
-        assert_eq!(us_time("00:05:00"), "12:05 AM");
-        assert_eq!(us_time("12:30"), "12:30 PM");
+        assert_eq!(format_time("14:19:05", false), "2:19 PM");
+        assert_eq!(format_time("14:19:05", true), "14:19");
+        assert_eq!(format_time("09:05", true), "09:05");
+        assert_eq!(format_time("00:05:00", false), "12:05 AM");
+        assert_eq!(format_time("12:30", false), "12:30 PM");
     }
 
     #[test]
