@@ -249,15 +249,11 @@ impl App {
         }
         let slow = slow_laps(session);
         let best = session.best_lap(MIN_LAP_MS).copied();
-        let mut sorted: Vec<i64> = laps.iter().map(|l| l.duration_ms()).collect();
-        sorted.sort_unstable();
-        let median = sorted[sorted.len() / 2].max(1) as f32;
-        // Racing laps share one width; long laps (stopped under a flag) are wider, capped so they don't swamp the strip.
-        let weight = |l: &aim_xrk::Lap| (l.duration_ms() as f32 / median).clamp(1.0, 1.8);
+        // Every lap the same width, the row filling the page.
         let all_w = if compare_mode { 86.0 } else { 64.0 };
         let gap = 4.0;
         let avail = ui.available_width() - all_w - gap * laps.len() as f32;
-        let total: f32 = laps.iter().map(weight).sum();
+        let w = (avail / laps.len() as f32).max(28.0);
         let h = 46.0;
         let mut toggle = None;
         let mut pick: Option<Option<usize>> = None;
@@ -285,7 +281,6 @@ impl App {
                 }
             }
             for (i, lap) in laps.iter().enumerate() {
-                let w = (avail * weight(lap) / total).max(28.0);
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
                 // On Compare, "selected" means in the comparison.
                 let selected = if compare_mode { false } else { self.lap == Some(i) };
@@ -315,6 +310,16 @@ impl App {
                 if w >= 62.0 {
                     p.text(pos2(rect.left() + 8.0, rect.top() + 13.0), egui::Align2::LEFT_CENTER, lap.number.to_string(), regular(11.5), DIM);
                     p.text(pos2(rect.left() + 8.0, rect.top() + 31.0), egui::Align2::LEFT_CENTER, format_lap_time(lap.duration_ms()), medium(13.0), time_color);
+                } else if let (true, Some(b)) = (w >= 44.0, best) {
+                    // Too narrow for a full time: the best keeps its time to the hundredth, the rest show their gap to it.
+                    let text = if is_best {
+                        let t = format_lap_time(lap.duration_ms());
+                        t[..t.len() - 1].to_string()
+                    } else {
+                        format!("+{:.2}", (lap.duration_ms() - b.duration_ms()) as f64 / 1000.0)
+                    };
+                    p.text(pos2(rect.left() + 5.0, rect.top() + 13.0), egui::Align2::LEFT_CENTER, lap.number.to_string(), regular(11.0), DIM);
+                    p.text(pos2(rect.left() + 5.0, rect.top() + 31.0), egui::Align2::LEFT_CENTER, text, medium(12.0), time_color);
                 } else {
                     p.text(rect.center(), egui::Align2::CENTER_CENTER, lap.number.to_string(), medium(12.5), time_color);
                 }
