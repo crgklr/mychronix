@@ -35,7 +35,7 @@ pub(super) struct SessionFilter {
 
 /// A session's driver: the one entered for it, else its kart's (the kart
 /// its MyChron was on when it was recorded); "" when neither.
-pub(super) fn session_driver(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
+pub(crate) fn session_driver(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
     let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
     s.meta
         .as_ref()
@@ -46,7 +46,7 @@ pub(super) fn session_driver(s: &tracks::LocalSession, profiles: &crate::profile
 }
 
 /// A session's track name: the one it's assigned to, else the one its MyChron recorded.
-pub(super) fn session_track(lib: &Library, i: usize) -> Option<String> {
+pub(crate) fn session_track(lib: &Library, i: usize) -> Option<String> {
     let s = &lib.sessions[i];
     s.track.map(|t| lib.tracks[t].name.clone()).or_else(|| s.summary.track.clone())
 }
@@ -117,7 +117,7 @@ fn check_row(ui: &mut Ui, on: bool, label: &str, count: usize) -> bool {
 
 /// A section of the filter panel: its own card, with an icon, a title, a
 /// line saying what it's filtering, and a Clear link while it filters.
-fn section(ui: &mut Ui, icon: Icon, title: &str, summary: &str, active: bool, add: impl FnOnce(&mut Ui)) -> bool {
+pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, summary: &str, active: bool, add: impl FnOnce(&mut Ui)) -> bool {
     let mut clear = false;
     Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin::same(16)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -151,9 +151,14 @@ fn section(ui: &mut Ui, icon: Icon, title: &str, summary: &str, active: bool, ad
 
 /// An even grid of choices, two to a row; the one picked is filled.
 fn segments<T: Copy + PartialEq>(ui: &mut Ui, value: &mut T, options: &[(T, &str)]) {
+    segments_in(ui, value, options, 2);
+}
+
+/// Choices as buttons, `per_row` to a row.
+pub(super) fn segments_in<T: Copy + PartialEq>(ui: &mut Ui, value: &mut T, options: &[(T, &str)], per_row: usize) {
     let gap = 8.0;
-    let w = (ui.available_width() - gap) / 2.0;
-    for row in options.chunks(2) {
+    let w = (ui.available_width() - gap * (per_row - 1) as f32) / per_row as f32;
+    for row in options.chunks(per_row) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for (v, label) in row {
@@ -174,7 +179,7 @@ fn segments<T: Copy + PartialEq>(ui: &mut Ui, value: &mut T, options: &[(T, &str
 }
 
 /// An on/off switch with a title and an explanation; true when clicked.
-fn switch_row(ui: &mut Ui, on: bool, title: &str, detail: &str) -> bool {
+pub(super) fn switch_row(ui: &mut Ui, on: bool, title: &str, detail: &str) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
     let p = ui.painter();
     let track = Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), vec2(40.0, 22.0));

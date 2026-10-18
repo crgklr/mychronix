@@ -633,7 +633,7 @@ impl App {
                         let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
                         let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
                         p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.0), TEXT);
-                        let when = [sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
+                        let when = [sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
                         p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, when, regular(12.5), DIM);
                         let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
                         let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());

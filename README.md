@@ -24,6 +24,28 @@ racers and families who don't use Windows. If you're on Windows, use RaceStudio.
 Mychronix only ever **reads** from your MyChron and data key. It never changes
 settings, deletes sessions or updates firmware.
 
+## Share your sessions
+
+**We're looking for sample sessions from every kind of MyChron**: the 3, 4, 5
+and 6 series and all their variants, and **especially ones with lots of sensors
+and expansions connected** (expansion boxes, CAN devices, water and exhaust
+temperatures, lambda, steering, brake pressure, wheel speed, extra GPS). Every
+logger and accessory records a little differently, and the only way to support
+one properly is to read real sessions from it.
+
+To share one, [open an issue](https://github.com/crgklr/mychronix/issues/new)
+and attach the files zipped up:
+
+- **MyChron 5 and 6:** the `.xrk` or `.xrz` (and its `.xri` if you have it),
+  from RaceStudio 3 or from Mychronix's `~/Mychronix/sessions` folder.
+- **MyChron 4:** RaceStudio 2's `.drk` with its `.gpk`, `.rrk` and `.imd`
+  beside it, or the `.mc4` files Mychronix saves.
+- **MyChron 3:** whatever RaceStudio saved.
+
+Say which MyChron it is and what's plugged into it. A session with a few laps
+is plenty. Issues are public, and session files can hold driver and kart names
+and the track's GPS position, so share only what you're happy to make public.
+
 ## What it does
 
 - **Download** from your MyChron. Add it from the Device page and Mychronix walks
@@ -45,8 +67,18 @@ settings, deletes sessions or updates firmware.
   tracks and timed laps; search by anything.
 - **Analysis**: channels over time or distance on a shared cursor, a track map
   colored by any channel, every lap as a strip across the top.
-- **Lap by lap**, **Splits**, **Corners**, **Histogram** and **Scatter**
-  (RPM against speed with your gearing drawn in, the G-G diagram).
+- **Corners**, the way a data team reads them: each corner from its braking
+  point to the next one's (so the exit counts), against the best you've driven
+  each corner. One row per corner shows the speed given up, how the kart slowed
+  (braking, trail braking, or lifting and sliding), steering and the time lost;
+  the best of every corner adds up to the lap you've already proven you can
+  drive. The selected corner is drawn up close, headed by what stands out.
+- **Lap by lap**, **Splits**, **Histogram** and **Scatter** (RPM against speed
+  with your gearing drawn in, the grip circle).
+- **MyChron 6 motion sensor**: worked out for however the MyChron is mounted,
+  with nothing to set: braking and acceleration (Forward g), bumps (Vertical g),
+  grip used around the lap, trail braking, bumps and curbs hit on most laps, and
+  steering corrections without a steering sensor when the MyChron is on the wheel.
 - **Compare** laps, or each driver's best lap at a track, lined up by distance,
   with the time gap and where time was won and lost.
 - **Speed without GPS**: worked out from RPM, gearing and rear tire size (marked
@@ -62,6 +94,11 @@ settings, deletes sessions or updates firmware.
 - **Tracks**: AiM's track database (about 5,600 tracks with outlines, details and
   logos), your custom tracks, maps and satellite views, favorites.
 - **Weather** at the track when each session started.
+- **AI race coaching with your own assistant**: the Mychronix Performance
+  Engineer lets Claude Desktop, Codex or another app that supports MCP read your
+  sessions and coach from them. No subscription; see below.
+- **Settings**: units, 12- or 24-hour times, and what Mychronix may fetch from
+  the internet.
 - **Works offline.** At the track with no signal, everything you've downloaded is
   there; anything that needs the internet waits until you're back online.
 
@@ -172,14 +209,32 @@ for these, and sends nothing about you:
 
 | What | From | Turn off |
 |---|---|---|
-| AiM's track database: all of it the first time (~70 MB, under a minute), then only what changed | AiM's public track server, the one RaceStudio 3 uses | `"aim_tracks": false` |
-| Weather when each session started (only the track's position and the date are sent) | [Open-Meteo](https://open-meteo.com) | `"weather": false` |
-| Whether a newer Mychronix is out | GitHub | `"update_check": false` |
+| AiM's track database: all of it the first time (~70 MB, under a minute), then only what changed | AiM's public track server, the one RaceStudio 3 uses | Settings → Internet |
+| Weather when each session started (only the track's position and the date are sent) | [Open-Meteo](https://open-meteo.com) | Settings → Internet |
+| Whether a newer Mychronix is out | GitHub | Settings → Internet |
 | Map tiles and satellite imagery, cached once viewed | OpenStreetMap; Esri World Imagery | — |
 
-The settings go in `~/Mychronix/settings.json`, e.g. `{ "weather": false }`.
-Units follow your computer's region (mph and °F in the US); `"units": "metric"`
-or `"units": "imperial"` picks them yourself.
+Settings (the gear at the bottom of the sidebar) are saved in
+`~/Mychronix/settings.json`. Units and the clock follow your computer's region
+until you pick them there.
+
+## AI race coaching: the Mychronix Performance Engineer
+
+Plenty of lap-timing apps sell an "AI coach" by subscription. Mychronix lets
+you use the AI assistant you already have instead. Turn on **Settings → Mychronix
+Performance Engineer**, then press **Add to Claude Desktop** or **Add to
+Codex** (or copy the command into any app that supports MCP servers). Restart
+the assistant and ask it things like *"How did Saturday go, and where is the
+time in each corner?"*
+
+It's an [MCP](https://modelcontextprotocol.io) server built into Mychronix
+(`mychronix-gui --mcp`). It's read-only: it can list sessions, read a session's
+laps, setup and weather, go corner by corner, compare two laps, read a channel
+through a lap, and follow race days over a season, with the same numbers as the
+app's own screens. It can't change your data or talk to a MyChron, and it's off
+until you turn it on. Mychronix sends nothing itself; what the assistant reads
+goes to the company that runs it (Anthropic for Claude, OpenAI for Codex), like
+anything else you share in that chat.
 
 ## Troubleshooting
 
@@ -241,6 +296,7 @@ known, where it came from and how sure we are of it is in
 Roughly in priority order:
 
 - [ ] Test a MyChron 5 (and a MyChron 4 with an expansion box) on real hardware.
+      [Sample sessions](#share-your-sessions) help a lot here.
 - [ ] Edit sessions' details after downloading, one or many at once.
 - [ ] Export sessions and laps to CSV.
 - [ ] Drag and drop on Linux under Wayland (waiting on the windowing library).

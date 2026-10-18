@@ -76,6 +76,25 @@ impl App {
                         }
                         y += 46.0;
                     }
+                    // Settings at the bottom of the rail.
+                    let row = Rect::from_min_size(pos2(rect.left() + 10.0, rect.bottom() - 58.0), vec2(width - 20.0, 42.0));
+                    let resp = ui.interact(row, egui::Id::new(("rail_item", "Settings")), Sense::click());
+                    let selected = self.page == Page::Settings;
+                    if selected || resp.hovered() {
+                        painter.rect_filled(row, CornerRadius::same(theme::RADIUS_SMALL + 2), if selected { SURFACE_ACTIVE } else { SURFACE_HOVER });
+                    }
+                    let tint = if selected { TEXT } else { SECONDARY };
+                    let icon_rect = Rect::from_center_size(pos2(rect.left() + RAIL_W / 2.0, row.center().y), Vec2::splat(20.0));
+                    Icon::Settings.image(tint, 20.0).paint_at(ui, icon_rect);
+                    if t > 0.05 {
+                        painter.text(pos2(icon_rect.right() + 16.0, row.center().y), egui::Align2::LEFT_CENTER, "Settings", medium(14.5), tint.gamma_multiply(t));
+                    }
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if resp.clicked() {
+                        self.page = Page::Settings;
+                    }
                 });
             });
     }
@@ -88,7 +107,7 @@ impl App {
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let title = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
         let when = match (i.date.as_deref(), i.time.as_deref()) {
-            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::events::us_time(t))),
+            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::events::clock_time(t))),
             (Some(d), None) => Some(d.to_string()),
             _ => None,
         };

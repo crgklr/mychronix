@@ -24,6 +24,7 @@ mod countries;
 mod device;
 mod digest;
 mod logging;
+mod mcp;
 mod paths;
 mod events;
 mod profiles;
@@ -90,6 +91,13 @@ fn main() -> eframe::Result {
         std::env::consts::ARCH,
         std::env::var("MYCHRONIX_LOG").unwrap_or_default()
     );
+    // `--mcp`: the Mychronix Performance Engineer, for an AI assistant on this
+    // computer (no window; it talks over stdin and stdout).
+    if std::env::args().any(|a| a == "--mcp") {
+        units::init();
+        mcp::serve();
+        return Ok(());
+    }
     let path = std::env::args_os().nth(1).map(PathBuf::from);
     let screenshot = std::env::var_os("MYCHRONIX_SCREENSHOT").map(PathBuf::from);
     let demo = std::env::var_os("MYCHRONIX_DEMO").is_some();
@@ -143,6 +151,7 @@ fn main() -> eframe::Result {
             }
             match std::env::var("MYCHRONIX_PAGE").as_deref() {
                 Ok("device") => app.show_device_page(),
+                Ok("settings") => app.show_settings_page(),
                 Ok("tracks") => app.show_tracks_page(),
                 Ok("sessions") => app.show_sessions_page(),
                 Ok("events") => app.show_events_page(),

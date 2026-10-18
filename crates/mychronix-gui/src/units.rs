@@ -1,7 +1,7 @@
 //! Display units: mph and °F, or km/h and °C. The MyChron records metric;
-//! values are converted when shown. Chosen in `~/Mychronix/settings.json`
-//! (`"units": "imperial"` or `"metric"`), else from the Mac's measurement
-//! setting or the system's country.
+//! values are converted when shown. Chosen on the Settings page (saved in
+//! `~/Mychronix/settings.json`), else from the Mac's measurement setting or
+//! the system's country.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -11,9 +11,14 @@ static IMPERIAL: AtomicBool = AtomicBool::new(false);
 
 const MPH_PER_KMH: f64 = 0.621_371;
 
-/// Reads the setting (or the locale) once at startup.
+/// Reads the setting (or the locale) at startup.
 pub fn init() {
-    let imperial = match crate::settings::get().units.as_deref() {
+    crate::settings::get();
+}
+
+/// Uses `units` ("imperial", "metric", or None for the computer's region).
+pub fn set(units: Option<&str>) {
+    let imperial = match units {
         Some("imperial") => true,
         Some("metric") => false,
         // The countries that use miles per hour and Fahrenheit day to day. The

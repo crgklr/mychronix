@@ -446,7 +446,7 @@ impl App {
                         ui.add_space(6.0);
                         let number = aim_xrk::summary::session_number(&e.name).map(|n| format!("Session {n}")).unwrap_or(e.name.clone());
                         ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                        let when = sum.as_ref().map(|s| [s.date.map(crate::events::us_short), s.start_time.as_deref().map(crate::events::us_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
+                        let when = sum.as_ref().map(|s| [s.date.map(crate::events::us_short), s.start_time.as_deref().map(crate::events::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
                         ui.label(RichText::new(when).color(DIM));
                         if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
                             ui.label(RichText::new(t).color(SECONDARY));
