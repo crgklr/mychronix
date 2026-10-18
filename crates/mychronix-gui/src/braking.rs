@@ -24,8 +24,11 @@ pub struct Zone {
     /// Time in the zone actually on the brakes (GPS LonAcc below
     /// RaceStudio's −0.15 g), s; the rest is lifting or scrubbing speed.
     pub brake_s: f64,
-    /// Hardest deceleration in the zone (GPS LonAcc), g, as a positive number.
+    /// Hardest deceleration in the zone (Forward g from the IMU when the
+    /// session has it, else GPS LonAcc), g, as a positive number.
     pub peak_g: f64,
+    /// With the IMU: seconds braking while already turning (see [`trail_in`]).
+    pub trail_s: Option<f64>,
     /// With a steering channel, from the start of braking to the corner's
     /// exit (the next corner's braking or the lap's end): the largest angle
     /// either way and how many times the wheel changed direction by 5°+.
@@ -56,9 +59,16 @@ pub fn lap_zones(session: &Session, lap: &Lap) -> Option<(Vec<Zone>, DistancePro
     let lo = gps.times_ms.partition_point(|&t| t < lap.start_ms);
     let hi = gps.times_ms.partition_point(|&t| t <= lap.end_ms);
     let mut zones = find_zones(&gps.times_ms[lo..hi], &gps.speed_kmh[lo..hi], |t| profile.dist_at(t as f64));
-    if let Some(lon) = session.channel("GPS LonAcc") {
+    // The IMU's forward g is sharper than the GPS's (50 readings a second, unsmoothed).
+    let imu = session.channel("Forward g");
+    if let Some(lon) = imu.or_else(|| session.channel("GPS LonAcc")) {
         for z in &mut zones {
             (z.brake_s, z.peak_g) = braking_in(lon, z.start_ms, z.apex_ms);
+        }
+    }
+    if let (Some(fwd), Some(lat)) = (imu, session.channel("GPS LatAcc")) {
+        for z in &mut zones {
+            z.trail_s = Some(trail_in(fwd, lat, z.start_ms, z.apex_ms));
         }
     }
     let steer = session.channels.iter().find(|c| c.name.to_lowercase().contains("steer") && c.values.len() > 1);
@@ -93,6 +103,25 @@ pub fn braking_in(lon: &aim_xrk::Channel, start_ms: i64, end_ms: i64) -> (f64, f
     (on_ms as f64 / 1000.0, peak)
 }
 
+/// Trail braking over [start_ms, end_ms]: seconds braking (forward g below
+/// −0.15 g) while already turning (over 0.3 g of cornering), when braking and
+/// turning overlap on the way into the corner.
+pub fn trail_in(forward: &aim_xrk::Channel, lat: &aim_xrk::Channel, start_ms: i64, end_ms: i64) -> f64 {
+    let lo = forward.times_ms.partition_point(|&t| t < start_ms);
+    let hi = forward.times_ms.partition_point(|&t| t <= end_ms);
+    let mut ms = 0i64;
+    for i in lo..hi {
+        let t = forward.times_ms[i];
+        let next = forward.times_ms.get(i + 1).copied().unwrap_or(end_ms).min(end_ms);
+        let j = lat.times_ms.partition_point(|&x| x <= t).saturating_sub(1);
+        let turning = lat.values.get(j).is_some_and(|g| g.abs() > 0.3);
+        if forward.values[i] < -0.15 && turning {
+            ms += (next - t).max(0);
+        }
+    }
+    ms as f64 / 1000.0
+}
+
 /// Braking zones in a speed trace: each fall of at least [`MIN_DROP_KMH`] from
 /// a peak to a low that speed then climbs back from by as much.
 pub fn find_zones(times_ms: &[i64], speed_kmh: &[f64], dist_at: impl Fn(i64) -> f64) -> Vec<Zone> {
@@ -109,6 +138,7 @@ pub fn find_zones(times_ms: &[i64], speed_kmh: &[f64], dist_at: impl Fn(i64) -> 
         min_kmh: speed_kmh[lo],
         brake_s: 0.0,
         peak_g: 0.0,
+        trail_s: None,
         steering: None,
     };
     let mut peak = 0;
@@ -214,7 +244,7 @@ mod tests {
 
     #[test]
     fn matches_corners_by_where_they_fall() {
-        let at = |m: f64| Zone { start_ms: 0, apex_ms: 0, start_m: m - 20.0, apex_m: m, entry_kmh: 0.0, min_kmh: 0.0, brake_s: 0.0, peak_g: 0.0, steering: None };
+        let at = |m: f64| Zone { start_ms: 0, apex_ms: 0, start_m: m - 20.0, apex_m: m, entry_kmh: 0.0, min_kmh: 0.0, brake_s: 0.0, peak_g: 0.0, trail_s: None, steering: None };
         let reference = [at(50.0), at(150.0), at(250.0)];
         // A slightly longer lap that missed the middle corner's dip.
         let lap = [at(52.0), at(262.0)];

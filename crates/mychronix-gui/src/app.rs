@@ -1290,6 +1290,7 @@ impl App {
         if !self.collapsed_init {
             self.collapsed_init = true;
             self.collapsed_groups.insert("Lap timing");
+            self.collapsed_groups.insert("More channels");
             // MYCHRONIX_CHANNEL_SEARCH pre-fills the search (for screenshots).
             if let Ok(q) = std::env::var("MYCHRONIX_CHANNEL_SEARCH") {
                 self.filter = q;
@@ -1321,7 +1322,7 @@ impl App {
                     .channels
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| channel_group(c) == group && !is_dead(c))
+                    .filter(|(_, c)| channel_group(c, session.info.imu_mount.is_some()) == group && !is_dead(c))
                     .filter(|(_, c)| needle.is_empty() || c.name.to_lowercase().contains(&needle))
                     .filter(|(i, _)| self.channel_view != ChannelView::Graphed || self.selected.contains_key(i))
                     .map(|(i, _)| i)
@@ -1735,12 +1736,15 @@ impl App {
                                 if reference.is_some() && ui.selectable_label(gain.is_some(), "Time compare").on_hover_text("Where this lap gains and loses time against the best lap").clicked() {
                                     self.map_time_compare = true;
                                 }
+                                // Only what's worth seeing on the track: engine and movement.
+                                let imu = session.info.imu_mount.is_some();
                                 for (i, c) in session.channels.iter().enumerate() {
-                                    if !is_dead(c) {
-                                        if ui.selectable_label(gain.is_none() && color_ch == Some(i), &c.name).clicked() {
-                                            self.map_channel = Some(i);
-                                            self.map_time_compare = false;
-                                        }
+                                    if !is_dead(c)
+                                        && matches!(channel_group(c, imu), "Engine" | "Movement")
+                                        && ui.selectable_label(gain.is_none() && color_ch == Some(i), &c.name).clicked()
+                                    {
+                                        self.map_channel = Some(i);
+                                        self.map_time_compare = false;
                                     }
                                 }
                             })
@@ -2389,11 +2393,19 @@ fn is_dead(c: &Channel) -> bool {
 }
 
 /// Sidebar groups, in order.
-const CHANNEL_GROUPS: [&str; 4] = ["Engine", "Movement", "Lap timing", "Logger"];
+const CHANNEL_GROUPS: [&str; 5] = ["Engine", "Movement", "Lap timing", "Logger", "More channels"];
 
-fn channel_group(c: &Channel) -> &'static str {
+/// Which group a channel is listed under. `imu`: the session has the IMU's
+/// corrected channels, which stand in for the GPS's forward acceleration.
+fn channel_group(c: &Channel, imu: bool) -> &'static str {
     let n = c.name.to_lowercase();
-    if n.contains("predictive") || n.contains("diff") || n.contains("lap time") || n.contains("split") {
+    // The IMU's own axes (the logger's, not the kart's) and channels the
+    // corrected ones replace: still there, but tucked away.
+    if n.starts_with("accelerometer") || n.starts_with("gyro") || (imu && n == "gps lonacc") {
+        "More channels"
+    } else if n == "forward g" || n == "vertical g" || n == "grip used" {
+        "Movement"
+    } else if n.contains("predictive") || n.contains("diff") || n.contains("lap time") || n.contains("split") {
         "Lap timing"
     } else if n.contains("rpm") || n.contains("exhaust") || n.contains("egt") || n.contains("water") || n.contains("cht") || n.contains("throttle") || n.contains("lambda") {
         "Engine"
