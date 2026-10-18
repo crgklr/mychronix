@@ -9,10 +9,11 @@
 //! - **Forward** is the level direction whose acceleration best matches the
 //!   GPS's speeding up and slowing down.
 //!
-//! Only forward and vertical acceleration are given. The logger sits on the
-//! steering wheel and turns with it, so in corners its sideways reading is off
-//! by around 0.2 g (Oct 2026, a MyChron 6 against its own GPS); the GPS's
-//! cornering g stays the better measure there. And nothing is given unless the
+//! Only forward and vertical acceleration are given: in corners the chassis
+//! rolls, so the IMU's sideways reading falls about 20% short of the path's
+//! cornering g (Oct 2026, a MyChron 6 against its own GPS), which stays the
+//! measure there. A logger on the steering wheel turns with it, and its gyro
+//! gives the steering angle (see [`steering`]). And nothing is given unless the
 //! result checks out against the GPS: no still moment to find gravity, or a
 //! poor match, and the session simply has no IMU channels.
 
@@ -178,6 +179,110 @@ pub fn kart_channels(accel: [&Channel; 3], mount: &Mount) -> Vec<Channel> {
         channel("Forward g", (0..n).map(|i| dot(a(i), mount.forward) - mount.forward_bias).collect()),
         channel("Vertical g", (0..n).map(|i| dot(a(i), mount.up) - mount.gravity).collect()),
     ]
+}
+
+/// GPS heading lags the IMU by about this much (ms), found by lining up the
+/// gyro's turn rate with the GPS's on a MyChron 6 (Oct 2026).
+const GPS_LAG_MS: i64 = 60;
+/// The steering estimate must explain this much of how tightly the kart
+/// turns (R²); a MyChron 6 on the steering wheel scores 0.65–0.76.
+const MIN_STEER_FIT: f64 = 0.5;
+
+/// "Steering": the steering wheel's angle, degrees (positive turning right),
+/// for a MyChron mounted on the wheel, which turns with it. Worked out from
+/// the gyro: its rotation, less the kart's own turning (from the GPS), is the
+/// wheel turning; the column's direction is the one whose added-up rotation
+/// best follows how tightly the kart turns, and the angle is set back to zero
+/// on every straight so it can't drift. None when the logger doesn't turn
+/// with the wheel (a fixed bracket) or the result doesn't check out.
+pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Channel> {
+    let [x, y, z] = gyro;
+    let n = x.values.len().min(y.values.len()).min(z.values.len());
+    if n < 500 || gps.len() < 100 {
+        return None;
+    }
+    let t = &x.times_ms[..n];
+    let gps_at = |v: &[f64], ms: i64| {
+        let i = gps.times_ms.partition_point(|&q| q <= ms).saturating_sub(1);
+        v[i.min(v.len() - 1)]
+    };
+    let speed: Vec<f64> = t.iter().map(|&ms| gps_at(&gps.speed_kmh, ms)).collect();
+    let yaw: Vec<f64> = t.iter().map(|&ms| gps_at(&gps.yaw_rate_dps, ms + GPS_LAG_MS)).collect();
+    let w = |i: usize| [x.values[i], y.values[i], z.values[i]];
+    // The gyro's zero, while the kart sits still.
+    let still: Vec<usize> = (0..n).filter(|&i| speed[i] < STILL_KMH).collect();
+    if still.len() < 100 {
+        return None;
+    }
+    let bias = [0, 1, 2].map(|k| still.iter().map(|&i| w(i)[k]).sum::<f64>() / still.len() as f64);
+    // Rotation left once the kart's own turning is taken off (GPS yaw is
+    // clockwise positive, a turn about −up), added up axis by axis.
+    let mut total = vec![[0.0; 3]; n];
+    for i in 1..n {
+        let dt = (t[i] - t[i - 1]) as f64 / 1000.0;
+        let wi = w(i);
+        for k in 0..3 {
+            total[i][k] = total[i - 1][k] + (wi[k] - bias[k] + yaw[i] * mount.up[k]) * dt;
+        }
+    }
+    // Back to zero on straights: the drift between two straights is taken out
+    // in a straight line.
+    let straight: Vec<usize> = (0..n).filter(|&i| yaw[i].abs() < 3.0 && speed[i] > 20.0).collect();
+    if straight.len() < 50 {
+        return None;
+    }
+    let angle: Vec<[f64; 3]> = (0..n)
+        .map(|i| {
+            let j = straight.partition_point(|&q| q <= i);
+            let (a, b) = (straight[j.saturating_sub(1)], straight[j.min(straight.len() - 1)]);
+            let f = if b > a { (i as f64 - a as f64) / (b - a) as f64 } else { 0.0 };
+            [0, 1, 2].map(|k| total[i][k] - (total[a][k] + f.clamp(0.0, 1.0) * (total[b][k] - total[a][k])))
+        })
+        .collect();
+    // The column: the direction whose angle best follows the path's curvature.
+    let moving: Vec<usize> = (0..n).filter(|&i| speed[i] > MOVING_KMH).collect();
+    let curvature = |i: usize| yaw[i] / (speed[i] / 3.6);
+    let mut m = [[0.0f64; 4]; 3];
+    for &i in &moving {
+        for r in 0..3 {
+            for c in 0..3 {
+                m[r][c] += angle[i][r] * angle[i][c];
+            }
+            m[r][3] += angle[i][r] * curvature(i);
+        }
+    }
+    for i in 0..3 {
+        let p = m[i][i];
+        if p.abs() < 1e-9 {
+            return None;
+        }
+        m[i][i..].iter_mut().for_each(|v| *v /= p);
+        let pivot = m[i];
+        for r in (0..3).filter(|&r| r != i) {
+            let f = m[r][i];
+            m[r][i..].iter_mut().zip(&pivot[i..]).for_each(|(v, pv)| *v -= f * pv);
+        }
+    }
+    let fit_w = [m[0][3], m[1][3], m[2][3]];
+    let mean = moving.iter().map(|&i| curvature(i)).sum::<f64>() / moving.len() as f64;
+    let total_var: f64 = moving.iter().map(|&i| (curvature(i) - mean).powi(2)).sum();
+    let error: f64 = moving.iter().map(|&i| (curvature(i) - dot(fit_w, angle[i])).powi(2)).sum();
+    let fit = 1.0 - error / total_var;
+    if fit < MIN_STEER_FIT {
+        log::debug!("IMU: no steering (it follows the kart's turning with R² {fit:.2} only)");
+        return None;
+    }
+    let column = unit(fit_w);
+    log::debug!("IMU: steering from the gyro, R² {fit:.2}, column {column:.2?}");
+    Some(Channel {
+        name: "Steering".into(),
+        group: Some("IMU".into()),
+        units: "deg".into(),
+        decimals: 0,
+        interpolate: true,
+        times_ms: t.to_vec(),
+        values: angle.iter().map(|a| dot(*a, column)).collect(),
+    })
 }
 
 /// "Grip used": how much of the session's grip the kart is using, %, from

@@ -246,6 +246,11 @@ impl From<libxrk::XrkFile> for Session {
                         log::debug!("IMU: tilted {:.0}°, fit {:.2}", mount.tilt_deg, mount.fit);
                         let mut extra = imu::kart_channels(accel, &mount);
                         extra.extend(imu::grip_used(&extra[0], &g.times_ms, &lat_g));
+                        // Steering from the gyro, unless the file already has a steering channel.
+                        let has_steering = channels.iter().any(|c| c.name.to_lowercase().contains("steer") && !c.values.is_empty());
+                        if let (false, Some(gx), Some(gy), Some(gz)) = (has_steering, find("GyroX"), find("GyroY"), find("GyroZ")) {
+                            extra.extend(imu::steering([gx, gy, gz], &mount, g));
+                        }
                         info.imu_mount = Some(mount);
                         channels.extend(extra);
                     }
