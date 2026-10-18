@@ -19,6 +19,7 @@ mod braking;
 mod bumps;
 mod charts;
 mod compare;
+mod corner_model;
 mod countries;
 mod device;
 mod digest;
