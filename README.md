@@ -1,4 +1,9 @@
-# Mychronix
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="crates/mychronix-gui/assets/mychronix.svg">
+    <img src="docs/logo/mychronix-light.svg" alt="Mychronix" width="420">
+  </picture>
+</h1>
 
 A free desktop app for **AiM MyChron** kart data loggers on **Linux** and
 **Apple Silicon Macs**: download your sessions, analyze and compare laps, keep
@@ -6,6 +11,8 @@ setup sheets, and follow your season — no Windows and no RaceStudio needed.
 
 AiM's own software, RaceStudio, runs only on Windows. Mychronix is for the kart
 racers and families who don't use Windows. If you're on Windows, use RaceStudio.
+
+![The Corners tab: a lap corner by corner against the best of each corner, beside the track map](docs/screenshots/corners.png)
 
 > Mychronix is an independent project. It is not affiliated with, endorsed by
 > or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of
@@ -101,6 +108,17 @@ and the track's GPS position, so share only what you're happy to make public.
   the internet.
 - **Works offline.** At the track with no signal, everything you've downloaded is
   there; anything that needs the internet waits until you're back online.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Garage: two drivers, their karts and MyChrons, seat time this season](docs/screenshots/garage.png) | ![Sessions by race day, filtered to sessions with timed laps](docs/screenshots/sessions.png) |
+| **Garage**: drivers, karts, MyChrons and seat time | **Sessions** by race day, with filters |
+| ![Analysis: RPM, speed and exhaust temperature over a lap, and the track map](docs/screenshots/analysis.png) | ![Compare: three laps with the time gap to the reference and where time changes on the map](docs/screenshots/compare.png) |
+| **Analysis**: channels over a lap, the track colored by RPM | **Compare**: the gap to the best lap and where it grows |
+| ![Settings: units, clock, internet use and the Mychronix Performance Engineer](docs/screenshots/settings.png) | |
+| **Settings**, with the Mychronix Performance Engineer | |
 
 ## Install
 
