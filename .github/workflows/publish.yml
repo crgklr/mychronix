@@ -1,0 +1,84 @@
+# Publishes the newest release beyond GitHub:
+#
+# - dnf and apt repositories on GitHub Pages (scripts/publish-repos.sh), so
+#   Fedora, Ubuntu and Debian users get updates with the rest of their system.
+# - The Homebrew tap (scripts/publish-homebrew.sh), so `brew upgrade` brings
+#   the Mac app.
+#
+# The release workflow runs this once a release has its downloads. Run it by
+# hand (Actions → Publish → Run workflow) to publish the newest release again.
+# Each part waits, with a note on the run, until its secret is set up
+# (PACKAGE_SIGNING_KEY, HOMEBREW_TAP_KEY).
+name: Publish
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repositories:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Check for the signing key
+        id: ready
+        env:
+          KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::No PACKAGE_SIGNING_KEY secret yet: the dnf and apt repositories weren't updated."; fi
+
+      - uses: actions/checkout@v5
+        if: steps.ready.outputs.ok
+
+      - name: Install tools
+        if: steps.ready.outputs.ok
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends createrepo-c rpm apt-utils gnupg
+
+      - name: Build the repositories
+        if: steps.ready.outputs.ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: scripts/publish-repos.sh
+
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.ready.outputs.ok
+        with:
+          path: target/site
+
+      - uses: actions/deploy-pages@v4
+        if: steps.ready.outputs.ok
+        id: deploy
+
+  homebrew:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check for the tap's key
+        id: ready
+        env:
+          KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::No HOMEBREW_TAP_KEY secret yet: the Homebrew tap wasn't updated."; fi
+
+      - uses: actions/checkout@v5
+        if: steps.ready.outputs.ok
+
+      - name: Update the tap
+        if: steps.ready.outputs.ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HOMEBREW_TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+        run: scripts/publish-homebrew.sh
