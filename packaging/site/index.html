@@ -1,0 +1,491 @@
+<!doctype html>
+<!-- Mychronix's website, at @URL@. scripts/build-site.py fills in @VERSION@,
+     @DATE@, @REPO@, @URL@, @FPR@ and the roadmap (from the README's
+     "Still to do"); the rest is written here. Looks like the app on purpose:
+     its colors (theme.rs), its icons (Lucide, assets/icons), its sidebar and
+     status bar. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mychronix</title>
+<meta name="description" content="The free desktop app for AiM MyChron kart data loggers on Linux and Mac: download sessions, find time corner by corner, compare laps, follow your season.">
+<meta property="og:title" content="Mychronix">
+<meta property="og:description" content="The free desktop app for AiM MyChron kart data loggers on Linux and Mac.">
+<meta property="og:image" content="@URL@/screenshots/corners.png">
+<link rel="icon" href="mychronix-icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* The app's palette (crates/mychronix-gui/src/theme.rs). Dark only, like the app. */
+  :root {
+    --window: #0f1114; --sidebar: #14171b; --surface: #1b1f24; --hover: #24292f;
+    --active: #2d333c; --outline: #262b32;
+    --text: #f2f4f6; --secondary: #a9b1bc; --dim: #6e7784;
+    --accent: #19d3f2; --good: #34c759; --danger: #e5484d; --favorite: #f5b72e;
+    --rail: 248px; --status: 30px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box }
+  html { scroll-behavior: smooth; background: var(--window) }
+  body {
+    margin: 0; background: var(--window); color: var(--text);
+    font: 15px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none }
+  a:hover { text-decoration: underline }
+  b { color: var(--text); font-weight: 600 }
+  code { font: .88em "JetBrains Mono", ui-monospace, Menlo, monospace; background: var(--hover); padding: 1px 6px; border-radius: 5px }
+  svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+
+  /* Sidebar, always open */
+  .rail {
+    position: fixed; inset: 0 auto var(--status) 0; width: var(--rail);
+    background: var(--sidebar); border-right: 1px solid var(--outline);
+    display: flex; flex-direction: column; padding: 18px 14px; gap: 4px; overflow-y: auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px }
+  .brand img.icon { width: 34px; height: 34px }
+  .brand img.word { width: 132px; height: auto }
+  .nav { display: flex; flex-direction: column; gap: 2px }
+  .nav a {
+    display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px;
+    color: var(--secondary); font-weight: 500; font-size: 14.5px; text-decoration: none;
+  }
+  .nav a:hover { background: var(--hover); color: var(--text) }
+  .nav a.on { background: var(--active); color: var(--text) }
+  .rail .spacer { flex: 1 }
+  .rail .get {
+    display: flex; align-items: center; justify-content: center; gap: 8px; height: 40px; border-radius: 999px;
+    background: var(--text); color: var(--window); font-weight: 600; text-decoration: none; margin-top: 12px;
+  }
+  .rail .get:hover { background: #fff; text-decoration: none }
+  .rail .gh { display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: 8px; color: var(--secondary); font-weight: 500; font-size: 14px }
+  .rail .gh:hover { background: var(--hover); color: var(--text); text-decoration: none }
+
+  /* Status bar, like the app's */
+  .status {
+    position: fixed; inset: auto 0 0 0; height: var(--status); z-index: 5;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px;
+    background: var(--sidebar); border-top: 1px solid var(--outline); color: var(--dim); font-size: 12.5px;
+  }
+  .status span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none }
+  .status a { color: var(--dim) }
+  .status a:hover { color: var(--secondary) }
+  .status code { background: none; padding: 0 }
+
+  /* Pages */
+  main { margin-left: var(--rail); padding: 8px 48px calc(var(--status) + 64px) }
+  .page { max-width: 1040px; margin: 0 auto }
+  section { padding-top: 56px }
+  .title { margin-bottom: 20px }
+  h2 { font-size: 28px; font-weight: 700; letter-spacing: -.015em; line-height: 1.2; margin: 0; text-wrap: balance }
+  .sub { color: var(--secondary); margin: 6px 0 0; font-size: 15px; max-width: 46rem }
+  .label { font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--dim) }
+  .card { background: var(--surface); border: 1px solid var(--outline); border-radius: 12px; padding: 20px; min-width: 0 }
+  .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px }
+  .tile { width: 36px; height: 36px; border-radius: 9px; background: var(--hover); display: grid; place-items: center; color: var(--text); flex: none }
+  .card-head h3 { margin: 0; font-size: 15.5px; font-weight: 600 }
+  .card-head p { margin: 0; font-size: 13px; color: var(--dim) }
+  .card p { color: var(--secondary); margin: 0 0 10px }
+  .card p:last-child { margin-bottom: 0 }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px }
+  .button { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px; border-radius: 999px; font-weight: 600; text-decoration: none }
+  .button:hover { text-decoration: none }
+  .button.primary { background: var(--text); color: var(--window) }
+  .button.primary:hover { background: #fff }
+  .button.quiet { background: var(--hover); color: var(--text) }
+  .button.quiet:hover { background: var(--active) }
+
+  /* Overview */
+  .hero { padding-top: 56px }
+  .lights { display: flex; gap: 7px; margin-bottom: 22px }
+  .lights i { width: 9px; height: 9px; border-radius: 50%; background: var(--active) }
+  .lights i:first-child { background: var(--good) }
+  .lights i:last-child { background: var(--danger) }
+  .hero h1 { margin: 0 }
+  .hero img.word { width: min(460px, 100%); height: auto; display: block }
+  .hero .tagline { font-size: 20px; line-height: 1.5; color: var(--secondary); max-width: 40rem; margin: 22px 0 0; text-wrap: balance }
+  .hero .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px }
+  .fact { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--outline); color: var(--secondary); font-size: 13px }
+  .fact .i { width: 15px; height: 15px; color: var(--good) }
+  .window { margin-top: 36px; border-radius: 12px; overflow: hidden; border: 1px solid var(--outline); box-shadow: 0 30px 80px -24px rgb(0 0 0 / .8); background: var(--window) }
+  .window img { display: block; width: 100%; height: auto }
+
+  /* Screenshots: tabs like the app's segments */
+  .segments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px }
+  .segments button {
+    font: inherit; font-size: 14px; font-weight: 500; height: 34px; padding: 0 14px; border-radius: 8px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--outline); color: var(--secondary);
+  }
+  .segments button:hover { background: var(--hover); color: var(--text) }
+  .segments button[aria-selected="true"] { background: var(--text); border-color: var(--text); color: var(--window) }
+  .caption { color: var(--secondary); font-size: 14px; margin: 12px 2px 0 }
+
+  /* MyChrons */
+  .scroll { overflow-x: auto }
+  .table { width: 100%; border-collapse: collapse; font-size: 14.5px }
+  .table th { text-align: left; font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--dim); padding: 0 14px 10px }
+  .table td { padding: 13px 14px; border-top: 1px solid var(--outline); vertical-align: middle; color: var(--secondary) }
+  .table td:first-child { color: var(--text); font-weight: 600; white-space: nowrap }
+  .table .how { display: inline-flex; align-items: center; gap: 8px }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor }
+  .pill.works { color: var(--good); background: rgb(52 199 89 / .12) }
+  .pill.expected { color: var(--favorite); background: rgb(245 183 46 / .12) }
+  .pill.not { color: var(--dim); background: var(--hover) }
+  .footnote { color: var(--dim); font-size: 13.5px; margin: 14px 2px 0 }
+
+  /* Install */
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 5px; background: var(--surface); border: 1px solid var(--outline); border-radius: 12px; width: fit-content; max-width: 100% }
+  .tabs button { font: inherit; font-size: 14.5px; font-weight: 500; color: var(--secondary); background: none; border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer }
+  .tabs button:hover { color: var(--text); background: var(--hover) }
+  .tabs button[aria-selected="true"] { color: var(--window); background: var(--text) }
+  .panel { margin-top: 14px }
+  .panel h3 { margin: 0 0 4px; font-size: 17px }
+  .step { margin-top: 18px }
+  .step .label { margin-bottom: 8px }
+  .cmd { position: relative; background: var(--window); border: 1px solid var(--outline); border-radius: 10px }
+  .cmd pre { margin: 0; padding: 14px 84px 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13.5px/1.7 "JetBrains Mono", ui-monospace, Menlo, monospace; color: var(--text) }
+  .cmd pre:not(.multi)::before { content: "$ "; color: var(--dim) }
+  .copy { position: absolute; top: 8px; right: 8px; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--secondary); background: var(--hover); border: 1px solid var(--outline); border-radius: 7px; padding: 4px 10px; cursor: pointer }
+  .copy:hover { color: var(--text) }
+  .copy.done { color: var(--good) }
+  .card p.note, .note { margin-top: 16px; font-size: 14px; color: var(--dim) }
+  .downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 16px }
+  .download { display: block; padding: 14px 16px; border: 1px solid var(--outline); border-radius: 10px; background: var(--window); color: var(--text) }
+  .download:hover { border-color: var(--accent); text-decoration: none }
+  .download b { display: flex; align-items: center; gap: 8px }
+  .download span { display: block; margin-top: 4px; font-size: 13.5px; color: var(--secondary) }
+
+  /* AI coaching */
+  .coach { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px }
+  .bubbles { display: flex; flex-direction: column; gap: 10px; justify-content: center; padding: 8px 4px }
+  .bubble { align-self: flex-end; max-width: 92%; background: var(--active); color: var(--text); padding: 10px 14px; border-radius: 14px 14px 4px 14px; font-size: 14.5px }
+  .bubble.reply { align-self: flex-start; background: var(--surface); border: 1px solid var(--outline); color: var(--secondary); border-radius: 14px 14px 14px 4px }
+
+  /* Lists */
+  .checks { list-style: none; margin: 0; padding: 0 }
+  .checks li { display: flex; gap: 12px; padding: 11px 2px; border-top: 1px solid var(--outline); color: var(--secondary) }
+  .checks li:first-child { border-top: 0; padding-top: 2px }
+  .checks li::before { content: ""; flex: none; width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; border: 2px solid var(--active) }
+  .files { margin: 8px 0 0; padding-left: 18px; color: var(--secondary) }
+  .files li { margin: 6px 0 }
+
+  footer.page { color: var(--dim); font-size: 13px; padding-top: 56px; display: grid; gap: 6px }
+  footer.page .rule { border-top: 1px solid var(--outline); margin-bottom: 18px }
+
+  /* Narrow screens: the sidebar becomes a bar across the top */
+  @media (max-width: 860px) {
+    .rail { position: sticky; top: 0; inset: auto; width: auto; height: auto; flex-direction: row; align-items: center; padding: 10px 12px; gap: 8px; border-right: 0; border-bottom: 1px solid var(--outline); z-index: 6; overflow: visible }
+    .brand { padding: 0 4px 0 0 }
+    .brand img.word, .rail .spacer, .rail .gh, .rail .get { display: none }
+    .nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; gap: 4px; min-width: 0 }
+    .nav a { height: 36px; padding: 0 10px; white-space: nowrap; font-size: 14px }
+    .nav a svg { display: none }
+    main { margin-left: 0; padding: 0 16px calc(var(--status) + 40px) }
+    section { scroll-margin-top: 64px; padding-top: 40px }
+    .hero { padding-top: 32px }
+    .hero .tagline { font-size: 17px }
+    .coach { grid-template-columns: 1fr }
+    .status .key { display: none }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+  <symbol id="i-mychron" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="4.5"/><rect x="6" y="7.5" width="12" height="6.5" rx="1.5" fill="currentColor" stroke="none"/><circle cx="8.5" cy="17" r="1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="17" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193"/><path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/></symbol>
+  <symbol id="i-usb" viewBox="0 0 24 24"><circle cx="10" cy="7" r="1"/><circle cx="4" cy="20" r="1"/><path d="M4.7 19.3 19 5"/><path d="m21 3-3 1 2 2Z"/><path d="M9.26 7.68 5 12l2 5"/><path d="m10 14 5 2 3.5-3.5"/><path d="m18 12 1-1 1 1-1 1Z"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v3"/><path d="M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+</svg>
+
+<nav class="rail" aria-label="Sections">
+  <a class="brand" href="#overview" aria-label="Mychronix">
+    <img class="icon" src="mychronix-icon.svg" alt="" width="34" height="34">
+    <img class="word" src="mychronix.svg" alt="" width="578" height="82">
+  </a>
+  <div class="nav">
+    <a href="#overview"><svg class="i"><use href="#i-house"/></svg>Overview</a>
+    <a href="#features"><svg class="i"><use href="#i-gauge"/></svg>Features</a>
+    <a href="#screenshots"><svg class="i"><use href="#i-chart"/></svg>Screenshots</a>
+    <a href="#mychrons"><svg class="i"><use href="#i-mychron"/></svg>Which MyChrons</a>
+    <a href="#install"><svg class="i"><use href="#i-download"/></svg>Install</a>
+    <a href="#coaching"><svg class="i"><use href="#i-activity"/></svg>AI race coaching</a>
+    <a href="#privacy"><svg class="i"><use href="#i-cloud-off"/></svg>Your data</a>
+    <a href="#share"><svg class="i"><use href="#i-folder"/></svg>Share sessions</a>
+    <a href="#roadmap"><svg class="i"><use href="#i-flag"/></svg>Coming next</a>
+  </div>
+  <div class="spacer"></div>
+  <a class="gh" href="https://github.com/@REPO@"><svg class="i"><use href="#i-code"/></svg>Source on GitHub</a>
+  <a class="get" href="#install"><svg class="i"><use href="#i-download"/></svg>Get Mychronix</a>
+</nav>
+
+<main>
+<div class="page">
+
+  <section id="overview" class="hero">
+    <div class="lights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <h1><img class="word" src="mychronix.svg" alt="Mychronix" width="578" height="82"></h1>
+    <p class="tagline">The free desktop app for <b>AiM MyChron</b> kart data loggers on <b>Linux</b> and <b>Mac</b>. Download your sessions, find the time corner by corner, compare laps, keep setup sheets and follow your season. No Windows, no RaceStudio.</p>
+    <div class="actions">
+      <a class="button primary" href="#install"><svg class="i"><use href="#i-download"/></svg>Install Mychronix @VERSION@</a>
+      <a class="button quiet" href="https://github.com/@REPO@/releases/tag/v@VERSION@">What's new</a>
+    </div>
+    <div class="facts">
+      <span class="fact"><svg class="i"><use href="#i-check"/></svg>Free and open source</span>
+      <span class="fact"><svg class="i"><use href="#i-check"/></svg>MyChron 4, 5 and 6</span>
+      <span class="fact"><svg class="i"><use href="#i-check"/></svg>Works offline at the track</span>
+      <span class="fact"><svg class="i"><use href="#i-check"/></svg>Only ever reads from your MyChron</span>
+    </div>
+    <div class="window"><img src="screenshots/corners.png" alt="The Corners view: a lap corner by corner against the best of each corner, beside the track map" width="1920" height="1116"></div>
+  </section>
+
+  <section id="features">
+    <div class="title"><h2>Features</h2><p class="sub">Everything RaceStudio does for a kart racer, and some things it doesn't.</p></div>
+    <div class="grid">
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-wifi"/></svg></div><div><h3>Download</h3><p>Over WiFi, or the MyChron 4's data key</p></div></div>
+        <p>Mychronix walks you through connecting, joins the MyChron's WiFi for you on Linux, and offers new sessions with RaceStudio-style details. Nothing already downloaded is ever overwritten.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-house"/></svg></div><div><h3>Garage</h3><p>Drivers, karts and their MyChrons</p></div></div>
+        <p>Seat time and race days per driver. MyChrons can move between karts and drivers (handed down to a younger sibling, say) and every session stays with the kart it was recorded on.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-list"/></svg></div><div><h3>Sessions</h3><p>Everything by race day</p></div></div>
+        <p>Best laps and lap-time sparklines; filter by dates, drivers, tracks and timed laps; search by anything. Import folders of sessions you already have, too.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-chart"/></svg></div><div><h3>Analysis</h3><p>Channels, maps, lap by lap</p></div></div>
+        <p>Channels over time or distance on a shared cursor, a track map colored by any channel, splits, histograms, and RPM against speed with your gearing drawn in.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-timer"/></svg></div><div><h3>Corners</h3><p>The way a data team reads them</p></div></div>
+        <p>Each corner from its braking point to the next one's, against the best you've driven it: the speed given up, how the kart slowed, steering, and the time lost. Added up, the best of every corner is the lap you've already proven you can drive.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-activity"/></svg></div><div><h3>Compare</h3><p>Laps, sessions and drivers</p></div></div>
+        <p>Laps lined up by distance with the time gap, and the track colored by where time was won and lost. Or each driver's best lap at a track.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-gauge"/></svg></div><div><h3>MyChron 6 motion sensor</h3><p>Mounted any way, nothing to set</p></div></div>
+        <p>Braking and acceleration, bumps, grip used around the lap, trail braking, curbs hit on most laps, and steering corrections when the MyChron sits on the wheel.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-alert"/></svg></div><div><h3>Speed without GPS</h3><p>For MyChrons without it</p></div></div>
+        <p>Worked out from RPM, gearing and rear tire size (and marked wherever it's used), so a MyChron 4 still gets corners and comparisons.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-calendar"/></svg></div><div><h3>Events and setups</h3><p>Your season, and what you changed</p></div></div>
+        <p>Sessions grouped by week, track and championship, with a season summary. Setup sheets per session (gearing, tires, pressures, weight, jetting) carry over from the last one and flag what changed.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-pin"/></svg></div><div><h3>Tracks and weather</h3><p>About 5,600 tracks from AiM</p></div></div>
+        <p>AiM's track database with outlines and satellite views, your custom tracks, favorites, and the weather at the track when each session started.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-star"/></svg></div><div><h3>Session notes</h3><p>What stands out, measured</p></div></div>
+        <p>Lap-time trends and consistency across a session, and a warning when a sensor that has worked before stops recording.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-cloud-off"/></svg></div><div><h3>Works offline</h3><p>At the track with no signal</p></div></div>
+        <p>Everything you've downloaded is there; anything that needs the internet waits until you're back online.</p></div>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <div class="title"><h2>Screenshots</h2><p class="sub">The app as it is today.</p></div>
+    <div class="segments" role="tablist" data-gallery>
+      <button role="tab" aria-selected="true" data-src="screenshots/garage.png" data-caption="Garage: drivers, their karts and MyChrons, and seat time this season.">Garage</button>
+      <button role="tab" aria-selected="false" data-src="screenshots/corners.png" data-caption="Corners: each corner against the best you've driven it, with the track beside it.">Corners</button>
+      <button role="tab" aria-selected="false" data-src="screenshots/sessions.png" data-caption="Sessions by race day, filtered by dates, drivers, tracks and timed laps.">Sessions</button>
+      <button role="tab" aria-selected="false" data-src="screenshots/analysis.png" data-caption="Analysis: channels over a lap, and the track colored by RPM.">Analysis</button>
+      <button role="tab" aria-selected="false" data-src="screenshots/compare.png" data-caption="Compare: the gap to the best lap, and where on the track it grows.">Compare</button>
+      <button role="tab" aria-selected="false" data-src="screenshots/settings.png" data-caption="Settings: units, the clock, what Mychronix may fetch, and the Mychronix Performance Engineer.">Settings</button>
+    </div>
+    <div class="window" style="margin-top:0"><img id="gallery" src="screenshots/garage.png" alt="Garage" width="1920" height="1116"></div>
+    <p class="caption" id="caption">Garage: drivers, their karts and MyChrons, and seat time this season.</p>
+  </section>
+
+  <section id="mychrons">
+    <div class="title"><h2>Which MyChrons work</h2><p class="sub">Mychronix only ever reads from your MyChron and data key. It never changes settings, deletes sessions or updates firmware.</p></div>
+    <div class="card scroll" style="padding:16px 6px 6px">
+      <table class="table">
+        <thead><tr><th>MyChron</th><th>How it downloads</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>MyChron 6, 6T</td><td><span class="how"><svg class="i"><use href="#i-wifi"/></svg>Over the MyChron's own WiFi</span></td><td><span class="pill works">Works</span></td></tr>
+          <tr><td>MyChron 5, 5S, 5 2T, 5S 2T</td><td><span class="how"><svg class="i"><use href="#i-wifi"/></svg>Over WiFi, the same way</span></td><td><span class="pill expected">Expected to work</span></td></tr>
+          <tr><td>MyChron 4, 4 2T, 4 660</td><td><span class="how"><svg class="i"><use href="#i-usb"/></svg>AiM's USB data key</span></td><td><span class="pill works">Works</span></td></tr>
+          <tr><td>MyChron 4 with expansions</td><td><span class="how"><svg class="i"><use href="#i-usb"/></svg>Data key</span></td><td><span class="pill expected">Expected to work</span></td></tr>
+          <tr><td>MyChron 3</td><td><span class="how"><svg class="i"><use href="#i-usb"/></svg>Serial cable</span></td><td><span class="pill not">Not yet</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">"Works" means tested on that MyChron; "expected" means it reads the same files, but nobody has tried one yet. Have one? <a href="#share">Share a session</a>.</p>
+  </section>
+
+  <section id="install">
+    <div class="title"><h2>Install</h2><p class="sub">Version @VERSION@, released @DATE@. Add the Mychronix repository once and new versions arrive with your system's updates.</p></div>
+    <div class="tabs" role="tablist" data-install>
+      <button role="tab" id="t-fedora" aria-controls="fedora" aria-selected="true">Fedora</button>
+      <button role="tab" id="t-ubuntu" aria-controls="ubuntu" aria-selected="false">Ubuntu &amp; Debian</button>
+      <button role="tab" id="t-mac" aria-controls="mac" aria-selected="false">Mac</button>
+      <button role="tab" id="t-other" aria-controls="other" aria-selected="false">Other Linux</button>
+    </div>
+
+    <div class="card panel" role="tabpanel" id="fedora" aria-labelledby="t-fedora">
+      <h3>Fedora</h3>
+      <p>Fedora 36 or newer. Updates come with <code>dnf upgrade</code> or GNOME Software.</p>
+      <div class="step"><div class="label">1 · Add the repository</div>
+        <div class="cmd"><pre>sudo curl -fsSL -o /etc/yum.repos.d/mychronix.repo @URL@/mychronix.repo</pre></div></div>
+      <div class="step"><div class="label">2 · Install</div>
+        <div class="cmd"><pre>sudo dnf install mychronix</pre></div></div>
+      <p class="note">dnf asks you to accept the Mychronix signing key the first time; its fingerprint is in the status bar below.</p>
+    </div>
+
+    <div class="card panel" role="tabpanel" id="ubuntu" aria-labelledby="t-ubuntu" hidden>
+      <h3>Ubuntu, Debian, Mint, Pop!_OS</h3>
+      <p>Ubuntu 22.04, Debian 12, Mint 21 or newer. Updates come with <code>apt upgrade</code> or your software updater.</p>
+      <div class="step"><div class="label">1 · Add the signing key and repository</div>
+        <div class="cmd"><pre class="multi">sudo install -d /etc/apt/keyrings
+curl -fsSL @URL@/mychronix.gpg | sudo tee /etc/apt/keyrings/mychronix.gpg &gt; /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/mychronix.gpg] @URL@/deb ./" | sudo tee /etc/apt/sources.list.d/mychronix.list</pre></div></div>
+      <div class="step"><div class="label">2 · Install</div>
+        <div class="cmd"><pre>sudo apt update &amp;&amp; sudo apt install mychronix</pre></div></div>
+    </div>
+
+    <div class="card panel" role="tabpanel" id="mac" aria-labelledby="t-mac" hidden>
+      <h3>Mac</h3>
+      <p>Apple Silicon (M1 and newer), macOS 11 or later. With <a href="https://brew.sh">Homebrew</a>, updates come with <code>brew upgrade</code>.</p>
+      <div class="step"><div class="label">Install with Homebrew</div>
+        <div class="cmd"><pre>brew install --cask crgklr/mychronix/mychronix</pre></div></div>
+      <p class="note">Or download <a href="https://github.com/@REPO@/releases/download/v@VERSION@/Mychronix-@VERSION@-arm64.dmg">Mychronix-@VERSION@-arm64.dmg</a> and drag Mychronix into Applications. Mychronix isn't signed by Apple yet: the first time it opens, macOS says it couldn't verify it. Click Done, then in System Settings → Privacy &amp; Security click <b>Open Anyway</b>. On a Mac, join the MyChron's WiFi from the menu bar yourself.</p>
+    </div>
+
+    <div class="card panel" role="tabpanel" id="other" aria-labelledby="t-other" hidden>
+      <h3>Any other Linux</h3>
+      <p>Arch, CachyOS, openSUSE and the rest: anything from 2022 on.</p>
+      <div class="downloads">
+        <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/Mychronix-@VERSION@-x86_64.AppImage"><b><svg class="i"><use href="#i-download"/></svg>AppImage</b><span>No install: make it executable and double-click it. AppImage updaters keep it current.</span></a>
+        <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/mychronix-@VERSION@-x86_64.tar.gz"><b><svg class="i"><use href="#i-download"/></svg>Tarball</b><span>Unpack anywhere and run <code>bin/mychronix-gui</code>.</span></a>
+      </div>
+      <p class="note">For a MyChron 4's data key, Linux needs AiM's USB rule once (the .rpm and .deb install it): see <a href="https://github.com/@REPO@#linux">the README</a>.</p>
+    </div>
+  </section>
+
+  <section id="coaching">
+    <div class="title"><h2>AI race coaching, with your own assistant</h2><p class="sub">Plenty of lap-timing apps sell an "AI coach" by subscription. Mychronix lets you use the AI assistant you already have instead.</p></div>
+    <div class="coach">
+      <div class="card">
+        <div class="card-head"><div class="tile"><svg class="i"><use href="#i-activity"/></svg></div><div><h3>Mychronix Performance Engineer</h3><p>Claude Desktop, Codex, or any app that supports MCP</p></div></div>
+        <p>Turn it on in <b>Settings</b>, press <b>Add to Claude Desktop</b> or <b>Add to Codex</b>, and restart the assistant. It can list sessions, read a session's laps, setup and weather, go corner by corner, compare laps, read any channel and follow your season, with the same numbers as the app's own screens.</p>
+        <p><b>Read-only, and off until you turn it on.</b> It can't change your data or talk to a MyChron, and Mychronix sends nothing itself. What the assistant reads goes to the company that runs it, like anything else you share in that chat.</p>
+      </div>
+      <div class="bubbles" aria-label="Example questions">
+        <div class="bubble">How did Saturday go, and where is the time in each corner?</div>
+        <div class="bubble reply">Your best lap was 30.48. Most of what's left is in <b>corner 4</b>: you brake 20 ft earlier than your best pass and carry 1.7 mph less to the apex…</div>
+        <div class="bubble">What changed since last week's setup?</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="title"><h2>Your data stays yours</h2><p class="sub">No account and no cloud. Everything is on your computer, in a folder called Mychronix in your home folder.</p></div>
+    <div class="grid">
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-folder"/></svg></div><div><h3>On your computer</h3><p>Plain files you can back up</p></div></div>
+        <p>Sessions exactly as the MyChron stores them, with their details and setup sheets beside them; drivers, karts, events and settings as small text files. Removing a MyChron or kart only hides it, and deleting a driver asks twice and moves their sessions to the Trash.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-cloud-off"/></svg></div><div><h3>What it fetches</h3><p>Each can be turned off in Settings</p></div></div>
+        <ul class="files">
+          <li><b>AiM's track database</b>, from AiM's server (the one RaceStudio 3 uses)</li>
+          <li><b>Weather</b> from Open-Meteo: only the track's position and the date are sent</li>
+          <li><b>Whether a newer Mychronix is out</b>, from GitHub, once a day</li>
+          <li><b>Maps</b> from OpenStreetMap and Esri, cached once viewed</li>
+        </ul></div>
+    </div>
+  </section>
+
+  <section id="share">
+    <div class="title"><h2>Share your sessions</h2><p class="sub">Every MyChron and accessory records a little differently, and the only way to support one properly is to read real sessions from it.</p></div>
+    <div class="card">
+      <div class="card-head"><div class="tile"><svg class="i"><use href="#i-mychron"/></svg></div><div><h3>Wanted: sessions from every kind of MyChron</h3><p>The 3, 4, 5 and 6 series, especially with lots of sensors and expansions</p></div></div>
+      <p>Expansion boxes, CAN devices, water and exhaust temperatures, lambda, steering, brake pressure, wheel speed, extra GPS: the more that's plugged in, the better. A session with a few laps is plenty. Open an issue and attach the files zipped up:</p>
+      <ul class="files">
+        <li><b>MyChron 5 and 6:</b> the <code>.xrk</code> or <code>.xrz</code> (and its <code>.xri</code>), from RaceStudio 3 or Mychronix</li>
+        <li><b>MyChron 4:</b> RaceStudio 2's <code>.drk</code> with its <code>.gpk</code>, <code>.rrk</code> and <code>.imd</code>, or Mychronix's <code>.mc4</code> files</li>
+        <li><b>MyChron 3:</b> whatever RaceStudio saved</li>
+      </ul>
+      <p style="margin-top:14px">Say which MyChron it is and what's plugged into it. Issues are public, and session files can hold driver and kart names and the track's position, so share only what you're happy to make public.</p>
+      <a class="button primary" style="margin-top:6px" href="https://github.com/@REPO@/issues/new">Share a session</a>
+    </div>
+  </section>
+
+  <section id="roadmap">
+    <div class="title"><h2>Coming next</h2><p class="sub">Roughly in priority order. Writing settings or tracks to a MyChron may come later; firmware updates are out of scope.</p></div>
+    <div class="card">
+      <ul class="checks">
+@ROADMAP@
+      </ul>
+    </div>
+  </section>
+
+  <footer class="page">
+    <div class="rule"></div>
+    <div>Free and open source, under the MIT or Apache-2.0 license. <a href="https://github.com/@REPO@">Source, issues and the full README on GitHub</a>.</div>
+    <div>Mychronix is an independent project, not affiliated with, endorsed by or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of AiM Tech Srl.</div>
+  </footer>
+
+</div>
+</main>
+
+<div class="status">
+  <span><i class="dot"></i>Mychronix @VERSION@ · @DATE@</span>
+  <span class="key">Packages signed with key <a href="mychronix.asc"><code>@FPR@</code></a></span>
+</div>
+
+<script>
+  // Install's tabs; open the one for this computer (Linux browsers name the
+  // distribution only sometimes, so Fedora is the default).
+  const install = [...document.querySelectorAll('[data-install] [role="tab"]')];
+  function showPanel(tab) {
+    for (const t of install) {
+      t.setAttribute('aria-selected', t === tab);
+      document.getElementById(t.getAttribute('aria-controls')).hidden = t !== tab;
+    }
+  }
+  install.forEach(t => t.addEventListener('click', () => showPanel(t)));
+  const ua = navigator.userAgent;
+  const pick = /Macintosh|Mac OS X/.test(ua) ? 'mac' : /Ubuntu|Debian|Mint/i.test(ua) ? 'ubuntu' : null;
+  if (pick) showPanel(document.querySelector(`[aria-controls="${pick}"]`));
+
+  // The screenshot gallery.
+  const shots = [...document.querySelectorAll('[data-gallery] button')];
+  const img = document.getElementById('gallery'), caption = document.getElementById('caption');
+  shots.forEach(b => b.addEventListener('click', () => {
+    shots.forEach(x => x.setAttribute('aria-selected', x === b));
+    img.src = b.dataset.src; img.alt = b.textContent; caption.textContent = b.dataset.caption;
+  }));
+
+  // Copy buttons.
+  for (const cmd of document.querySelectorAll('.cmd')) {
+    const b = document.createElement('button');
+    b.className = 'copy'; b.type = 'button'; b.textContent = 'Copy';
+    b.addEventListener('click', async () => {
+      const pre = cmd.querySelector('pre');
+      try { await navigator.clipboard.writeText(pre.textContent); b.textContent = 'Copied'; b.classList.add('done'); }
+      catch { getSelection().selectAllChildren(pre); b.textContent = 'Selected'; }
+      setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1600);
+    });
+    cmd.appendChild(b);
+  }
+
+  // The sidebar marks the section you're reading, as the app's marks its page.
+  const links = new Map([...document.querySelectorAll('.nav a')].map(a => [a.getAttribute('href').slice(1), a]));
+  const seen = new Set();
+  const spy = new IntersectionObserver(entries => {
+    for (const e of entries) e.isIntersecting ? seen.add(e.target.id) : seen.delete(e.target.id);
+    const first = [...links.keys()].find(id => seen.has(id));
+    if (first) links.forEach((a, id) => a.classList.toggle('on', id === first));
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  links.forEach((_, id) => spy.observe(document.getElementById(id)));
+  links.get('overview').classList.add('on');
+</script>
+</body>
+</html>
