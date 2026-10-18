@@ -127,9 +127,28 @@ Download the latest release from the
 
 ### Linux
 
+**Fedora**: add the Mychronix repository once, and `dnf upgrade` (or GNOME
+Software) brings each new version:
+
+```sh
+sudo curl -fsSL -o /etc/yum.repos.d/mychronix.repo https://crgklr.github.io/mychronix/mychronix.repo
+sudo dnf install mychronix
+```
+
+**Ubuntu, Debian, Mint, Pop!_OS**: the same, for `apt`:
+
+```sh
+sudo install -d /etc/apt/keyrings
+curl -fsSL https://crgklr.github.io/mychronix/mychronix.gpg | sudo tee /etc/apt/keyrings/mychronix.gpg > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/mychronix.gpg] https://crgklr.github.io/mychronix/deb ./" | sudo tee /etc/apt/sources.list.d/mychronix.list
+sudo apt update && sudo apt install mychronix
+```
+
+Or download one from the [latest release](https://github.com/crgklr/mychronix/releases/latest):
+
 | Download | For |
 |---|---|
-| `Mychronix-<version>-x86_64.AppImage` | Any distribution, no install: make it executable and double-click it. |
+| `Mychronix-<version>-x86_64.AppImage` | Any distribution, no install: make it executable and double-click it. AppImage updaters such as Gear Lever update it from GitHub. |
 | `mychronix_<version>-1_amd64.deb` | Ubuntu, Debian, Mint, Pop!_OS: `sudo apt install ./mychronix_*.deb` |
 | `mychronix-<version>-1.x86_64.rpm` | Fedora, openSUSE: `sudo dnf install ./mychronix-*.rpm` |
 | `mychronix-<version>-x86_64.tar.gz` | Anything else: unpack and run `bin/mychronix-gui`. |
@@ -150,8 +169,16 @@ sudo cp 70-mychronix-aim.rules /etc/udev/rules.d/ && sudo udevadm control --relo
 
 ### Mac (Apple Silicon)
 
-For M1 and newer Macs on macOS 11 or later: open
-`Mychronix-<version>-arm64.dmg` and drag Mychronix into Applications.
+For M1 and newer Macs on macOS 11 or later. With [Homebrew](https://brew.sh),
+and `brew upgrade` brings each new version:
+
+```sh
+brew install --cask crgklr/mychronix/mychronix
+```
+
+Or open `Mychronix-<version>-arm64.dmg` from the
+[latest release](https://github.com/crgklr/mychronix/releases/latest) and drag
+Mychronix into Applications.
 
 Mychronix isn't signed by Apple yet, so the first launch shows "Apple could not
 verify…". Click Done, open System Settings → Privacy & Security, and click
@@ -164,8 +191,11 @@ network, allow it.
 
 ### Updates
 
-Once a day Mychronix checks GitHub for a newer release and, if there is one,
-shows what's new and where to download it. Nothing installs by itself.
+Installed from the Fedora or Ubuntu repository or with Homebrew, Mychronix
+updates with the rest of your system (`dnf upgrade`, `apt upgrade`, `brew
+upgrade`, or your software center). Every way you install it, Mychronix also
+checks GitHub once a day for a newer release and, if there is one, shows
+what's new. Nothing installs by itself.
 
 ## Using it
 
