@@ -104,17 +104,38 @@ fn corners_table(
     };
     let mut hovered = None;
     let has_steering = reference.iter().any(|z| z.steering.is_some());
+    let has_trail = reference.iter().any(|z| z.trail_s.is_some());
     let mut headers = vec![
         ("Corner", "Numbered from the start line, on the best lap"),
         ("Brake point", "Where braking starts: later than the best lap means braking deeper into the corner"),
         ("Entry", "Highest speed before the corner"),
         ("Corner speed", "Lowest speed in the corner"),
         ("Braking", "Distance from the highest speed to the lowest"),
-        ("Avg decel", "Average deceleration from the highest speed to the lowest (RaceStudio's measure; includes lifting)"),
-        ("Peak", "Hardest deceleration in the corner (GPS)"),
-        ("On brakes", "Time actually braking (harder than −0.15 g, RaceStudio's threshold): the rest of the slowing is lifting or scrubbing speed"),
+        ("Avg decel", "Average speed lost per second, from the highest speed to the lowest: braking, lifting and sliding all count (RaceStudio's measure)"),
+        (
+            "Peak",
+            if has_trail {
+                "Hardest braking in the corner, from the MyChron's motion sensor: the kart's own deceleration. Speed lost by sliding isn't braking, so this can be lower than Avg decel."
+            } else {
+                "Hardest deceleration in the corner (GPS)"
+            },
+        ),
+        (
+            "On brakes",
+            if has_trail {
+                "Time actually braking (harder than −0.15 g, RaceStudio's threshold), from the motion sensor; the rest of the slowing is lifting or sliding"
+            } else {
+                "Time actually braking (harder than −0.15 g, RaceStudio's threshold): the rest of the slowing is lifting or scrubbing speed"
+            },
+        ),
         ("Time", "Time from the highest speed to the lowest"),
     ];
+    if has_trail {
+        headers.push((
+            "Trail",
+            "Trail braking: seconds still braking after the kart has started turning. A little helps the kart turn in; none means braking is finished before turning; a lot can mean braking too deep. From the MyChron's motion sensor.",
+        ));
+    }
     if has_steering {
         headers.push((
             "Steering · corr.",
@@ -166,7 +187,7 @@ fn corners_table(
                         cell(&mut row, &mut |ui| {
                             ui.label(RichText::new("No braking found here on this lap").size(13.0).color(DIM));
                         });
-                        for _ in 0..(7 + has_steering as usize) {
+                        for _ in 0..(7 + has_trail as usize + has_steering as usize) {
                             cell(&mut row, &mut |_| {});
                         }
                         row.col(|_| {});
@@ -213,6 +234,14 @@ fn corners_table(
                         let d = z.time_s() - r.time_s();
                         delta(ui, d, format!("{d:+.2}"), false);
                     });
+                    if has_trail {
+                        cell(&mut row, &mut |ui| {
+                            if let Some(t) = z.trail_s {
+                                ui.label(text(format!("{t:.1} s")));
+                                neutral(ui, format!("{:+.1}", t - r.trail_s.unwrap_or(0.0)));
+                            }
+                        });
+                    }
                     if has_steering {
                         cell(&mut row, &mut |ui| match z.steering {
                             Some((peak, corr)) => {

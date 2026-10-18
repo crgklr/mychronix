@@ -21,15 +21,16 @@ impl Default for ChartsState {
             hist_channel: "RPM".into(),
             hist_percent: true,
             hist_best: true,
-            x: "GPS Speed".into(),
-            y: "RPM".into(),
+            // Empty: the session picks (the grip circle when it has the IMU).
+            x: String::new(),
+            y: String::new(),
             color: None,
         }
     }
 }
 
 /// Channels worth a one-click pick, when the session has them.
-const QUICK: [&str; 5] = ["RPM", "GPS Speed", "Exhaust Temp", "AccelerometerY", "GPS LonAcc"];
+const QUICK: [&str; 5] = ["RPM", "GPS Speed", "Exhaust Temp", "Forward g", "GPS LatAcc"];
 
 impl App {
     /// The time windows the charts cover: the chosen lap, or every racing lap.
@@ -178,6 +179,23 @@ impl App {
         let setup = self.current_setup();
         let st = &mut self.charts;
         let has = |n: &str| session.channels.iter().any(|c| c.name == n && !is_dead(c));
+        // The grip circle: cornering across, braking and speeding up up — the
+        // IMU's forward g when the session has it, else the GPS's.
+        let grip_y = ["Forward g", "GPS LonAcc"].into_iter().find(|n| has(n)).filter(|_| has("GPS LatAcc"));
+        if st.x.is_empty() || st.y.is_empty() {
+            match grip_y.filter(|&y| y == "Forward g") {
+                Some(y) => {
+                    st.x = "GPS LatAcc".into();
+                    st.y = y.into();
+                    st.color = has("GPS Speed").then(|| "GPS Speed".into());
+                }
+                None => {
+                    st.x = "GPS Speed".into();
+                    st.y = "RPM".into();
+                    st.color = None;
+                }
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             ui.label(RichText::new("Presets").size(12.5).color(DIM));
@@ -186,10 +204,13 @@ impl App {
                 st.y = "RPM".into();
                 st.color = None;
             }
-            if has("AccelerometerY") && has("GPS LonAcc") && chip(ui, "G-G diagram", st.x == "AccelerometerY" && st.y == "GPS LonAcc").on_hover_text("Cornering against braking and acceleration").clicked() {
-                st.x = "AccelerometerY".into();
-                st.y = "GPS LonAcc".into();
-                st.color = has("GPS Speed").then(|| "GPS Speed".into());
+            if let Some(y) = grip_y {
+                let on = st.x == "GPS LatAcc" && st.y == y;
+                if chip(ui, "Grip circle", on).on_hover_text("Cornering against braking and speeding up: how much of the tires' grip each moment uses").clicked() {
+                    st.x = "GPS LatAcc".into();
+                    st.y = y.into();
+                    st.color = has("GPS Speed").then(|| "GPS Speed".into());
+                }
             }
         });
         ui.add_space(6.0);
@@ -224,7 +245,16 @@ impl App {
         };
         let color = st.color.as_deref().and_then(find);
         let pts = charts::scatter(x, y, color, &windows, 6000);
-        let gg = st.x == "AccelerometerY" && st.y == "GPS LonAcc";
+        let gg = st.x == "GPS LatAcc" && (st.y == "Forward g" || st.y == "GPS LonAcc");
+        // The grip the kart actually reached: how far out the points go (98th
+        // percentile, so a lone bump doesn't set it).
+        let limit = gg
+            .then(|| {
+                let mut r: Vec<f64> = pts.iter().map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt()).filter(|r| *r > 0.2).collect();
+                r.sort_by(f64::total_cmp);
+                (r.len() > 50).then(|| r[r.len() * 98 / 100])
+            })
+            .flatten();
         // The gearing on RPM vs speed: rpm = (rpm per unit of speed) × speed.
         let gearing = (st.x == "GPS Speed" && st.y == "RPM")
             .then(|| setup.as_ref().and_then(|s| s.expected_rpm_per_kmh().map(|e| (e / crate::units::speed(1.0), format!("{}/{}", s.drive_teeth.trim(), s.driven_teeth.trim())))))
@@ -233,8 +263,16 @@ impl App {
         let (xu, yu) = (pretty_units(&x.units).to_string(), pretty_units(&y.units).to_string());
         graph_card(ui, (ui.available_height() - 4.0).max(300.0), |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{} against {} · {scope}", short_name(&y.name), short_name(&x.name))).font(medium(14.5)).color(TEXT));
-                ui.label(RichText::new(format!("{yu} up, {xu} across")).size(12.5).color(DIM));
+                if gg {
+                    ui.label(RichText::new(format!("Grip circle · {scope}")).font(medium(14.5)).color(TEXT));
+                    ui.label(RichText::new("down is braking, up is speeding up, sideways is cornering").size(12.5).color(DIM));
+                    if let Some(l) = limit {
+                        ui.label(RichText::new(format!("·  grip reached {l:.2} g")).size(12.5).color(SECONDARY));
+                    }
+                } else {
+                    ui.label(RichText::new(format!("{} against {} · {scope}", short_name(&y.name), short_name(&x.name))).font(medium(14.5)).color(TEXT));
+                    ui.label(RichText::new(format!("{yu} up, {xu} across")).size(12.5).color(DIM));
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let (Some(c), true) = (color, cmax > cmin) {
                         let unit = pretty_units(&c.units);
@@ -262,9 +300,26 @@ impl App {
                 .show_x(false)
                 .show_y(false);
             if gg {
-                plot = plot.data_aspect(1.0);
+                // Square, centered, and just big enough for the grip reached.
+                let reach = limit.unwrap_or(1.0).max(0.6) * 1.3;
+                let side = ui.available_height().min(ui.available_width());
+                plot = plot
+                    .data_aspect(1.0)
+                    .width(side)
+                    .include_x(-reach)
+                    .include_x(reach)
+                    .include_y(-reach)
+                    .include_y(reach)
+                    .allow_drag(false)
+                    .allow_zoom(false);
             }
-            plot.show(ui, |plot| {
+            // The grip circle sits square in the middle of the card; anything else fills it.
+            let area = ui.available_rect_before_wrap();
+            let area = if gg { Rect::from_center_size(area.center(), vec2(area.height().min(area.width()), area.height())) } else { area };
+            let mut plot_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
+            ui.advance_cursor_after_rect(area);
+            let mut edge: Option<Vec<[f64; 2]>> = None;
+            plot.show(&mut plot_ui, |plot| {
                 if gg {
                     // Rings at 0.5, 1 and 1.5 g, as RaceStudio's circular grid.
                     for r in [0.5, 1.0, 1.5] {
@@ -273,6 +328,14 @@ impl App {
                             [r * a.cos(), r * a.sin()]
                         }).collect();
                         plot.line(Line::new(format!("{r} g"), PlotPoints::from(ring)).color(GRID).width(1.0));
+                    }
+                    // The grip reached, drawn over the points so it reads as the edge.
+                    if let Some(l) = limit {
+                        let ring: Vec<[f64; 2]> = (0..=96).map(|k| {
+                            let a = std::f64::consts::TAU * k as f64 / 96.0;
+                            [l * a.cos(), l * a.sin()]
+                        }).collect();
+                        edge = Some(ring);
                     }
                 }
                 match color {
@@ -292,6 +355,9 @@ impl App {
                         let xy: Vec<[f64; 2]> = pts.iter().map(|p| [p[0], p[1]]).collect();
                         plot.points(egui_plot::Points::new("samples", PlotPoints::from(xy)).color(SERIES[0].gamma_multiply(0.7)).radius(1.8));
                     }
+                }
+                if let Some(ring) = edge.take() {
+                    plot.line(Line::new("Grip reached", PlotPoints::from(ring)).color(TEXT.gamma_multiply(0.55)).width(1.5));
                 }
                 if let Some((per, label)) = &gearing {
                     // Across the data only, so the plot isn't stretched down to 0.

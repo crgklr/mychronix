@@ -142,6 +142,18 @@ impl App {
             summary_tiles(ui, session);
             ui.add_space(10.0);
             self.setup_strip(ui);
+            // The IMU's mounting, worked out from the session: reassurance, not a setting.
+            if let Some(m) = session.info.imu_mount {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(Icon::Mychron.image(DIM, 14.0));
+                    ui.label(
+                        RichText::new(format!("The MyChron leans {:.0}° on its mount. Forward g and Vertical g are corrected for it automatically.", m.tilt_deg))
+                            .size(12.5)
+                            .color(DIM),
+                    );
+                });
+            }
         } else {
             ui.add_space(2.0);
             self.setup_line(ui);

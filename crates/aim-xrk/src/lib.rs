@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub mod checks;
 pub mod drk;
+pub mod imu;
 pub mod mc4;
 pub mod notes;
 pub mod rs2gps;
@@ -99,6 +100,9 @@ pub struct SessionInfo {
     pub logger_model: Option<String>,
     /// AiM's number for that model.
     pub logger_model_id: Option<u16>,
+    /// How a logger with a built-in IMU sits on the kart, when it could be
+    /// worked out (see [`imu`]); its "Forward g" and "Vertical g" channels exist then.
+    pub imu_mount: Option<imu::Mount>,
 }
 
 /// A recorded channel. `times_ms` and `values` have the same length.
@@ -190,6 +194,7 @@ impl From<libxrk::XrkFile> for Session {
             logger_id: m.logger_id,
             logger_model: m.logger_model,
             logger_model_id: m.logger_model_id,
+            imu_mount: None,
         };
         let channels: Vec<Channel> = file
             .channels
@@ -201,7 +206,10 @@ impl From<libxrk::XrkFile> for Session {
             .collect();
         let gps = file.gps.as_ref().and_then(GpsTrack::from_libxrk);
         let mut channels = channels;
+        let mut info = info;
         if let Some(g) = &gps {
+            let lon_g = longitudinal_g(&g.times_ms, &g.speed_kmh);
+            let lat_g = lateral_g(&g.times_ms, &g.speed_kmh, &g.yaw_rate_dps);
             channels.push(Channel {
                 name: "GPS Speed".into(),
                 group: Some("GPS".into()),
@@ -218,7 +226,7 @@ impl From<libxrk::XrkFile> for Session {
                 decimals: 2,
                 interpolate: true,
                 times_ms: g.times_ms.clone(),
-                values: longitudinal_g(&g.times_ms, &g.speed_kmh),
+                values: lon_g.clone(),
             });
             channels.push(Channel {
                 name: "GPS LatAcc".into(),
@@ -227,8 +235,23 @@ impl From<libxrk::XrkFile> for Session {
                 decimals: 2,
                 interpolate: true,
                 times_ms: g.times_ms.clone(),
-                values: lateral_g(&g.times_ms, &g.speed_kmh, &g.yaw_rate_dps),
+                values: lat_g.clone(),
             });
+            // The built-in IMU in the kart's own directions, when it checks out.
+            let find = |n: &str| channels.iter().find(|c| c.name == n);
+            if let (Some(x), Some(y), Some(z)) = (find("AccelerometerX"), find("AccelerometerY"), find("AccelerometerZ")) {
+                let accel = [x, y, z];
+                match imu::find_mount(accel, g, &lon_g) {
+                    Ok(mount) => {
+                        log::debug!("IMU: tilted {:.0}°, fit {:.2}", mount.tilt_deg, mount.fit);
+                        let mut extra = imu::kart_channels(accel, &mount);
+                        extra.extend(imu::grip_used(&extra[0], &g.times_ms, &lat_g));
+                        info.imu_mount = Some(mount);
+                        channels.extend(extra);
+                    }
+                    Err(why) => log::debug!("IMU: mounting not worked out ({why:?}); no IMU channels"),
+                }
+            }
         }
         let laps = file
             .laps
