@@ -3,7 +3,8 @@
 #   mychronix-<version>-<arch>.tar.gz    the two programs, launcher and icons
 #   mychronix_<version>-1_<arch>.deb      Debian, Ubuntu, Mint, Pop!_OS
 #   mychronix-<version>-1.<arch>.rpm     Fedora, openSUSE
-#   Mychronix-<version>-<arch>.AppImage  any distro, no install
+#   Mychronix-<version>-<arch>.AppImage  any distro, no install (and its
+#                                        .zsync, for AppImage updaters)
 # Needs cargo-deb and cargo-generate-rpm (cargo install them), rsvg-convert
 # (librsvg) or ImageMagick for the icons, and downloads appimagetool.
 # The release workflow runs this; it also works locally.
@@ -61,8 +62,13 @@ if [ ! -x "$tool" ]; then
   curl -fsSL -o "$tool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
   chmod +x "$tool"
 fi
+# Update info, so AppImage updaters (AppImageUpdate, Gear Lever and the like)
+# fetch new versions from GitHub's releases; appimagetool writes the .zsync
+# file they compare against beside the AppImage.
+repo=${GITHUB_REPOSITORY:-crgklr/mychronix}
+update="gh-releases-zsync|${repo%%/*}|${repo#*/}|latest|Mychronix-*-$arch.AppImage.zsync"
 # Runs without FUSE (CI machines don't have it).
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" "$tool" --no-appstream "$appdir" "$dist/Mychronix-$version-$arch.AppImage"
+(cd "$dist" && APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" "$OLDPWD/$tool" --no-appstream -u "$update" "$OLDPWD/$appdir" "Mychronix-$version-$arch.AppImage")
 
 (cd "$dist" && sha256sum -- * > SHA256SUMS)
 ls -l "$dist"

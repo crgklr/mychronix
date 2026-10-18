@@ -1,7 +1,8 @@
 # Builds the downloads: Linux (AppImage, .deb, .rpm, tarball) and Mac
 # (Apple Silicon .dmg).
 #
-# - Push a tag like v0.1.0: builds them and attaches them to a GitHub Release.
+# - Push a tag like v0.1.0: builds them, attaches them to a GitHub Release,
+#   then publishes it to the dnf/apt repositories and Homebrew (publish.yml).
 # - Run it by hand (Actions → Release → Run workflow): builds them as
 #   downloadable artifacts on the run, without making a release.
 #
@@ -88,3 +89,13 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Mychronix ${GITHUB_REF_NAME#v}" --generate-notes
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  # Then out to the package repositories and Homebrew.
+  publish:
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
