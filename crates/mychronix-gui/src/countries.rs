@@ -1,5 +1,14 @@
 //! Country names for the ISO 3166 codes used in AiM's track database.
 
+/// The country's name for display: "Italy", "Unknown country", or the code itself.
+pub fn label(code: &str) -> String {
+    match name(code) {
+        Some(name) => name.to_string(),
+        None if code.is_empty() => "Unknown country".to_string(),
+        None => code.to_string(),
+    }
+}
+
 pub fn name(code: &str) -> Option<&'static str> {
     Some(match code {
         "AE" => "United Arab Emirates",
@@ -122,8 +131,14 @@ pub fn name(code: &str) -> Option<&'static str> {
 }
 
 /// The country from the system locale (`LC_ALL`, `LC_ADDRESS`, then `LANG`),
-/// e.g. `en_US.UTF-8` → `US`.
+/// e.g. `en_US.UTF-8` → `US`. Worked out once: on a Mac it can mean running
+/// `defaults`, and the Tracks page asks on every frame.
 pub fn system_country() -> Option<String> {
+    static COUNTRY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    COUNTRY.get_or_init(look_up_country).clone()
+}
+
+fn look_up_country() -> Option<String> {
     ["LC_ALL", "LC_ADDRESS", "LANG"]
         .iter()
         .find_map(|var| locale_region(&std::env::var(var).ok()?))

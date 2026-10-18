@@ -45,9 +45,22 @@ pub struct Track {
     pub outline: Vec<LatLon>,
     /// Indices into [`Library::sessions`].
     pub sessions: Vec<usize>,
+    /// Lowercase name to sort by, and everything a search matches, worked
+    /// out once (see [`Track::index`]) rather than on every frame.
+    pub sort_key: String,
+    pub search: String,
 }
 
 impl Track {
+    /// Works out `sort_key` and `search` from the names; again whenever they change.
+    pub fn index(&mut self) {
+        self.sort_key = self.full_name.as_deref().unwrap_or(&self.name).to_lowercase();
+        let country = crate::countries::label(&self.country);
+        let parts = [Some(self.name.as_str()), Some(self.region.as_str()), self.city.as_deref(), self.full_name.as_deref(), Some(country.as_str())];
+        // One per line, so a search can't match across two of them.
+        self.search = parts.into_iter().flatten().collect::<Vec<_>>().join("\n").to_lowercase();
+    }
+
     /// "City, Region", as much as is known.
     pub fn locality(&self) -> String {
         let city = self.city.clone().unwrap_or_default();
@@ -135,17 +148,13 @@ impl Library {
     }
 
     fn load_inner() -> Self {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        let ours = home.join("Mychronix").join("tracks");
-        let rs3 = home.join(".rs3-wine/drive_c/AIM_SPORT/RaceStudio3");
+        let ours = crate::paths::data("tracks").unwrap_or_default();
 
         let mut lib = Library::default();
         let mut by_guid: HashMap<String, usize> = HashMap::new();
 
         // Custom tracks first so they win over database entries with the same guid.
-        let mut tkks = files_with_ext(&ours, "tkk");
-        tkks.extend(files_with_ext(&rs3.join("user/tracks"), "tkk"));
-        for path in tkks {
+        for path in files_with_ext(&ours, "tkk") {
             let Ok(t) = aim_track::read_tkk(&path) else { continue };
             let guid = t.guid.clone().unwrap_or_else(|| format!("tkk:{}", t.id));
             if by_guid.contains_key(&guid) {
@@ -169,6 +178,8 @@ impl Library {
                 kind: Kind::Custom,
                 outline: t.outline,
                 sessions: Vec::new(),
+                sort_key: String::new(),
+                search: String::new(),
             });
         }
 
@@ -176,10 +187,6 @@ impl Library {
         rias.extend(crate::aim_tracks::list_path());
         // Before the first download: the list copied from a MyChron (no outlines).
         rias.extend(crate::aim_tracks::mychron_list_path());
-        let rs3_db = rs3.join("aim_tracks/aim_tracks.ria");
-        if rs3_db.exists() {
-            rias.push(rs3_db);
-        }
         for path in rias {
             let Ok(records) = aim_track::read_ria(&path) else { continue };
             let custom_db = path.file_name().is_some_and(|n| n == "dev.ria");
@@ -214,6 +221,8 @@ impl Library {
                     kind: if custom_db { Kind::Custom } else { Kind::Aim },
                     outline: Vec::new(),
                     sessions: Vec::new(),
+                    sort_key: String::new(),
+                    search: String::new(),
                 });
             }
             if lib.tracks.len() > before {
@@ -253,7 +262,8 @@ impl Library {
         }
 
         // Downloaded sessions, matched to tracks by guid, then name and place.
-        for path in files_with_ext(&home.join("Mychronix").join("sessions"), "xri") {
+        let sessions_dir = crate::paths::sessions_dir().unwrap_or_default();
+        for path in files_with_ext(&sessions_dir, "xri") {
             let Ok(bytes) = std::fs::read(&path) else { continue };
             let Ok(summary) = aim_xrk::parse_xri(&bytes) else { continue };
             let session = lib.sessions.len();
@@ -275,7 +285,6 @@ impl Library {
         }
         // MyChron 4 sessions: RaceStudio 2's .drk and runs downloaded from a
         // data key (.mc4), summarized from the file itself.
-        let sessions_dir = home.join("Mychronix").join("sessions");
         let rs2 = files_with_ext(&sessions_dir, "drk").into_iter().map(|p| (p, true));
         let mc4 = files_with_ext(&sessions_dir, "mc4").into_iter().map(|p| (p, false));
         // A RaceStudio 2 raw download (.imd) counts only without its .drk.
@@ -304,6 +313,9 @@ impl Library {
 
         // Visited tracks first, then custom, then by name.
         lib.sort();
+        for t in &mut lib.tracks {
+            t.index();
+        }
         lib
     }
 
@@ -368,6 +380,7 @@ impl Library {
         if t.outline.is_empty() {
             t.outline = d.outline;
         }
+        t.index();
     }
 
     pub fn count(&self, kind: Kind) -> usize {
@@ -403,7 +416,7 @@ pub struct Details {
 /// Reads track files on a background thread, sending details as they're read.
 pub fn load_details(files: Vec<(usize, PathBuf)>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(usize, Details)> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("track-details", move || {
         for (i, path) in files {
             let Ok(t) = aim_track::read_tkk(&path) else { continue };
             let d = Details {
@@ -431,7 +444,7 @@ pub struct Favorites {
 
 impl Favorites {
     fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("favorite-tracks.json"))
+        crate::paths::data("favorite-tracks.json")
     }
 
     pub fn load() -> Self {

@@ -49,7 +49,7 @@ pub struct Events {
 
 impl Events {
     fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("events.json"))
+        crate::paths::data("events.json")
     }
 
     pub fn load() -> Self {
@@ -307,10 +307,9 @@ mod tests {
 /// `peak-egt.json` in the cache folder.
 pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Option<f64>)> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("peak-egt", move || {
         let cache_path = crate::paths::cache_dir().map(|d| d.join("peak-egt.json"));
-        let mut cache: std::collections::BTreeMap<String, Option<f64>> =
-            cache_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let mut cache: std::collections::BTreeMap<String, Option<f64>> = crate::storage::load_or_default(cache_path.clone());
         let mut changed = false;
         for path in paths {
             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -318,7 +317,7 @@ pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::s
             let value = match cache.get(&key) {
                 Some(v) => *v,
                 None => {
-                    let v = aim_xrk::Session::open(&path).ok().and_then(|s| {
+                    let v = crate::jobs::open_session(&path).ok().and_then(|s| {
                         s.channels
                             .iter()
                             .find(|c| c.name.eq_ignore_ascii_case("Exhaust Temp") || c.name.eq_ignore_ascii_case("EGT"))
@@ -334,11 +333,10 @@ pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::s
             }
             ctx.request_repaint();
         }
-        if let (true, Some(p)) = (changed, cache_path) {
-            if let Some(dir) = p.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(p, serde_json::to_string(&cache).unwrap_or_default());
+        if let (true, Some(p)) = (changed, cache_path)
+            && let Err(e) = crate::storage::save(&p, &cache)
+        {
+            log::warn!("couldn't save {}: {e}", p.display());
         }
     });
     rx

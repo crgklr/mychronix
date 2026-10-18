@@ -178,6 +178,8 @@ for these, and sends nothing about you:
 | Map tiles and satellite imagery, cached once viewed | OpenStreetMap; Esri World Imagery | — |
 
 The settings go in `~/Mychronix/settings.json`, e.g. `{ "weather": false }`.
+Units follow your computer's region (mph and °F in the US); `"units": "metric"`
+or `"units": "imperial"` picks them yourself.
 
 ## Troubleshooting
 

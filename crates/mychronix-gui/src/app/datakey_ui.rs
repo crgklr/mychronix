@@ -39,14 +39,15 @@ fn saved_starts(dir: &std::path::Path) -> Vec<(String, String)> {
 }
 
 fn sessions_dir(serial: &str) -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Mychronix").join("sessions").join(serial)
+    crate::paths::sessions_dir().unwrap_or_default().join(serial)
 }
 
 impl App {
     /// Checks for the key about once a second and picks up worker events.
     pub(super) fn key_poll(&mut self, ctx: &egui::Context) {
         let k = &mut self.key;
-        while let Some(ev) = k.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        let (events, ended) = crate::jobs::drain(k.rx.as_ref());
+        for ev in events {
             match ev {
                 KeyEvent::Listed { serial, total, new } => {
                     log::info!("data key: {total} runs, {} new, logger {serial}", new.len());
@@ -75,6 +76,13 @@ impl App {
             }
         }
         let k = &mut self.key;
+        // The job ended without saying how (it crashed): don't stay busy forever.
+        if ended && k.busy.is_some() {
+            log::error!("data key: the job stopped without finishing");
+            k.busy = None;
+            k.progress = None;
+            k.message = Some((false, "Reading the data key stopped unexpectedly. Unplug it, plug it back in, and try again.".into()));
+        }
         if k.busy.is_some() || k.last_check.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
             return;
@@ -99,7 +107,7 @@ impl App {
         self.key.rx = Some(rx);
         self.key.busy = Some("Reading the data key…".into());
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        crate::jobs::spawn("data-key-list", move || {
             let ev = (|| -> Result<KeyEvent, aim_link::datakey::KeyError> {
                 let mut key = DataKey::open()?;
                 let runs = key.runs()?;
@@ -125,7 +133,7 @@ impl App {
         self.key.busy = Some("Downloading from the data key…".into());
         self.key.progress = Some((0, new.len()));
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        crate::jobs::spawn("data-key-download", move || {
             let dir = sessions_dir(&serial);
             let result = (|| -> Result<Vec<PathBuf>, String> {
                 std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
@@ -134,7 +142,7 @@ impl App {
                 for (k, r) in new.iter().enumerate() {
                     let run = key.download(r, |_, _| {}).map_err(|e| e.to_string())?;
                     let path = dir.join(r.file_name());
-                    std::fs::write(&path, run.to_file()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+                    crate::storage::write_atomic(&path, &run.to_file()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
                     log::info!("data key: saved {}", path.display());
                     saved.push(path);
                     let _ = tx.send(KeyEvent::Progress { done: k + 1, of: new.len() });

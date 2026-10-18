@@ -95,7 +95,7 @@ pub struct ReportConfig {
 
 impl ReportConfig {
     fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("report.json"))
+        crate::paths::data("report.json")
     }
 
     pub fn load() -> Self {

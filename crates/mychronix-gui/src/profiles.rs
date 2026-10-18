@@ -245,7 +245,7 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
     // Your own picture, under this engine's name or the one it shares a picture with.
     let shared = bundled.map(|(_, file, _)| *file);
     for name in std::iter::once(slug.as_str()).chain(shared) {
-        let own = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("engines").join(format!("{name}.png")));
+        let own = crate::paths::data("engines").map(|d| d.join(format!("{name}.png")));
         if let Some(bytes) = own.as_ref().and_then(|p| std::fs::read(p).ok()) {
             return Some((format!("bytes://engine/{name}.png"), bytes));
         }
@@ -270,17 +270,16 @@ pub struct Profiles {
 
 impl Profiles {
     pub fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("profiles.json"))
+        crate::paths::data("profiles.json")
     }
 
-    /// Loads saved profiles; on first run, fills in what RaceStudio 3 already knows.
+    /// Loads saved profiles, moving older files' layout into drivers and karts.
     pub fn load() -> Self {
-        let saved = Self::path().and_then(|p| crate::storage::load::<Profiles>(&p));
-        let fresh = saved.is_none();
-        let mut p = saved.unwrap_or_else(Self::from_racestudio);
-        let migrated = p.migrate(&crate::setup::Baselines::saved().loggers);
-        if migrated || (fresh && !p.loggers.is_empty()) {
-            let _ = p.save();
+        let mut p: Profiles = crate::storage::load_or_default(Self::path());
+        if p.migrate(&crate::setup::Baselines::saved().loggers)
+            && let Err(e) = p.save()
+        {
+            log::error!("couldn't save profiles after updating their layout: {e}");
         }
         p
     }
@@ -488,43 +487,6 @@ impl Profiles {
     pub fn get(&self, logger: &str) -> Option<LoggerProfile> {
         Some(self.for_logger(logger)).filter(|p| !p.driver.is_empty() || !p.kart.is_empty())
     }
-
-    /// RaceStudio 3 files sessions as `data/<date>/<driver>/<track>/<driver>_<kart>_<track>_a_NNNN.xrk`
-    /// and writes the names into each `.xrk`; read one per driver to learn their logger.
-    fn from_racestudio() -> Self {
-        let mut out = Profiles::default();
-        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return out };
-        let data = home.join(".rs3-wine/drive_c/AIM_SPORT/RaceStudio3/user/data");
-        let Ok(days) = std::fs::read_dir(data) else { return out };
-        for day in days.flatten() {
-            let Ok(drivers) = std::fs::read_dir(day.path()) else { continue };
-            for driver in drivers.flatten() {
-                let Some(xrk) = find_xrk(&driver.path()) else { continue };
-                let Ok(session) = aim_xrk::Session::open(&xrk) else { continue };
-                let (Some(id), Some(name)) = (session.info.logger_id, session.info.driver.clone()) else { continue };
-                out.loggers.entry(id.to_string()).or_insert(LoggerProfile {
-                    driver: name,
-                    kart: session.info.vehicle.clone().unwrap_or_default(),
-                    ..Default::default()
-                });
-            }
-        }
-        out
-    }
-}
-
-fn find_xrk(dir: &std::path::Path) -> Option<PathBuf> {
-    for entry in std::fs::read_dir(dir).ok()?.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            if let Some(found) = find_xrk(&p) {
-                return Some(found);
-            }
-        } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xrk")) {
-            return Some(p);
-        }
-    }
-    None
 }
 
 #[cfg(test)]

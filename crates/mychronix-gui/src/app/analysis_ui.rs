@@ -88,7 +88,7 @@ impl App {
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let title = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
         let when = match (i.date.as_deref(), i.time.as_deref()) {
-            (Some(d), Some(t)) => Some(format!("{d} at {}", t.get(..5).unwrap_or(t))),
+            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::events::us_time(t))),
             (Some(d), None) => Some(d.to_string()),
             _ => None,
         };

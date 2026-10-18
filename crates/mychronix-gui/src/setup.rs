@@ -278,7 +278,7 @@ pub struct Baselines {
 
 impl Baselines {
     fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Mychronix").join("setups.json"))
+        crate::paths::data("setups.json")
     }
 
     /// What `setups.json` holds.

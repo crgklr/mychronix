@@ -39,12 +39,7 @@ impl Weather {
 
 /// Whether fetching is allowed (`"weather": false` in settings.json turns it off).
 pub fn enabled() -> bool {
-    let setting = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join("Mychronix").join("settings.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("weather").and_then(|w| w.as_bool()));
-    setting != Some(false)
+    crate::settings::get().weather
 }
 
 /// What a fetch needs from a session.
@@ -64,7 +59,7 @@ pub struct Want {
 /// arrives. Failures (offline) are logged and skipped.
 pub fn spawn(wants: Vec<Want>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Weather)> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("weather", move || {
         let mut by_day: BTreeMap<(String, i64, i64), Vec<Want>> = BTreeMap::new();
         for w in wants {
             // Same track (to about 1 km) and day: one request.

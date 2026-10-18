@@ -93,7 +93,7 @@ impl Digests {
     pub fn ensure(&mut self, path: &Path) -> Option<&Digest> {
         let k = key(path);
         if !self.by_key.contains_key(&k) {
-            let session = aim_xrk::Session::open(path).ok()?;
+            let session = crate::jobs::open_session(path).ok()?;
             self.by_key.insert(k.clone(), Digest::of(&session));
         }
         self.by_key.get(&k)
@@ -123,7 +123,7 @@ impl Digests {
 /// at once), sending each as it's ready, then saves the cache.
 pub fn spawn(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Digest)> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::jobs::spawn("digests", move || {
         let mut digests = Digests::load();
         let mut changed = false;
         for (n, path) in paths.into_iter().enumerate() {
