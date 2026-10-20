@@ -24,6 +24,7 @@ mod countries;
 mod device;
 mod digest;
 mod logging;
+mod startup_notify;
 mod mcp;
 mod paths;
 mod events;
@@ -82,6 +83,7 @@ fn install_crash_handler() {
 }
 
 fn main() -> eframe::Result {
+    let launch_token = startup_notify::take_token();
     logging::init();
     install_crash_handler();
     log::info!(
@@ -109,8 +111,11 @@ fn main() -> eframe::Result {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([1280.0, 720.0])
                 .with_min_inner_size([960.0, 600.0])
-                .with_maximized(true)
+                // MYCHRONIX_WINDOWED=1 opens it at its normal size (for testing the window's edges).
+                .with_maximized(std::env::var_os("MYCHRONIX_WINDOWED").is_none())
                 .with_title("Mychronix")
+                // On Linux, Mychronix draws its own close button instead of a title bar.
+                .with_decorations(!app::OWN_WINDOW_CONTROLS)
                 // Matches the installed launcher (packaging/linux/mychronix.desktop),
                 // which is where GNOME takes the app drawer and Alt+Tab icon from.
                 .with_app_id("mychronix")
@@ -118,6 +123,7 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(move |cc| {
+            startup_notify::finish(launch_token, cc, cc);
             theme::install(&cc.egui_ctx);
             units::init();
             log::info!("units: {}", if units::imperial() { "mph and °F" } else { "km/h and °C" });

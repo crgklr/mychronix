@@ -29,8 +29,10 @@ mod splits_ui;
 mod tracks_ui;
 mod device_page;
 mod compare_ui;
+mod window_ui;
 
 pub(crate) use sessions_filter_ui::{session_driver, session_track};
+pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
 
 use compare_ui::gain_color;
 use device_page::model_from_ssid;
@@ -611,7 +613,7 @@ impl eframe::App for App {
             );
         }
         // Some desktops ignore maximize at creation; ask again once the window is up.
-        if self.frames < 2 && self.screenshot_to.is_none() {
+        if self.frames < 2 && self.screenshot_to.is_none() && std::env::var_os("MYCHRONIX_WINDOWED").is_none() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
         }
         if self.screenshot_to.is_none() {
@@ -676,6 +678,7 @@ impl eframe::App for App {
             });
 
         self.rail(&ui.ctx().clone(), rail_space);
+        self.window_controls(&ui.ctx().clone());
         // MYCHRONIX_SENSOR_CHECK=<logger id> checks that logger's downloaded sessions
         // as if just downloaded (development only).
         if self.frames == 3 {
@@ -756,7 +759,7 @@ impl App {
         egui::Panel::top("update")
             .exact_size(38.0)
             .show_separator_line(false)
-            .frame(Frame::new().fill(SURFACE).inner_margin(Margin::symmetric(16, 0)))
+            .frame(Frame::new().fill(SURFACE).inner_margin(Margin { left: 16, right: 16 + window_ui::CORNER_W as i8, top: 0, bottom: 0 }))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
@@ -818,7 +821,7 @@ impl App {
         let mut dismiss = false;
         egui::Panel::top("error")
             .show_separator_line(false)
-            .frame(Frame::new().fill(theme::DANGER.gamma_multiply(0.16)).inner_margin(Margin::symmetric(16, 9)))
+            .frame(Frame::new().fill(theme::DANGER.gamma_multiply(0.16)).inner_margin(Margin { left: 16, right: 16 + window_ui::CORNER_W as i8, top: 9, bottom: 9 }))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
