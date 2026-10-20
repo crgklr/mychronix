@@ -29,6 +29,10 @@ pub struct Settings {
     /// Mychronix Performance Engineer: answer an AI assistant on this
     /// computer (`mychronix-gui --mcp`). Off until turned on.
     pub mcp: bool,
+    /// The real width in meters of tracks the Map view draws, by track name
+    /// (`{ "Lonato": 9 }`); other tracks get a typical width for their type.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub track_widths: std::collections::BTreeMap<String, f64>,
     /// Settings this version doesn't know, kept as they were.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
@@ -36,7 +40,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { units: None, clock: None, weather: true, update_check: true, aim_tracks: true, mcp: false, other: Default::default() }
+        Self { units: None, clock: None, weather: true, update_check: true, aim_tracks: true, mcp: false, track_widths: Default::default(), other: Default::default() }
     }
 }
 

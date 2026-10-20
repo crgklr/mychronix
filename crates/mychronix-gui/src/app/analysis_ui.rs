@@ -182,9 +182,8 @@ impl App {
             });
     }
 
-    /// The open session in two short lines: "mka · Session 35" and
-    /// "Sat 10/10 · Timmy · Lap 10".
-    fn session_label(&mut self, session: &Session) -> (String, String) {
+    /// The open session's parts: track, session number, day, driver, and the lap looked at.
+    fn session_parts(&mut self, session: &Session) -> [Option<String>; 5] {
         let i = &session.info;
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let track = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
@@ -199,15 +198,23 @@ impl App {
             Some(l) => format!("Lap {}", l.number),
             None => "All laps".to_string(),
         };
-        let title = [Some(track), number.map(|n| format!("Session {n}"))].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-        let detail = [date, i.driver.clone().filter(|d| !d.is_empty()), Some(lap)].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-        (title, detail)
+        [Some(track), number.map(|n| format!("Session {n}")), date, i.driver.clone().filter(|d| !d.is_empty()), Some(lap)]
     }
 
-    /// The pill at the top of each analysis view: what you're looking at, which
-    /// opens the session panel; warnings beside it. Returns the pill's rect.
+    /// The open session in two short lines for the rail: "Lonato · Session 35" and
+    /// "Sat 10/10 · Alex · Lap 10".
+    fn session_label(&mut self, session: &Session) -> (String, String) {
+        let [track, number, date, driver, lap] = self.session_parts(session);
+        let join = |v: Vec<Option<String>>| v.into_iter().flatten().collect::<Vec<_>>().join(" · ");
+        (join(vec![track, number]), join(vec![date, driver, lap]))
+    }
+
+    /// The pill at the top of each analysis view: "Lonato · Sat 10/10 · Alex ·
+    /// Session 35 · Lap 10  0:30.480", which opens the session panel; warnings
+    /// beside it. Returns the pill's rect.
     pub(super) fn session_pill(&mut self, ui: &mut Ui, session: &Session) -> Rect {
-        let (title, detail) = self.session_label(session);
+        let [track, number, date, driver, lap] = self.session_parts(session);
+        let rest: String = [date, driver, number, lap].into_iter().flatten().map(|s| format!("  ·  {s}")).collect();
         let time = self.lap.and_then(|k| session.laps.get(k)).or_else(|| session.best_lap(MIN_LAP_MS)).map(|l| format_lap_time(l.duration_ms()));
         let gearing = self.gearing_warning();
         let sensors = self.open_session_check(session);
@@ -216,18 +223,18 @@ impl App {
             ui.spacing_mut().item_spacing.x = 12.0;
             let mut job = egui::text::LayoutJob::default();
             let mut add = |text: &str, font: egui::FontId, color: Color32| job.append(text, 0.0, egui::TextFormat { font_id: font, color, ..Default::default() });
-            add(&title, semibold(13.5), TEXT);
-            add(&format!("  ·  {detail}"), regular(13.5), SECONDARY);
+            add(track.as_deref().unwrap_or(""), semibold(14.0), TEXT);
+            add(&rest, regular(14.0), SECONDARY);
             if let Some(t) = &time {
-                add(&format!("   {t}"), semibold(13.5), TEXT);
+                add(&format!("   {t}"), semibold(14.0), TEXT);
             }
             let galley = ui.painter().layout_job(job);
-            let size = galley.size() + vec2(28.0 + 22.0, 14.0);
+            let size = galley.size() + vec2(32.0 + 22.0, 16.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
             let lit = resp.hovered() || self.session_panel;
             ui.painter().rect(rect, CornerRadius::same(255), SURFACE, Stroke::new(1.0, if lit { SURFACE_ACTIVE } else { theme::OUTLINE }), egui::StrokeKind::Inside);
-            ui.painter().galley(rect.left_center() + vec2(14.0, -galley.size().y / 2.0), galley, TEXT);
-            Icon::ChevronDown.image(if lit { TEXT } else { SECONDARY }, 14.0).paint_at(ui, Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), Vec2::splat(14.0)));
+            ui.painter().galley(rect.left_center() + vec2(16.0, -galley.size().y / 2.0), galley, TEXT);
+            Icon::ChevronDown.image(if lit { TEXT } else { SECONDARY }, 14.0).paint_at(ui, Rect::from_center_size(pos2(rect.right() - 20.0, rect.center().y), Vec2::splat(14.0)));
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -239,7 +246,7 @@ impl App {
             if let Some(checked) = sensors {
                 let names: Vec<&str> = checked.issues.iter().map(|i| i.channel.as_str()).collect();
                 let text = format!("{}: no data", names.join(", "));
-                let r = ui.add(egui::Button::image_and_text(Icon::TriangleAlert.image(theme::FAVORITE, 14.0), RichText::new(text).size(13.0).color(theme::FAVORITE)).frame(false));
+                let r = ui.add(egui::Button::image_and_text(Icon::TriangleAlert.image(theme::FAVORITE, 14.0), RichText::new(text).size(14.0).color(theme::FAVORITE)).frame(false));
                 if r.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
@@ -248,7 +255,7 @@ impl App {
                 }
             }
             if let Some(why) = gearing {
-                ui.label(RichText::new("Gearing doesn't match the data").size(13.0).color(theme::FAVORITE)).on_hover_text(why);
+                ui.label(RichText::new("Gearing doesn't match the data").size(14.0).color(theme::FAVORITE)).on_hover_text(why);
             }
         });
         pill
@@ -274,12 +281,13 @@ impl App {
         });
     }
 
-    /// The panel the pill and the rail's session indicator open: the session
-    /// (today's header and details), its laps, and other sessions to open.
+    /// The panel the pill and the rail's session indicator open, in three
+    /// columns: the session (today's header and details), its laps, and other
+    /// sessions at the track.
     pub(super) fn session_panel(&mut self, ctx: &egui::Context, session: &std::sync::Arc<Session>) {
         let Some(pill) = self.pill_rect.filter(|_| self.session_panel) else { return };
         let screen = ctx.content_rect();
-        let width = (screen.right() - 28.0 - pill.left()).min(1280.0);
+        let width = (screen.right() - 28.0 - pill.left()).min(1400.0);
         let mut open_path = None;
         let mut close = false;
         let area = egui::Area::new(egui::Id::new("session_panel")).order(egui::Order::Foreground).fixed_pos(pill.left_bottom() + vec2(0.0, 8.0)).show(ctx, |ui| {
@@ -288,29 +296,36 @@ impl App {
                 .stroke(Stroke::new(1.0, SURFACE_ACTIVE))
                 .corner_radius(CornerRadius::same(14))
                 .shadow(egui::Shadow { offset: [0, 18], blur: 48, spread: 0, color: Color32::from_black_alpha(165) })
-                .inner_margin(Margin::same(20))
                 .show(ui, |ui| {
-                    ui.set_width(width - 40.0);
-                    let gap = 22.0;
-                    let inner = width - 40.0 - 2.0 * gap;
-                    let widths = [inner * 0.5, inner * 0.28, inner * 0.22];
+                    ui.set_width(width);
+                    let widths = [width * 0.42, width * 0.30, width * 0.28];
+                    let pad = 24.0;
+                    let top = ui.cursor().top();
+                    let mut bottom = top;
                     ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        ui.vertical(|ui| {
-                            ui.set_width(widths[0]);
-                            self.panel_session(ui, session);
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_width(widths[1]);
-                            if self.panel_laps(ui, session, widths[1]) {
-                                close = true;
-                            }
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_width(widths[2]);
-                            open_path = self.panel_sessions(ui);
-                        });
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for (col, w) in widths.into_iter().enumerate() {
+                            let r = ui
+                                .allocate_ui_with_layout(vec2(w, 0.0), Layout::top_down(Align::Min), |ui| {
+                                    Frame::new().inner_margin(Margin { left: pad as i8, right: pad as i8, top: 22, bottom: 22 }).show(ui, |ui| {
+                                        ui.set_width(w - 2.0 * pad);
+                                        match col {
+                                            0 => self.panel_session(ui, session),
+                                            1 => close |= self.panel_laps(ui, session, w - 2.0 * pad),
+                                            _ => open_path = self.panel_sessions(ui),
+                                        }
+                                    });
+                                })
+                                .response
+                                .rect;
+                            bottom = bottom.max(r.bottom());
+                        }
                     });
+                    // Lines between the columns, the panel's full height.
+                    let left = ui.min_rect().left();
+                    for d in [widths[0], widths[0] + widths[1]] {
+                        ui.painter().vline(left + d, top..=bottom, Stroke::new(1.0, theme::OUTLINE));
+                    }
                 });
         });
         // Click anywhere else (but the pill and the rail's indicator, which toggle it) or Escape to close.
@@ -337,95 +352,141 @@ impl App {
             (Some(d), None) => Some(d.to_string()),
             _ => None,
         };
-        let sub = [i.session.clone(), when, i.driver.clone(), i.vehicle.clone()].into_iter().flatten().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("  ·  ");
+        let section = |ui: &mut Ui, text: &str| {
+            ui.add_space(16.0);
+            ui.label(RichText::new(text).font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
+            ui.add_space(4.0);
+        };
+        // The track, with "Change track" beside it.
         ui.horizontal(|ui| {
-            let t = ui.add(egui::Label::new(RichText::new(title).font(semibold(22.0)).color(TEXT)).sense(Sense::click()));
-            if t.hovered() {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            ui.label(RichText::new(title).font(semibold(26.0)).color(TEXT));
+            let link = ui.add(egui::Label::new(RichText::new("Change track").size(14.0).color(theme::ACCENT)).sense(Sense::click()));
+            if link.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            if t.on_hover_text("Change the track this session was at").clicked() {
+            if link.on_hover_text("Change the track this session was at").clicked() {
                 if let Some(p) = self.path.clone() {
                     self.open_track_pick(p);
                 }
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if button(ui, Some(Icon::FolderOpen), "Open…", false).on_hover_text("Open a session file").clicked() {
-                    self.open_dialog();
-                }
-            });
         });
-        ui.add(egui::Label::new(RichText::new(sub).font(regular(14.0)).color(SECONDARY)).wrap());
-        ui.add_space(12.0);
-        summary_tiles(ui, session);
-        ui.add_space(10.0);
-        self.setup_strip(ui);
-        ui.add_space(6.0);
-        self.weather_line(ui);
-        // Session notes: what stands out across the racing laps.
+        // Session · when · driver · kart, the driver in bold.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let mut first = true;
+            // The logger's session name, else "Session N" from the file name.
+            let number = self.path.as_ref().and_then(|p| p.file_stem()).and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy())).map(|n| format!("Session {n}"));
+            let name = i.session.clone().filter(|s| !s.is_empty()).or(number);
+            for (part, strong) in [(name, false), (when, false), (i.driver.clone(), true), (i.vehicle.clone(), false)] {
+                let Some(part) = part.filter(|p| !p.is_empty()) else { continue };
+                if !first {
+                    ui.label(RichText::new("  ·  ").size(15.0).color(SECONDARY));
+                }
+                first = false;
+                ui.label(RichText::new(part).font(if strong { medium(15.0) } else { regular(15.0) }).color(if strong { TEXT } else { SECONDARY }));
+            }
+        });
+        ui.add_space(14.0);
+        panel_tiles(ui, session);
+        ui.add_space(16.0);
+        self.setup_section(ui);
+        let weather = self.path.clone().and_then(|p| self.library.get_or_insert_with(Library::load).sessions.iter().find(|s| s.path == p).and_then(|s| s.weather));
+        if weather.is_some() {
+            section(ui, "WEATHER");
+            self.weather_line(ui);
+        }
+        // What stands out across the racing laps.
         let notes = self.open_session_notes(session);
         if !notes.is_empty() {
-            ui.add_space(4.0);
+            section(ui, "WHAT STANDS OUT");
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add(Icon::Activity.image(DIM, 14.0));
+                ui.spacing_mut().item_spacing.x = 0.0;
                 for (k, (text, why, attention)) in notes.into_iter().enumerate() {
                     if k > 0 {
-                        ui.label(RichText::new("·").size(13.0).color(DIM));
+                        ui.label(RichText::new("  ·  ").size(15.0).color(DIM));
                     }
-                    ui.label(RichText::new(text).size(13.0).color(if attention { theme::FAVORITE } else { SECONDARY })).on_hover_text(why);
+                    ui.label(RichText::new(text).size(15.0).color(if attention { theme::FAVORITE } else { TEXT })).on_hover_text(why);
                 }
             });
         }
         // The IMU's mounting, worked out from the session: reassurance, not a setting.
         if let Some(m) = session.info.imu_mount {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add(Icon::Mychron.image(DIM, 14.0));
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(format!("The MyChron leans {:.0}° on its mount. Forward g and Vertical g are corrected for it automatically.", m.tilt_deg)).size(12.5).color(DIM),
-                    )
+            ui.add_space(14.0);
+            ui.add(
+                egui::Label::new(RichText::new(format!("The MyChron leans {:.0}° on its mount. Forward g and Vertical g are corrected for it automatically.", m.tilt_deg)).size(13.0).color(DIM))
                     .wrap(),
-                );
+            );
+        }
+        // Sensors that stopped recording.
+        if let Some(checked) = self.open_session_check(session) {
+            let names: Vec<&str> = checked.issues.iter().map(|i| i.channel.as_str()).collect();
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.add(Icon::TriangleAlert.image(theme::FAVORITE, 14.0));
+                ui.label(RichText::new(format!("{}: no data", names.join(", "))).size(13.5).color(theme::FAVORITE));
+                ui.label(RichText::new("·").size(13.5).color(DIM));
+                let link = ui.add(egui::Label::new(RichText::new("what happened, and what to check").size(13.5).color(theme::ACCENT)).sense(Sense::click()));
+                if link.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if link.clicked() {
+                    self.sensors.report = Some(vec![checked.clone()]);
+                }
             });
+        }
+        ui.add_space(16.0);
+        let open = egui::Button::new(RichText::new("Open…").size(14.0).color(TEXT))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, SURFACE_ACTIVE))
+            .corner_radius(CornerRadius::same(255))
+            .min_size(vec2(92.0, 38.0));
+        if ui.add(open).on_hover_text("Open a session file").clicked() {
+            self.open_dialog();
         }
     }
 
-    /// The panel's lap picker: the whole session, then every lap. True when one was picked.
+    /// The panel's lap picker: every lap, then the whole session. True when one was picked.
     fn panel_laps(&mut self, ui: &mut Ui, session: &Session, width: f32) -> bool {
         ui.label(RichText::new("LAP").font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         let slow = slow_laps(session);
         let best = session.best_lap(MIN_LAP_MS).copied();
-        let gap = 6.0;
+        let gap = 8.0;
         let w = (width - gap * 2.0) / 3.0;
         let mut picked = None;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(gap, gap);
-            let cell = |ui: &mut Ui, on: bool, dim: bool, number: &str, time: &str, color: Color32| {
-                let (rect, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
+            let cell = |ui: &mut Ui, on: bool, number: &str, time: &str, color: Color32| {
+                let (rect, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
                 let p = ui.painter();
-                p.rect(rect, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else if resp.hovered() { SURFACE_HOVER } else { SURFACE }, Stroke::new(1.0, if on { SECONDARY } else { theme::OUTLINE }), egui::StrokeKind::Inside);
-                p.text(rect.left_center() + vec2(9.0, 0.0), egui::Align2::LEFT_CENTER, number, regular(12.5), DIM);
-                p.text(rect.right_center() - vec2(9.0, 0.0), egui::Align2::RIGHT_CENTER, time, medium(13.0), if dim { DIM } else { color });
+                p.rect(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), if on { SURFACE_ACTIVE } else if resp.hovered() { SURFACE_HOVER } else { SURFACE }, Stroke::new(1.0, if on { SECONDARY } else { theme::OUTLINE }), egui::StrokeKind::Inside);
+                if time.is_empty() {
+                    p.text(rect.center(), egui::Align2::CENTER_CENTER, number, medium(15.0), TEXT);
+                } else {
+                    p.text(rect.left_center() + vec2(12.0, 0.0), egui::Align2::LEFT_CENTER, number, regular(15.0), DIM);
+                    p.text(rect.right_center() - vec2(12.0, 0.0), egui::Align2::RIGHT_CENTER, time, medium(15.0), color);
+                }
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 resp
             };
-            if cell(ui, self.lap.is_none(), false, "All", "", TEXT).on_hover_text("The whole session").clicked() {
-                picked = Some(None);
-            }
             for (k, lap) in session.laps.iter().enumerate() {
-                let color = if Some(*lap) == best { theme::GOOD } else { TEXT };
-                let r = cell(ui, self.lap == Some(k), slow[k], &lap.number.to_string(), &format_lap_time(lap.duration_ms()), color);
-                if r.on_hover_text(if slow[k] { "Out, in or slow lap" } else { "" }).clicked() {
+                let color = if Some(*lap) == best { theme::GOOD } else if slow[k] { DIM } else { TEXT };
+                let r = cell(ui, self.lap == Some(k), &lap.number.to_string(), &format_lap_time(lap.duration_ms()), color);
+                let r = if slow[k] { r.on_hover_text("Out, in or slow lap") } else { r };
+                if r.clicked() {
                     picked = Some(Some(k));
                 }
             }
+            if cell(ui, self.lap.is_none(), "All", "", TEXT).on_hover_text("The whole session").clicked() {
+                picked = Some(None);
+            }
         });
-        ui.add_space(8.0);
-        ui.label(RichText::new("Dimmed: out, in and slow laps.").size(12.0).color(DIM));
+        ui.add_space(12.0);
+        ui.label(RichText::new("Dimmed: out, in and slow laps.").size(13.0).color(DIM));
         if let Some(choice) = picked {
             self.lap = choice;
             self.cursor_s = None;
@@ -434,24 +495,26 @@ impl App {
         false
     }
 
-    /// The panel's other sessions at this track, newest race day first. Returns one picked.
+    /// The panel's other sessions at this track: the open session's race day
+    /// first, then the rest newest first. Returns one picked.
     fn panel_sessions(&mut self, ui: &mut Ui) -> Option<PathBuf> {
         ui.label(RichText::new("ANOTHER SESSION").font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         let lib = self.library.take().unwrap_or_else(Library::load);
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p));
-        let (track, logger) = (here.and_then(|s| s.track), here.map(|s| s.logger.clone()));
+        let (track, logger, day) = (here.and_then(|s| s.track), here.map(|s| s.logger.clone()), here.and_then(|s| s.summary.date));
         let mut rows: Vec<usize> = (0..lib.sessions.len())
             .filter(|&i| {
                 let s = &lib.sessions[i];
                 (track.is_some() && s.track == track) || (track.is_none() && Some(&s.logger) == logger.as_ref())
             })
-            .filter(|&i| !crate::events::is_warm_up(&lib.sessions[i].summary))
+            // Sessions with laps to look at.
+            .filter(|&i| lib.sessions[i].summary.best_lap_ms.is_some() || self.path.as_ref() == Some(&lib.sessions[i].path))
             .collect();
         rows.sort_by_key(|&i| {
             let s = &lib.sessions[i].summary;
-            std::cmp::Reverse((s.date, s.start_time.clone(), s.number))
+            (s.date != day, std::cmp::Reverse((s.date, s.start_time.clone(), s.number)))
         });
         rows.truncate(10);
         let mut open = None;
@@ -459,22 +522,31 @@ impl App {
         for &i in &rows {
             let s = &lib.sessions[i];
             if last_date != Some(s.summary.date) {
+                if last_date.is_some() {
+                    ui.add_space(10.0);
+                }
                 last_date = Some(s.summary.date);
-                ui.add_space(6.0);
-                let day = s.summary.date.map(long_date).unwrap_or_else(|| "Unknown date".into());
-                ui.label(RichText::new(day.to_uppercase()).font(medium(11.0)).color(DIM).extra_letter_spacing(0.5));
-                ui.add_space(2.0);
+                let date = s.summary.date.map(|d| long_date(d).rsplit_once(", ").map(|(day, _)| day.to_string()).unwrap_or_default()).unwrap_or_else(|| "Unknown date".into());
+                let place = s.track.map(|t| lib.tracks[t].name.clone()).or_else(|| s.summary.track.clone()).unwrap_or_default();
+                let head = if place.is_empty() { date } else { format!("{date} · {place}") };
+                ui.label(RichText::new(head.to_uppercase()).font(medium(12.0)).color(DIM).extra_letter_spacing(0.5));
+                ui.add_space(4.0);
             }
             let on = self.path.as_ref() == Some(&s.path);
-            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
             if on || resp.hovered() {
-                ui.painter().rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else { SURFACE_HOVER });
+                ui.painter().rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), if on { SURFACE_ACTIVE } else { SURFACE_HOVER });
             }
             let who = session_driver(s, &profiles);
-            let name = format!("Session {}{}", s.summary.number.unwrap_or(0), if who.is_empty() { String::new() } else { format!("  ·  {who}") });
-            ui.painter().text(rect.left_center() + vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, name, if on { semibold(13.0) } else { regular(13.0) }, TEXT);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(&format!("Session {}", s.summary.number.unwrap_or(0)), 0.0, egui::TextFormat { font_id: if on { semibold(15.0) } else { regular(15.0) }, color: TEXT, ..Default::default() });
+            if !who.is_empty() {
+                job.append(&format!(" · {who}"), 0.0, egui::TextFormat { font_id: regular(15.0), color: TEXT, ..Default::default() });
+            }
+            let galley = ui.painter().layout_job(job);
+            ui.painter().galley(rect.left_center() + vec2(10.0, -galley.size().y / 2.0), galley, TEXT);
             if let Some(b) = s.summary.best_lap_ms {
-                ui.painter().text(rect.right_center() - vec2(8.0, 0.0), egui::Align2::RIGHT_CENTER, format_lap_time(b as i64), regular(12.5), DIM);
+                ui.painter().text(rect.right_center() - vec2(10.0, 0.0), egui::Align2::RIGHT_CENTER, format_lap_time(b as i64), regular(14.5), DIM);
             }
             if resp.hovered() && !on {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -483,14 +555,48 @@ impl App {
                 open = Some(s.path.clone());
             }
         }
-        ui.add_space(8.0);
-        if ui.add(egui::Label::new(RichText::new("All sessions…").size(13.0).color(SECONDARY)).sense(Sense::click())).clicked() {
-            self.page = Page::Sessions;
-        }
+        ui.add_space(10.0);
+        ui.vertical_centered(|ui| {
+            let r = ui.add(egui::Label::new(RichText::new("All sessions…").size(14.5).color(SECONDARY)).sense(Sense::click()));
+            if r.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if r.clicked() {
+                self.page = Page::Sessions;
+            }
+        });
         self.library = Some(lib);
         self.profiles = Some(profiles);
         open
     }
+}
+
+/// The panel's four tiles: best lap, average lap, laps, time on track.
+fn panel_tiles(ui: &mut Ui, session: &Session) {
+    let slow = slow_laps(session);
+    let racing: Vec<_> = session.laps.iter().zip(&slow).filter(|(_, s)| !**s).map(|(l, _)| l).collect();
+    let best = session.best_lap(MIN_LAP_MS);
+    let avg = (!racing.is_empty()).then(|| racing.iter().map(|l| l.duration_ms()).sum::<i64>() / racing.len() as i64);
+    let span = session.laps.first().zip(session.laps.last()).map(|(a, b)| b.end_ms - a.start_ms);
+    let dash = || "—".to_string();
+    let tiles = [
+        ("Best lap", best.map(|l| format_lap_time(l.duration_ms())).unwrap_or_else(dash)),
+        ("Average lap", avg.map(format_lap_time).unwrap_or_else(dash)),
+        ("Laps", session.laps.len().to_string()),
+        ("On track", span.map(format_duration).unwrap_or_else(dash)),
+    ];
+    let gap = 10.0;
+    let w = (ui.available_width() - gap * 3.0) / 4.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (label, value) in tiles {
+            let (rect, _) = ui.allocate_exact_size(vec2(w, 72.0), Sense::hover());
+            let p = ui.painter();
+            p.rect(rect, CornerRadius::same(10), WINDOW, Stroke::new(1.0, theme::OUTLINE), egui::StrokeKind::Inside);
+            p.text(rect.left_top() + vec2(12.0, 22.0), egui::Align2::LEFT_CENTER, label, regular(13.0), DIM);
+            p.text(rect.left_top() + vec2(12.0, 47.0), egui::Align2::LEFT_CENTER, value, semibold(21.0), TEXT);
+        }
+    });
 }
 
 /// A click this frame outside `panel`, `pill` and the rail (whose session
