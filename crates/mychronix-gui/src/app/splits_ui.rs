@@ -317,7 +317,7 @@ impl App {
             ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
                 ui.set_width(detail_w);
                 egui::ScrollArea::vertical().id_salt("split_detail").auto_shrink([false, false]).show(ui, |ui| {
-                    split_detail(ui, session, c, &included, st.selected, st.hovered_row);
+                    split_detail(ui, session, c, &included, st.selected, st.hovered_row, height);
                 });
             });
         });
@@ -334,9 +334,12 @@ impl App {
 }
 
 /// The map of the splits, and with a split selected: speed through it, its
-/// time and driven distance by lap, and time against distance.
-fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool], selected: Option<usize>, hovered_row: Option<usize>) {
+/// time and driven distance by lap, and time against distance. `height` is
+/// the column's: the map alone fills it.
+#[allow(clippy::too_many_arguments)]
+fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool], selected: Option<usize>, hovered_row: Option<usize>, height: f32) {
     let Some(gps) = session.gps.as_ref() else { return };
+    let top = ui.cursor().top();
     // Laps in the selected split, ranked by their time there (for color).
     let in_split: Vec<(usize, f64, f64, i64)> = match selected {
         Some(k) => c
@@ -363,7 +366,11 @@ fn split_detail(ui: &mut Ui, session: &Session, c: &Computed, included: &[bool],
         });
         let note = if selected.is_some() { "Each ticked lap through the split, fastest green to slowest red" } else { "Click a split's heading to see it in detail" };
         ui.label(RichText::new(note).size(12.5).color(SECONDARY));
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 300.0), Sense::hover());
+        ui.add_space(14.0);
+        // On its own the map takes the column's height (less the card's margin);
+        // with a split's details under it, a fixed height.
+        let map_h = if selected.is_none() { (top + height - 20.0 - ui.cursor().top()).max(300.0) } else { 380.0 };
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), map_h), Sense::hover());
         let r0 = c.reference[0];
         let kx = 111_320.0 * r0.lat.to_radians().cos();
         let xy = |p: &LatLon| ((p.lon - r0.lon) * kx, (p.lat - r0.lat) * 110_540.0);

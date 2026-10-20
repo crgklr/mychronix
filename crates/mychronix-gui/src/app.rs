@@ -1576,9 +1576,14 @@ impl App {
                             if x.clicked() {
                                 remove = Some(i);
                             }
-                            ui.add_space(6.0);
+                            ui.add_space(8.0);
+                            // The value at the cursor, big, with its units ("6889 rpm").
                             if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
-                                ui.label(RichText::new(format_value(v, c.decimals)).font(semibold(16.0)).color(TEXT));
+                                ui.spacing_mut().item_spacing.x = 5.0;
+                                if !units.is_empty() {
+                                    ui.label(RichText::new(units).font(medium(16.0)).color(SECONDARY));
+                                }
+                                ui.label(RichText::new(format_value(v, c.decimals)).font(semibold(26.0)).color(TEXT));
                             }
                         });
                     });
@@ -1834,7 +1839,8 @@ impl App {
                     .map(|i| channel.and_then(|c| sample_at(c, gps.times_ms[i])))
                     .collect();
                 let (vmin, vmax) = robust_range(values.iter().flatten().copied());
-                let ramp = |v: f64| heat_color(((v - vmin) / (vmax - vmin).max(f64::EPSILON)) as f32);
+                let colors = channel.map_or(heat_color as fn(f32) -> Color32, channel_ramp);
+                let ramp = |v: f64| colors(((v - vmin) / (vmax - vmin).max(f64::EPSILON)) as f32);
 
                 let painter = ui.painter_at(rect);
                 for k in 0..pts.len() - 1 {
@@ -1851,7 +1857,7 @@ impl App {
                         }
                         None => values[k].map(ramp).unwrap_or(DIM),
                     };
-                    painter.line_segment([pts[k], pts[k + 1]], Stroke::new(3.5, color));
+                    painter.line_segment([pts[k], pts[k + 1]], Stroke::new(6.0, color));
                 }
                 // Where the window starts.
                 painter.circle_filled(pts[0], 4.0, DIM);
@@ -2062,19 +2068,68 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
     response
 }
 
+/// Colors from the first stop (`t` = 0) to the last (1), evenly spaced.
+fn ramp_color(stops: &[Color32], t: f32) -> Color32 {
+    let x = t.clamp(0.0, 1.0) * (stops.len() - 1) as f32;
+    let i = (x.floor() as usize).min(stops.len() - 2);
+    mix(stops[i], stops[i + 1], x - i as f32)
+}
+
+/// RPM on the track: dark purple when low, through magenta and orange, to
+/// yellow when high (plasma), so where the engine bogs and pulls stands out.
+pub(super) fn rpm_color(t: f32) -> Color32 {
+    ramp_color(
+        &[
+            Color32::from_rgb(0x2b, 0x0b, 0x6e),
+            Color32::from_rgb(0x8a, 0x1c, 0xa8),
+            Color32::from_rgb(0xd6, 0x45, 0x7a),
+            Color32::from_rgb(0xf7, 0x94, 0x3f),
+            Color32::from_rgb(0xf6, 0xe6, 0x4a),
+        ],
+        t,
+    )
+}
+
+/// A temperature on the track: blue when low, through yellow and orange, to red when high.
+pub(super) fn temp_color(t: f32) -> Color32 {
+    ramp_color(&[Color32::from_rgb(0x2f, 0x6b, 0xff), Color32::from_rgb(0xf2, 0xd1, 0x3b), Color32::from_rgb(0xf0, 0x8c, 0x2b), Color32::from_rgb(0xe5, 0x48, 0x4d)], t)
+}
+
+/// Speed on the track: red when slow to green when fast.
+pub(super) fn track_speed_color(t: f32) -> Color32 {
+    ramp_color(&[Color32::from_rgb(0xe5, 0x48, 0x4d), Color32::from_rgb(0xf0, 0xa0, 0x4b), theme::GOOD], t)
+}
+
+/// How a channel's values color the track, low to high, by what it measures
+/// (whatever the logger calls it): RPM, a temperature, a speed, or anything
+/// else on the general ramp.
+fn channel_ramp(c: &Channel) -> fn(f32) -> Color32 {
+    let name = c.name.to_lowercase();
+    let units = pretty_units(&c.units).to_lowercase();
+    if name.contains("rpm") || units == "rpm" {
+        rpm_color
+    } else if units == "°c" || units == "°f" {
+        temp_color
+    } else if name.contains("speed") || matches!(units.as_str(), "km/h" | "kmh" | "mph") {
+        track_speed_color
+    } else {
+        heat_color
+    }
+}
+
 /// Low to high on the track: blue, through teal and yellow, to red, so a
 /// channel's highs and lows stand apart on the line.
 fn heat_color(t: f32) -> Color32 {
-    const STOPS: [Color32; 5] = [
-        Color32::from_rgb(0x2f, 0x5b, 0xff),
-        Color32::from_rgb(0x16, 0xb8, 0xd4),
-        Color32::from_rgb(0xf2, 0xd1, 0x3b),
-        Color32::from_rgb(0xf0, 0x8c, 0x2b),
-        Color32::from_rgb(0xe5, 0x48, 0x4d),
-    ];
-    let x = t.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
-    let i = (x.floor() as usize).min(STOPS.len() - 2);
-    mix(STOPS[i], STOPS[i + 1], x - i as f32)
+    ramp_color(
+        &[
+            Color32::from_rgb(0x2f, 0x5b, 0xff),
+            Color32::from_rgb(0x16, 0xb8, 0xd4),
+            Color32::from_rgb(0xf2, 0xd1, 0x3b),
+            Color32::from_rgb(0xf0, 0x8c, 0x2b),
+            Color32::from_rgb(0xe5, 0x48, 0x4d),
+        ],
+        t,
+    )
 }
 
 /// Speed color: viridis, dark purple when slow to yellow when fast. Its

@@ -81,11 +81,6 @@ fn fit(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f
     Some((c, zoom))
 }
 
-/// Low to high: blue, through teal and yellow, to red.
-fn heat(t: f32) -> Color32 {
-    super::heat_color(t)
-}
-
 /// One line to draw on the map.
 struct Path {
     points: Vec<aim_track::LatLon>,
@@ -461,14 +456,14 @@ fn line_colors(model: &CornerModel, trace: usize, reference: usize, by: ColorBy,
         }
         ColorBy::Speed => {
             let (lo, hi) = super::robust_range(tr.kmh.iter().copied());
-            tr.kmh.iter().map(|v| heat(((v - lo) / (hi - lo).max(1e-6)) as f32)).collect()
+            tr.kmh.iter().map(|v| super::track_speed_color(((v - lo) / (hi - lo).max(1e-6)) as f32)).collect()
         }
         ColorBy::Rpm => {
             let Some(ch) = rpm else { return vec![theme::GOOD; n] };
             // Where RPM wasn't recorded, gray rather than the color of a low reading.
             let v: Vec<Option<f64>> = tr.t.iter().map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64)).collect();
             let (lo, hi) = super::robust_range(v.iter().flatten().copied());
-            v.iter().map(|x| x.map_or(LIFT, |x| heat(((x - lo) / (hi - lo).max(1e-6)) as f32))).collect()
+            v.iter().map(|x| x.map_or(LIFT, |x| super::rpm_color(((x - lo) / (hi - lo).max(1e-6)) as f32))).collect()
         }
         ColorBy::Gain => {
             let r = &model.traces[reference];
@@ -521,7 +516,7 @@ fn legend(ui: &mut Ui, by: ColorBy, model: &CornerModel, trace: usize, rpm: Opti
                 let (lo, hi) = super::robust_range(model.traces[trace].kmh.iter().copied());
                 let u = crate::units::speed_unit();
                 ui.label(RichText::new(format!("{:.0} {u}", crate::units::speed(lo))).size(12.5).color(SECONDARY));
-                ramp(ui, &heat);
+                ramp(ui, &super::track_speed_color);
                 ui.label(RichText::new(format!("{:.0} {u}", crate::units::speed(hi))).size(12.5).color(SECONDARY));
             }
             ColorBy::Rpm => {
@@ -529,7 +524,7 @@ fn legend(ui: &mut Ui, by: ColorBy, model: &CornerModel, trace: usize, rpm: Opti
                     let v = model.traces[trace].t.iter().filter_map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64));
                     let (lo, hi) = super::robust_range(v);
                     ui.label(RichText::new(format!("{lo:.0} rpm")).size(12.5).color(SECONDARY));
-                    ramp(ui, &heat);
+                    ramp(ui, &super::rpm_color);
                     ui.label(RichText::new(format!("{hi:.0} rpm")).size(12.5).color(SECONDARY));
                 }
             }
@@ -657,7 +652,10 @@ fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize,
             let mean = offs.iter().sum::<f64>() / offs.len() as f64;
             let sd = (offs.iter().map(|o| (o - mean).powi(2)).sum::<f64>() / offs.len() as f64).sqrt();
             ui.add_space(4.0);
-            ui.add(egui::Label::new(RichText::new(format!("Line at the apex across {} laps: ±{:.1} {du}", offs.len(), crate::units::distance(sd))).size(12.5).color(TEXT)).wrap());
+            // In words: GPS can't tell lines much closer than half a meter apart.
+            let how = if sd < 0.5 { "was consistent" } else if sd < 1.2 { "varied a little" } else { "varied a lot" };
+            ui.add(egui::Label::new(RichText::new(format!("Across {} laps, your line at the apex {how}.", offs.len())).size(12.5).color(TEXT)).wrap())
+                .on_hover_text("From the MyChron's GPS, which can't tell lines less than about half a meter apart.");
         }
     } else {
         ui.add(egui::Label::new(RichText::new("Turn on All laps to see how repeatable the line is here.").size(12.0).color(DIM)).wrap());
