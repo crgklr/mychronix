@@ -491,47 +491,49 @@ impl App {
         let tires = self.tire_suggestions();
         let lib = self.library.take().unwrap();
         let multiple = dlg.detected.len() > 1;
-        let mut open = true;
         let mut go = false;
         let mut cancel = false;
         let n = self.dev_selected.len();
-        let field_w = 400.0;
-        egui::Window::new(RichText::new(format!("Download {n} session{}", if n == 1 { "" } else { "s" })).font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                ui.add_space(6.0);
-                egui::Grid::new("download_meta").num_columns(2).spacing([16.0, 12.0]).show(ui, |ui| {
-                    let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
-                    label(ui, "Driver");
+        let field_w = 460.0;
+        let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
+            use garage_manage_ui::look;
+            let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
+            look::header(ui, Icon::Download, SECONDARY, None, &title, "Who drove, in which kart, and where. These are remembered for next time.");
+            // Two steps, either one a click away: the details, then the setup.
+            if let Some(k) = look::steps(ui, &["Details", "Setup"], usize::from(dlg.setup_open), true) {
+                dlg.setup_open = k == 1;
+            }
+            look::body(ui, |ui| {
+                if dlg.setup_open {
+                    setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tires, 480.0, true);
+                    let changes = dlg.setup.changes_from(&dlg.setup_before);
+                    if changes.is_empty() {
+                        look::note(ui, "Same as last time.", DIM);
+                    } else {
+                        look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                    }
+                    return;
+                }
+                egui::Grid::new("download_meta").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {
+                    look::label(ui, "Driver");
                     suggest_field(ui, "dl_driver", &mut dlg.meta.driver, "Driver name", &s.drivers, field_w);
                     ui.end_row();
-                    label(ui, "Kart");
+                    look::label(ui, "Kart");
                     suggest_field(ui, "dl_kart", &mut dlg.meta.kart, "Kart or class", &s.karts, field_w);
                     ui.end_row();
-                    label(ui, "Championship");
+                    look::label(ui, "Championship");
                     suggest_field(ui, "dl_champ", &mut dlg.meta.championship, "e.g. 2026 Club Championship", &s.championships, field_w);
                     ui.end_row();
-                    label(ui, "Session type");
+                    look::label(ui, "Session type");
                     suggest_field(ui, "dl_type", &mut dlg.meta.session_type, "Practice 1, Heat 2, Final…", &s.session_types, field_w);
                     ui.end_row();
-                    label(ui, "Track");
-                    if multiple {
-                        ui.vertical(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut format!("Multiple tracks detected: {}", dlg.detected.join(", ")))
-                                    .font(regular(15.0))
-                                    .margin(Margin::symmetric(12, 9))
-                                    .desired_width(field_w)
-                                    .interactive(false),
-                            );
-                            ui.label(RichText::new("Each session keeps the track the MyChron recorded for it.").size(12.5).color(DIM));
-                        });
-                    } else {
-                        ui.vertical(|ui| {
+                    look::label(ui, "Track");
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        if multiple {
+                            ui.label(RichText::new(format!("Several: {}", dlg.detected.join(", "))).font(regular(16.5)).color(TEXT));
+                            look::note(ui, "Each session keeps the track the MyChron recorded for it.", DIM);
+                        } else {
                             suggest_field(ui, "dl_track", &mut dlg.meta.track, "Track", &s.tracks, field_w);
                             let from_logger = dlg.detected.first().cloned().unwrap_or_default();
                             let note = if !from_logger.is_empty() && dlg.meta.track == from_logger {
@@ -541,44 +543,48 @@ impl App {
                             } else {
                                 "The MyChron didn't recognize a track for these sessions.".into()
                             };
-                            ui.label(RichText::new(note).size(12.5).color(DIM));
-                        });
-                    }
-                    ui.end_row();
-                    label(ui, "Setup");
-                    ui.vertical(|ui| {
-                        let summary = dlg.setup.summary();
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(if summary.is_empty() { "None recorded yet".to_string() } else { summary }).color(TEXT));
-                            let toggle = if dlg.setup_open { "Done" } else { "Change" };
-                            if ui.add(egui::Label::new(RichText::new(toggle).color(theme::FAVORITE)).sense(Sense::click())).clicked() {
-                                dlg.setup_open = !dlg.setup_open;
-                            }
-                        });
-                        let changes = dlg.setup.changes_from(&dlg.setup_before);
-                        let note = if changes.is_empty() { "Same as last time.".to_string() } else { format!("Changed: {}", changes.join(", ")) };
-                        ui.label(RichText::new(note).size(12.5).color(if changes.is_empty() { DIM } else { theme::FAVORITE }));
+                            look::note(ui, &note, DIM);
+                        }
                     });
                     ui.end_row();
-                    if dlg.setup_open {
-                        ui.label("");
-                        ui.vertical(|ui| setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tires, field_w, true));
-                        ui.end_row();
-                    }
-                    label(ui, "Comment");
-                    ui.add(egui::TextEdit::multiline(&mut dlg.meta.comment).hint_text("Optional: conditions, setup, how it went").font(regular(15.0)).margin(Margin::symmetric(12, 9)).desired_rows(2).desired_width(field_w));
+                    look::label(ui, "Comment");
+                    look::text_area(ui, &mut dlg.meta.comment, "Optional: conditions, how it went", field_w, 2);
+                    ui.end_row();
+                    look::label(ui, "Setup");
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        let summary = dlg.setup.summary();
+                        ui.add(egui::Label::new(RichText::new(if summary.is_empty() { "None recorded yet".to_string() } else { summary }).font(regular(16.0)).color(TEXT)).wrap());
+                        let changes = dlg.setup.changes_from(&dlg.setup_before);
+                        if changes.is_empty() {
+                            look::note(ui, "Same as last time.", DIM);
+                        } else {
+                            look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                        }
+                    });
                     ui.end_row();
                 });
-                ui.add_space(16.0);
-                ui.horizontal(|ui| {
-                    if button(ui, Some(Icon::FolderOpen), "Download", true).clicked() {
+            });
+            look::footer_row(ui, |ui| {
+                // Back from the setup; Cancel from the details.
+                if look::big_button(ui, if dlg.setup_open { "Back" } else { "Cancel" }, None, look::Kind::Quiet, true) {
+                    if dlg.setup_open {
+                        dlg.setup_open = false;
+                    } else {
+                        cancel = true;
+                    }
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if look::big_button(ui, "Download", Some(Icon::Download), look::Kind::Primary, true) {
                         go = true;
                     }
-                    if button(ui, None, "Cancel", false).clicked() {
-                        cancel = true;
+                    if !dlg.setup_open && look::big_button(ui, "Change setup", Some(Icon::Settings), look::Kind::Quiet, true) {
+                        dlg.setup_open = true;
                     }
                 });
             });
+        });
+        let open = !closed;
         self.library = Some(lib);
         if go {
             let id = self.dev_logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();

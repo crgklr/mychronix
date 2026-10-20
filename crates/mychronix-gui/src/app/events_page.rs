@@ -426,76 +426,60 @@ impl App {
         }
         let existing = defs.events.iter().any(|d| d.id == def.id && def.id != 0);
         let title = if existing { "Edit event" } else if def.track.is_empty() { "Plan an event" } else { "Name this event" };
-        let (mut open, mut save, mut cancel, mut delete) = (true, false, false, false);
-        let field_w = 400.0;
-        egui::Window::new(RichText::new(title).font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                ui.add_space(6.0);
-                egui::Grid::new("event_fields").num_columns(2).spacing([16.0, 12.0]).show(ui, |ui| {
-                    let label = |ui: &mut Ui, t: &str| ui.label(RichText::new(t).font(medium(15.0)).color(SECONDARY));
-                    label(ui, "Name");
+        let (mut save, mut cancel, mut delete) = (false, false, false);
+        let field_w = 460.0;
+        let problem = if def.name.trim().is_empty() {
+            Some("Give the event a name.")
+        } else if def.track.trim().is_empty() {
+            Some("Choose a track.")
+        } else if events::parse_date(&def.start).is_none() || events::parse_date(&def.end).is_none() {
+            Some("Dates look like 10/17/2026.")
+        } else {
+            None
+        };
+        let closed = garage_manage_ui::look::dialog(ctx, "event_edit", 720.0, |ui| {
+            use garage_manage_ui::look;
+            look::header(ui, Icon::Calendar, SECONDARY, None, title, "Sessions downloaded from this track between these dates join this event automatically.");
+            look::body(ui, |ui| {
+                egui::Grid::new("event_fields").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {
+                    look::label(ui, "Name");
                     suggest_field(ui, "ev_name", &mut def.name, "e.g. New England Championship round 3", &[], field_w);
                     ui.end_row();
-                    label(ui, "Track");
+                    look::label(ui, "Track");
                     suggest_field(ui, "ev_track", &mut def.track, "Track name as your MyChron uses it", &s.tracks, field_w);
                     ui.end_row();
-                    label(ui, "Starts");
-                    suggest_field(ui, "ev_start", &mut def.start, "MM/DD/YYYY", &[], field_w);
+                    look::label(ui, "Starts");
+                    look::text(ui, &mut def.start, "MM/DD/YYYY", Some(200.0));
                     ui.end_row();
-                    label(ui, "Ends");
-                    suggest_field(ui, "ev_end", &mut def.end, "MM/DD/YYYY", &[], field_w);
+                    look::label(ui, "Ends");
+                    look::text(ui, &mut def.end, "MM/DD/YYYY", Some(200.0));
                     ui.end_row();
-                    label(ui, "Championship");
+                    look::label(ui, "Championship");
                     suggest_field(ui, "ev_champ", &mut def.championship, "Optional", &championships, field_w);
                     ui.end_row();
-                    label(ui, "Notes");
-                    ui.add(
-                        egui::TextEdit::multiline(&mut def.notes)
-                            .font(regular(15.0))
-                            .margin(Margin::symmetric(12, 9))
-                            .desired_width(field_w)
-                            .desired_rows(3)
-                            .hint_text("Entry, class, tires, anything to remember"),
-                    );
+                    look::label(ui, "Notes");
+                    look::text_area(ui, &mut def.notes, "Entry, class, tires, anything to remember", field_w, 3);
                     ui.end_row();
                 });
-                ui.add_space(10.0);
-                let problem = if def.name.trim().is_empty() {
-                    Some("Give the event a name.")
-                } else if def.track.trim().is_empty() {
-                    Some("Choose a track.")
-                } else if events::parse_date(&def.start).is_none() || events::parse_date(&def.end).is_none() {
-                    Some("Dates look like 10/17/2026.")
-                } else {
-                    None
-                };
-                ui.label(
-                    RichText::new(problem.unwrap_or("Sessions downloaded from this track between these dates join this event automatically."))
-                        .size(12.5)
-                        .color(if problem.is_some() { SECONDARY } else { DIM }),
-                );
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if existing && button(ui, None, "Delete event", false).clicked() {
-                        delete = true;
+                if let Some(p) = problem {
+                    look::note(ui, p, SECONDARY);
+                }
+            });
+            look::footer_row(ui, |ui| {
+                if existing && look::big_button(ui, "Delete event", Some(Icon::Trash), look::Kind::Quiet, true) {
+                    delete = true;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if look::big_button(ui, "Save", Some(Icon::Check), look::Kind::Primary, problem.is_none()) {
+                        save = true;
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_enabled_ui(problem.is_none(), |ui| {
-                            if button(ui, Some(Icon::Check), "Save", true).clicked() {
-                                save = true;
-                            }
-                        });
-                        if button(ui, None, "Cancel", false).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    if look::big_button(ui, "Cancel", None, look::Kind::Quiet, true) {
+                        cancel = true;
+                    }
                 });
             });
+        });
+        let open = !closed;
         if save {
             // Store dates in one form.
             for d in [&mut def.start, &mut def.end] {

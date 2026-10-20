@@ -347,6 +347,11 @@ impl App {
         if self.page != Page::Analysis {
             self.session_panel = false;
         }
+        // A link in it that opened a window (change track, edit setup, a
+        // sensor's report) closes it, so the window has the screen to itself.
+        if self.track_pick.is_some() || self.setup_edit.is_some() || self.sensors.report.is_some() {
+            self.session_panel = false;
+        }
     }
 
     /// The panel's first column: today's session header and details.
@@ -450,6 +455,7 @@ impl App {
             .corner_radius(CornerRadius::same(255))
             .min_size(vec2(92.0, 38.0));
         if ui.add(open).on_hover_text("Open a session file").clicked() {
+            self.session_panel = false;
             self.open_dialog();
         }
     }

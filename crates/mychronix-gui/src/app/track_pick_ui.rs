@@ -38,31 +38,30 @@ impl App {
             Some((logger, Some(date))) => lib.sessions.iter().filter(|s| &s.logger == logger && s.summary.date == Some(*date)).map(|s| s.path.clone()).collect(),
             _ => vec![pick.path.clone()],
         };
-        let (mut open, mut save) = (true, false);
-        egui::Window::new(RichText::new("Session track").font(semibold(18.0))).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).open(&mut open).show(
-            ctx,
-            |ui| {
-                ui.set_width(420.0);
-                ui.label(RichText::new("Which track this session was at. Laps, best times and track pages use it.").size(13.0).color(SECONDARY));
-                ui.add_space(10.0);
-                egui::ComboBox::from_id_salt("track_pick").width(380.0).selected_text(if pick.choice.is_empty() { "Choose a track" } else { &pick.choice }).show_ui(ui, |ui| {
-                    for n in &names {
-                        ui.selectable_value(&mut pick.choice, n.clone(), n);
-                    }
-                });
-                ui.add_space(8.0);
+        let (mut save, mut cancel) = (false, false);
+        let closed = garage_manage_ui::look::dialog(ctx, "track_pick", garage_manage_ui::look::WIDTH, |ui| {
+            use garage_manage_ui::look;
+            look::header(ui, Icon::MapPin, SECONDARY, None, "Session track", "Which track this session was at. Laps, best times and track pages use it.");
+            look::body(ui, |ui| {
+                look::label(ui, "Track");
+                look::dropdown(ui, "track_pick", &mut pick.choice, &names, "Choose a track", ui.available_width() - 16.0);
                 if same_day.len() > 1 {
                     let date = this.as_ref().and_then(|t| t.1).map(crate::events::us_short).unwrap_or_default();
-                    ui.checkbox(&mut pick.whole_day, format!("All {} sessions from this MyChron on {date}", same_day.len()));
-                }
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if button(ui, Some(Icon::Check), "Save", true).clicked() && !pick.choice.is_empty() {
-                        save = true;
+                    ui.add_space(8.0);
+                    look::label(ui, "Change");
+                    if look::option(ui, !pick.whole_day, None, "Just this session", "") {
+                        pick.whole_day = false;
                     }
-                });
-            },
-        );
+                    if look::option(ui, pick.whole_day, None, &format!("All {} sessions from this MyChron on {date}", same_day.len()), "They were all at the same track that day") {
+                        pick.whole_day = true;
+                    }
+                }
+            });
+            let (l, r) = look::footer(ui, "Cancel", ("Save", Some(Icon::Check), look::Kind::Primary, !pick.choice.is_empty()));
+            cancel = l;
+            save = r;
+        });
+        let open = !closed && !cancel;
         if save {
             let targets = if pick.whole_day { same_day } else { vec![pick.path.clone()] };
             let mut failed = None;
