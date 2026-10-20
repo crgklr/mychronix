@@ -192,50 +192,44 @@ impl App {
         let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);
         let problems = sensor_check::problems(&checked, ignored);
         let sessions = checked.len();
-        let (mut open, mut done) = (true, false);
+        let mut done = false;
         let mut ignore: Option<(String, String)> = None;
-        egui::Window::new(RichText::new("Sensor check").font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                ui.label(
-                    RichText::new(if sessions == 1 {
-                        "A sensor that has worked before on this MyChron didn't record properly in this session.".to_string()
-                    } else {
-                        "Sensors that have worked before on this MyChron didn't record properly in some of these sessions.".to_string()
-                    })
-                    .size(13.0)
-                    .color(SECONDARY),
-                );
-                ui.add_space(12.0);
-                for p in &problems {
-                    ui.horizontal(|ui| {
-                        ui.add(Icon::TriangleAlert.image(theme::FAVORITE, 16.0));
-                        ui.label(RichText::new(&p.channel).font(semibold(15.0)).color(TEXT));
-                    });
-                    ui.label(RichText::new(sensor_check::summary(p)).size(13.5).color(TEXT));
-                    ui.label(RichText::new(aim_xrk::checks::advice(&p.channel)).size(12.5).color(SECONDARY));
-                    let link = ui.add(egui::Label::new(RichText::new(format!("Don't warn about {} on this MyChron", p.channel)).size(12.5).color(DIM).underline()).sense(Sense::click()));
+        let closed = garage_manage_ui::look::dialog(ctx, "sensor_check", garage_manage_ui::look::WIDTH, |ui| {
+            use garage_manage_ui::look;
+            let (title, sub) = if sessions == 1 {
+                ("A sensor stopped recording", "A sensor that has worked before on this MyChron didn't record properly in this session.")
+            } else {
+                ("Sensors stopped recording", "Sensors that have worked before on this MyChron didn't record properly in some of these sessions.")
+            };
+            look::header(ui, Icon::TriangleAlert, theme::FAVORITE, None, title, sub);
+            look::body(ui, |ui| {
+                for (k, p) in problems.iter().enumerate() {
+                    if k > 0 {
+                        ui.add_space(10.0);
+                    }
+                    ui.label(RichText::new(&p.channel).font(semibold(18.0)).color(TEXT));
+                    ui.add(egui::Label::new(RichText::new(sensor_check::summary(p)).font(regular(15.5)).color(TEXT)).wrap());
+                    ui.add(egui::Label::new(RichText::new(aim_xrk::checks::advice(&p.channel)).font(regular(14.5)).color(SECONDARY)).wrap());
+                    let link = ui.add(egui::Label::new(RichText::new(format!("Don't warn about {} on this MyChron", p.channel)).font(regular(14.5)).color(theme::ACCENT)).sense(Sense::click()));
                     if link.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                     if link.clicked() {
                         ignore = Some((p.logger.clone(), p.channel.clone()));
                     }
-                    ui.add_space(12.0);
                 }
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("The sessions are saved either way; only those channels are affected.").size(12.0).color(DIM));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, Some(Icon::Check), "OK", true).clicked() {
-                            done = true;
-                        }
-                    });
+                ui.add_space(6.0);
+                look::note(ui, "The sessions are saved either way; only those channels are affected.", DIM);
+            });
+            look::footer_row(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if look::big_button(ui, "OK", Some(Icon::Check), look::Kind::Primary, true) {
+                        done = true;
+                    }
                 });
             });
+        });
+        let open = !closed;
         if let Some((logger, channel)) = ignore {
             log::info!("sensor check: not warning about {channel} on logger {logger}");
             let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);

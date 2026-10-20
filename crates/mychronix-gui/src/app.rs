@@ -797,27 +797,42 @@ impl App {
             return;
         }
         if self.update_notes {
-            let mut open = true;
-            egui::Window::new(RichText::new(format!("What's new in {}", r.version)).font(semibold(18.0)))
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    ui.set_width(560.0);
-                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+            let mut close = false;
+            let closed = garage_manage_ui::look::dialog(ui.ctx(), "whats_new", garage_manage_ui::look::WIDTH, |ui| {
+                use garage_manage_ui::look;
+                look::header(ui, Icon::Download, theme::ACCENT, None, &format!("What's new in {}", r.version), "A newer Mychronix is ready to download.");
+                egui::ScrollArea::vertical().max_height(420.0).id_salt("whats_new_body").show(ui, |ui| {
+                    look::body(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
                         for line in r.notes.lines() {
                             let t = line.trim_start_matches('#').trim();
-                            let heading = line.starts_with('#');
-                            ui.label(if heading { RichText::new(t).font(semibold(15.0)).color(TEXT) } else { RichText::new(line.replace("**", "")).size(13.5).color(SECONDARY) });
+                            if line.starts_with('#') {
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(t).font(semibold(17.0)).color(TEXT));
+                            } else if !line.trim().is_empty() {
+                                // "**Lead-in:** the rest", the lead-in in bold.
+                                let mut job = egui::text::LayoutJob::default();
+                                let mut add = |t: &str, f: egui::FontId, c: Color32| job.append(t, 0.0, egui::TextFormat { font_id: f, color: c, ..Default::default() });
+                                match line.trim().strip_prefix("**").and_then(|r| r.split_once("**")) {
+                                    Some((lead, rest)) => {
+                                        add(lead, semibold(15.0), TEXT);
+                                        add(&rest.replace("**", ""), regular(15.0), SECONDARY);
+                                    }
+                                    None => add(&line.replace("**", ""), regular(15.0), SECONDARY),
+                                }
+                                job.wrap.max_width = ui.available_width();
+                                ui.label(job);
+                            }
                         }
                     });
-                    ui.add_space(10.0);
-                    if button(ui, None, "Download", true).clicked() {
-                        crate::update::open_url(&r.url);
-                    }
                 });
-            self.update_notes = open;
+                let (l, d) = look::footer(ui, "Not now", ("Download", Some(Icon::Download), look::Kind::Primary, true));
+                if d {
+                    crate::update::open_url(&r.url);
+                }
+                close = l;
+            });
+            self.update_notes = !closed && !close;
         }
     }
 

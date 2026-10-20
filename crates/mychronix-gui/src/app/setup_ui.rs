@@ -111,40 +111,35 @@ impl App {
     pub(super) fn setup_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut edit) = self.setup_edit.take() else { return };
         let tires = self.tire_suggestions();
-        let (mut open, mut save, mut cancel, mut revert) = (true, false, false, false);
-        egui::Window::new(RichText::new("Setup").font(semibold(18.0)))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_width(560.0);
-                ui.label(
-                    RichText::new("Sessions after this one use this setup until you change it again.")
-                        .size(12.5)
-                        .color(SECONDARY),
-                );
-                ui.add_space(10.0);
-                setup_fields(ui, "setup_edit", &mut edit.setup, &tires, 400.0, true);
-                ui.add_space(10.0);
+        let (mut save, mut cancel, mut revert) = (false, false, false);
+        let closed = garage_manage_ui::look::dialog(ctx, "setup_edit", 760.0, |ui| {
+            use garage_manage_ui::look;
+            look::header(ui, Icon::Settings, SECONDARY, None, "Setup", "Sessions after this one use this setup until you change it again.");
+            look::body(ui, |ui| {
+                setup_fields(ui, "setup_edit", &mut edit.setup, &tires, 480.0, true);
+                ui.add_space(4.0);
                 let changes = edit.setup.changes_from(&edit.before);
-                let note = if changes.is_empty() { "Same as the session before.".to_string() } else { format!("Changes: {}", changes.join(", ")) };
-                ui.label(RichText::new(note).size(12.5).color(if changes.is_empty() { DIM } else { theme::FAVORITE }));
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if edit.has_own && button(ui, None, "Use the previous setup", false).on_hover_text("Remove this session's own sheet").clicked() {
-                        revert = true;
+                if changes.is_empty() {
+                    look::note(ui, "Same as the session before.", DIM);
+                } else {
+                    look::note(ui, &format!("Changes: {}", changes.join(", ")), theme::FAVORITE);
+                }
+            });
+            look::footer_row(ui, |ui| {
+                if edit.has_own && look::big_button(ui, "Use the previous setup", None, look::Kind::Quiet, true) {
+                    revert = true;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if look::big_button(ui, "Save", Some(Icon::Check), look::Kind::Primary, true) {
+                        save = true;
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, Some(Icon::Check), "Save", true).clicked() {
-                            save = true;
-                        }
-                        if button(ui, None, "Cancel", false).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    if look::big_button(ui, "Cancel", None, look::Kind::Quiet, true) {
+                        cancel = true;
+                    }
                 });
             });
+        });
+        let open = !closed;
         let result = if revert || (save && edit.setup.same_setup(&edit.before) && edit.setup.notes.trim().is_empty()) {
             // Nothing of its own to keep: inherit again.
             Some(Setup::remove(&edit.path).map(|_| None))
