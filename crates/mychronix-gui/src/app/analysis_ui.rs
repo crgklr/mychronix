@@ -14,13 +14,13 @@ const ROW_STEP: f32 = 44.0;
 const TOP_PAGES: [(Page, Icon, &str); 3] = [(Page::Garage, Icon::House, "Garage"), (Page::Sessions, Icon::List, "Sessions"), (Page::Events, Icon::Calendar, "Events")];
 
 /// The analysis views, each its own place in the rail.
-const VIEWS: [(AnalysisView, Icon, &str); 6] = [
-    (AnalysisView::Report, Icon::Clock, "Laps"),
-    (AnalysisView::Splits, Icon::Flag, "Splits"),
-    (AnalysisView::Corners, Icon::Timer, "Corners"),
-    (AnalysisView::Map, Icon::Track, "Map"),
-    (AnalysisView::Session, Icon::ChartLine, "Graphs"),
-    (AnalysisView::Compare, Icon::Activity, "Compare"),
+const VIEWS: [(AnalysisView, Icon, &str, &str); 6] = [
+    (AnalysisView::Report, Icon::Clock, "Laps", "Each lap's numbers side by side"),
+    (AnalysisView::Splits, Icon::Flag, "Splits", "Each lap's time through each part of the track"),
+    (AnalysisView::Corners, Icon::Timer, "Corners", "Braking in each corner, against the best you drove it"),
+    (AnalysisView::Map, Icon::Track, "Map", "Your line through each corner, up close"),
+    (AnalysisView::Session, Icon::ChartLine, "Graphs", "Channels through a lap, with the track map"),
+    (AnalysisView::Compare, Icon::Activity, "Compare", "Laps from any sessions overlaid by distance"),
 ];
 
 const BOTTOM_PAGES: [(Page, Icon, &str); 2] = [(Page::Tracks, Icon::MapPin, "Tracks"), (Page::Device, Icon::Mychron, "Device")];
@@ -53,9 +53,10 @@ fn short_day(d: aim_xrk::summary::Date) -> String {
     long_date(d).get(..3).map(|day| format!("{day} {}/{}", d.month, d.day)).unwrap_or_default()
 }
 
-/// One row of the rail: icon, and the label as it slides out. Returns its response.
+/// One row of the rail: icon, and the label as it slides out; on hover, what
+/// it is (`hint`), or why it can't be used (`off`). Returns its response.
 #[allow(clippy::too_many_arguments)]
-fn rail_row(ui: &Ui, rail: Rect, width: f32, y: f32, icon: Icon, label: &str, selected: bool, off: Option<&str>, t: f32) -> egui::Response {
+fn rail_row(ui: &Ui, rail: Rect, width: f32, y: f32, icon: Icon, label: &str, selected: bool, hint: Option<&str>, off: Option<&str>, t: f32) -> egui::Response {
     let row = Rect::from_min_size(pos2(rail.left() + 10.0, y), vec2(width - 20.0, 40.0));
     let resp = ui.interact(row, egui::Id::new(("rail_item", label)), if off.is_some() { Sense::hover() } else { Sense::click() });
     let painter = ui.painter_at(rail);
@@ -71,8 +72,8 @@ fn rail_row(ui: &Ui, rail: Rect, width: f32, y: f32, icon: Icon, label: &str, se
     if resp.hovered() && off.is_none() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    match off {
-        Some(why) => resp.on_hover_text(why),
+    match off.or(hint) {
+        Some(text) => resp.on_hover_text(text),
         None => resp,
     }
 }
@@ -124,7 +125,7 @@ impl App {
                     let separator = |y: f32| painter.hline(rect.left() + 18.0..=rect.right() - 18.0, y, Stroke::new(1.0, theme::OUTLINE));
                     let mut y = icon.bottom() + 20.0;
                     for (page, icon, label) in TOP_PAGES {
-                        if rail_row(ui, rect, width, y, icon, label, self.page == page, None, t).clicked() {
+                        if rail_row(ui, rect, width, y, icon, label, self.page == page, None, None, t).clicked() {
                             self.page = page;
                         }
                         y += ROW_STEP;
@@ -154,11 +155,11 @@ impl App {
                         }
                         y += 52.0;
                     }
-                    for (view, icon, label) in VIEWS {
+                    for (view, icon, label, hint) in VIEWS {
                         let selected = self.page == Page::Analysis && self.analysis_view.rail_item() == view;
                         let off = session.and_then(|s| view_unavailable(s, view));
                         let label = if view == AnalysisView::Compare && compare_n > 0 { format!("{label} ({compare_n})") } else { label.to_string() };
-                        if rail_row(ui, rect, width, y, icon, &label, selected, off, t).clicked() {
+                        if rail_row(ui, rect, width, y, icon, &label, selected, Some(hint), off, t).clicked() {
                             self.page = Page::Analysis;
                             if self.analysis_view.rail_item() != view {
                                 self.analysis_view = view;
@@ -169,13 +170,13 @@ impl App {
                     separator(y + 4.0);
                     y += 14.0;
                     for (page, icon, label) in BOTTOM_PAGES {
-                        if rail_row(ui, rect, width, y, icon, label, self.page == page, None, t).clicked() {
+                        if rail_row(ui, rect, width, y, icon, label, self.page == page, None, None, t).clicked() {
                             self.page = page;
                         }
                         y += ROW_STEP;
                     }
                     // Settings at the bottom of the rail.
-                    if rail_row(ui, rect, width, rect.bottom() - 56.0, Icon::Settings, "Settings", self.page == Page::Settings, None, t).clicked() {
+                    if rail_row(ui, rect, width, rect.bottom() - 56.0, Icon::Settings, "Settings", self.page == Page::Settings, None, None, t).clicked() {
                         self.page = Page::Settings;
                     }
                 });
@@ -226,7 +227,13 @@ impl App {
             add(track.as_deref().unwrap_or(""), semibold(14.0), TEXT);
             add(&rest, regular(14.0), SECONDARY);
             if let Some(t) = &time {
-                add(&format!("   {t}"), semibold(14.0), TEXT);
+                // With all laps open, the time is the best lap's: say so.
+                if self.lap.is_none() {
+                    add("   Best ", regular(14.0), SECONDARY);
+                    add(t, semibold(14.0), TEXT);
+                } else {
+                    add(&format!("   {t}"), semibold(14.0), TEXT);
+                }
             }
             let galley = ui.painter().layout_job(job);
             let size = galley.size() + vec2(32.0 + 22.0, 16.0);
