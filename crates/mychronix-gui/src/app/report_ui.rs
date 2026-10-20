@@ -18,7 +18,10 @@ pub(super) struct ReportState {
 }
 
 impl App {
-    pub(super) fn report_view(&mut self, ui: &mut Ui, session: &Session) {
+    pub(super) fn report_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
+        let model = self.corner_model(session);
+        self.laps_figures(ui, session, model.as_deref());
+        ui.add_space(14.0);
         let st = &mut self.report;
         // New session: out/in and slow laps start excluded, as RaceStudio leaves them out.
         if st.for_path != self.path {
@@ -40,12 +43,6 @@ impl App {
         }
         let mut changed = false;
 
-        ui.label(
-            RichText::new("Each lap boiled down to a few numbers, so you can see what the fast laps did differently: corner speed (speed min), top of the straight (RPM max), engine temperature, consistency.")
-                .size(13.0)
-                .color(SECONDARY),
-        );
-        ui.add_space(10.0);
         // Toolbar: presets, add a column.
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -125,10 +122,52 @@ impl App {
             super::calculated_note(ui);
             ui.add_space(6.0);
         }
-        let height = ui.available_height();
-        // The graph keeps a readable height; the table gets the rest.
-        let graph_h = 230.0;
-        let table_h = (height - graph_h - 70.0).max(220.0);
+        // The plotted column against lap number.
+        let k = st.plotted.min(n_cols - 1);
+        let title = if k == 0 { "Lap time".to_string() } else { columns[k - 1].title() };
+        let pts: Vec<[f64; 2]> = included.iter().filter_map(|&i| cells[i][k].map(|v| [laps[i].number as f64, v])).collect();
+        let hot: Vec<[f64; 2]> = st.hovered_lap.and_then(|n| laps.iter().position(|l| l.number == n)).and_then(|i| cells[i][k].map(|v| vec![[laps[i].number as f64, v]])).unwrap_or_default();
+        graph_card(ui, 200.0, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{title} by lap")).font(medium(14.5)).color(TEXT));
+                ui.label(RichText::new(&units[k]).size(13.0).color(DIM));
+            });
+            Plot::new(("report_plot", k))
+                .height(ui.available_height())
+                // Steps of 1, 2, 4… rather than only 1, 10…, so a short chart still gets labels.
+                .y_grid_spacer(egui_plot::log_grid_spacer(2))
+                .show_background(false)
+                .grid_color(GRID)
+                .y_axis_min_width(46.0)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .allow_scroll(false)
+                .show_x(false)
+                .show_y(false)
+                .x_axis_formatter(|m, _| if (m.value - m.value.round()).abs() < 1e-6 { format!("Lap {}", m.value.round()) } else { String::new() })
+                .show(ui, |plot| {
+                    plot.line(Line::new(title.clone(), PlotPoints::from(pts.clone())).color(SERIES[0]).width(2.0));
+                    plot.points(egui_plot::Points::new("laps", PlotPoints::from(pts)).color(SERIES[0]).radius(4.0));
+                    if !hot.is_empty() {
+                        plot.points(egui_plot::Points::new("hovered", PlotPoints::from(hot)).color(TEXT).radius(7.0));
+                    }
+                });
+        });
+
+        ui.add_space(12.0);
+        // The table gets the rest of the height.
+        let table_h = (ui.available_height() - 70.0).max(220.0);
+        // Where each lap lost the most against the best of each corner (laps that count).
+        let lost: Vec<Option<(usize, usize, f64)>> = (0..laps.len())
+            .map(|i| {
+                let m = model.as_ref()?;
+                let t = m.trace_of(i).filter(|&t| m.counts[t])?;
+                let k = m.worst(t);
+                Some((t, k, m.loss(t, k)))
+            })
+            .collect();
+        let lost_col = usize::from(lost.iter().any(Option::is_some));
+        let mut to_corner = None;
         card(ui, |ui| {
             // Headers stay put while the laps scroll; wide tables scroll sideways as a whole.
             egui::ScrollArea::horizontal().id_salt("report_table_x").auto_shrink([false, true]).show(ui, |ui| {
@@ -139,6 +178,7 @@ impl App {
                     .cell_layout(Layout::left_to_right(Align::Center))
                     .column(egui_extras::Column::auto().at_least(56.0))
                     .columns(egui_extras::Column::auto().at_least(64.0), n_cols)
+                    .columns(egui_extras::Column::auto().at_least(120.0), lost_col)
                     // Fills the rest of the card, so the scrollbar sits at its edge.
                     .column(egui_extras::Column::remainder())
                     .min_scrolled_height(0.0)
@@ -162,6 +202,12 @@ impl App {
                                 ui.add_space(14.0);
                             });
                         }
+                        if lost_col > 0 {
+                            header.col(|ui| {
+                                ui.label(RichText::new("Lost most at").font(medium(13.0)).color(SECONDARY))
+                                    .on_hover_text("The corner where each lap lost the most against the best you drove it this session. Click to see it in Corners.");
+                            });
+                        }
                         header.col(|_| {});
                     })
                     .body(|mut body| {
@@ -178,6 +224,9 @@ impl App {
                                             .unwrap_or_else(|| "—".into());
                                         ui.label(RichText::new(text).size(12.5).color(SECONDARY));
                                     });
+                                }
+                                if lost_col > 0 {
+                                    row.col(|_| {});
                                 }
                                 row.col(|_| {});
                             });
@@ -215,6 +264,20 @@ impl App {
                                         }
                                     });
                                 }
+                                if lost_col > 0 {
+                                    row.col(|ui| {
+                                        let Some((t, k, loss)) = lost[i] else { return };
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        let r = ui.add(egui::Label::new(RichText::new(format!("Corner {}", k + 1)).size(13.5).color(if on { TEXT } else { DIM }).underline()).sense(Sense::click()));
+                                        if r.hovered() {
+                                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                        if r.on_hover_text("See it in Corners").clicked() {
+                                            to_corner = Some((i, t, k));
+                                        }
+                                        ui.label(RichText::new(format!("+{loss:.2}")).size(13.0).color(DIM));
+                                    });
+                                }
                                 row.col(|_| {});
                             });
                         }
@@ -237,37 +300,6 @@ impl App {
             }
         }
 
-        // The plotted column against lap number.
-        let k = st.plotted.min(n_cols - 1);
-        let title = if k == 0 { "Lap time".to_string() } else { columns[k - 1].title() };
-        ui.add_space(12.0);
-        let pts: Vec<[f64; 2]> = included.iter().filter_map(|&i| cells[i][k].map(|v| [laps[i].number as f64, v])).collect();
-        let hot: Vec<[f64; 2]> = st.hovered_lap.and_then(|n| laps.iter().position(|l| l.number == n)).and_then(|i| cells[i][k].map(|v| vec![[laps[i].number as f64, v]])).unwrap_or_default();
-        graph_card(ui, graph_h, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{title} by lap")).font(medium(14.5)).color(TEXT));
-                ui.label(RichText::new(&units[k]).size(13.0).color(DIM));
-            });
-            Plot::new(("report_plot", k))
-                .height(ui.available_height())
-                .show_background(false)
-                .grid_color(GRID)
-                .y_axis_min_width(46.0)
-                .allow_zoom(false)
-                .allow_drag(false)
-                .allow_scroll(false)
-                .show_x(false)
-                .show_y(false)
-                .x_axis_formatter(|m, _| if (m.value - m.value.round()).abs() < 1e-6 { format!("Lap {}", m.value.round()) } else { String::new() })
-                .show(ui, |plot| {
-                    plot.line(Line::new(title.clone(), PlotPoints::from(pts.clone())).color(SERIES[0]).width(2.0));
-                    plot.points(egui_plot::Points::new("laps", PlotPoints::from(pts)).color(SERIES[0]).radius(4.0));
-                    if !hot.is_empty() {
-                        plot.points(egui_plot::Points::new("hovered", PlotPoints::from(hot)).color(TEXT).radius(7.0));
-                    }
-                });
-        });
-
         if let Some(i) = remove {
             let col = columns[i].clone();
             config.columns.retain(|c| *c != col);
@@ -278,6 +310,85 @@ impl App {
             if let Err(e) = config.save() {
                 self.error = Some(format!("Couldn't save the report columns: {e}"));
             }
+        }
+        if let Some((i, t, k)) = to_corner {
+            self.lap = Some(i);
+            self.cursor_s = None;
+            self.corners.selected = Some((t, k));
+            self.analysis_view = AnalysisView::Corners;
+        }
+    }
+}
+
+impl App {
+    /// The session in a few numbers across the top of Laps: the best lap, the
+    /// best of every corner, consistency and pace, and an insight to look into.
+    fn laps_figures(&mut self, ui: &mut Ui, session: &Session, model: Option<&crate::corner_model::CornerModel>) {
+        use aim_xrk::notes::Note;
+        self.open_session_notes(session);
+        let notes = self.sensors.notes.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+        let best = session.best_lap(MIN_LAP_MS).copied();
+        let mut go = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 40.0;
+            let figure = |ui: &mut Ui, label: &str, value: String, color: Color32, note: String| {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(RichText::new(label).size(12.5).color(DIM));
+                    ui.label(RichText::new(value).font(semibold(24.0)).color(color));
+                    ui.label(RichText::new(note).size(12.5).color(SECONDARY));
+                })
+                .response
+            };
+            if let Some(b) = best {
+                figure(ui, "Best lap", format_lap_time(b.duration_ms()), TEXT, format!("lap {}", b.number));
+            }
+            if let (Some(m), Some(b)) = (model, best) {
+                let ideal = m.ideal_s();
+                figure(ui, "Best of every corner", format_lap_time((ideal * 1000.0).round() as i64), TEXT, format!("{:.2} s on the table", (b.duration_ms() as f64 / 1000.0 - ideal).max(0.0)))
+                    .on_hover_text("Your best time through every corner this session, added together");
+            }
+            for n in &notes {
+                match n {
+                    Note::Consistency { sd_s, laps } => {
+                        figure(ui, "Consistency", format!("±{sd_s:.2} s"), TEXT, format!("{laps} racing laps"))
+                            .on_hover_text("How much the racing laps varied (standard deviation; out/in laps and laps over 115% of the median left out). Smaller is more consistent.");
+                    }
+                    Note::LapTrend { per_lap_s, .. } => {
+                        let slowed = *per_lap_s > 0.0;
+                        figure(ui, "Pace", format!("{per_lap_s:+.2} s/lap"), if slowed { theme::FAVORITE } else { TEXT }, if slowed { "laps slowed".into() } else { "laps got faster".into() })
+                            .on_hover_text("How lap times moved over the racing laps, on average per lap");
+                    }
+                    _ => {}
+                }
+            }
+            // The corner that cost the most over the session, behind a lightbulb.
+            if let Some(m) = model {
+                let counting: Vec<usize> = (0..m.traces.len()).filter(|&t| m.counts[t]).collect();
+                let avg = |k: usize| counting.iter().map(|&t| m.loss(t, k)).sum::<f64>() / counting.len().max(1) as f64;
+                if let Some(k) = (0..m.segments.len()).max_by(|&a, &b| avg(a).total_cmp(&avg(b))).filter(|&k| avg(k) >= 0.02) {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::hover());
+                    if resp.hovered() {
+                        ui.painter().circle_filled(rect.center(), 18.0, SURFACE_HOVER);
+                    }
+                    Icon::Lightbulb.image(theme::FAVORITE, 20.0).paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(20.0)));
+                    resp.on_hover_ui(|ui| {
+                        ui.set_max_width(320.0);
+                        ui.label(RichText::new("INSIGHT").font(semibold(11.0)).color(DIM).extra_letter_spacing(0.8));
+                        ui.add_space(2.0);
+                        ui.label(RichText::new(format!("Corner {} cost the most all session: {:.2} s a lap on average against the best you drove it.", k + 1, avg(k))).size(13.5).color(TEXT));
+                        ui.add_space(4.0);
+                        if ui.add(egui::Label::new(RichText::new("See it in Corners").size(13.5).color(theme::ACCENT)).sense(Sense::click())).clicked() {
+                            go = Some(k);
+                        }
+                    });
+                }
+            }
+        });
+        if let (Some(k), Some(m)) = (go, model) {
+            let t = self.lap.and_then(|i| m.trace_of(i)).unwrap_or(m.best);
+            self.corners.selected = Some((t, k));
+            self.analysis_view = AnalysisView::Corners;
         }
     }
 }

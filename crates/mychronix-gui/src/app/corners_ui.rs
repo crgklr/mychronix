@@ -30,9 +30,9 @@ pub(super) struct CornersState {
     hovered: Option<usize>,
     /// The corner looked at, and the trace it was picked on: a new lap opens
     /// on the corner where that lap lost the most.
-    selected: Option<(usize, usize)>,
-    /// Built once per (session, best lap).
-    model: Option<(usize, i64, std::sync::Arc<CornerModel>)>,
+    pub selected: Option<(usize, usize)>,
+    /// Built once per (session, best lap); None inside when it can't be (no GPS).
+    model: Option<(usize, i64, Option<std::sync::Arc<CornerModel>>)>,
     bumps: Option<(usize, i64, Vec<crate::bumps::Bump>)>,
     /// Measured last frame, so both cards end at the same height: what each
     /// card adds around its content (the map card's height besides the map,
@@ -42,26 +42,33 @@ pub(super) struct CornersState {
 }
 
 impl App {
-    pub(super) fn corners_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        self.lap_strip(ui, session, false);
-        ui.add_space(12.0);
-        let Some(best) = session.best_lap(MIN_LAP_MS).copied() else {
-            card(ui, |ui| {
-                ui.label(RichText::new("Corners need a complete lap with GPS.").color(SECONDARY));
-            });
-            return;
-        };
+    /// The session's corners (see `corner_model`), built once per session and
+    /// best lap, for Corners, Laps and Map. None without GPS or a best lap.
+    pub(super) fn corner_model(&mut self, session: &std::sync::Arc<Session>) -> Option<std::sync::Arc<CornerModel>> {
+        let best = session.best_lap(MIN_LAP_MS).copied()?;
         let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
         if self.corners.model.as_ref().is_none_or(|m| (m.0, m.1) != key) {
             let counts: Vec<bool> = slow_laps(session).into_iter().map(|slow| !slow).collect();
             let started = std::time::Instant::now();
             let model = CornerModel::build(session, &best, &counts);
             log::debug!("corners: model built in {:?}", started.elapsed());
-            self.corners.model = model.map(|m| (key.0, key.1, std::sync::Arc::new(m)));
+            self.corners.model = Some((key.0, key.1, model.map(std::sync::Arc::new)));
             self.corners.bumps = Some((key.0, key.1, crate::bumps::recurring(session, &best)));
             self.corners.selected = None;
         }
-        let Some(model) = self.corners.model.as_ref().map(|m| m.2.clone()) else {
+        self.corners.model.as_ref().and_then(|m| m.2.clone())
+    }
+
+    pub(super) fn corners_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
+        self.lap_strip(ui, session, false);
+        ui.add_space(12.0);
+        if session.best_lap(MIN_LAP_MS).is_none() {
+            card(ui, |ui| {
+                ui.label(RichText::new("Corners need a complete lap with GPS.").color(SECONDARY));
+            });
+            return;
+        }
+        let Some(model) = self.corner_model(session) else {
             card(ui, |ui| {
                 ui.label(RichText::new("Corners need GPS for the lap, and a corner to brake for.").color(SECONDARY));
             });
