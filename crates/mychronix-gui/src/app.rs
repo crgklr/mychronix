@@ -2061,9 +2061,7 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
     }
     response
 }
-/// Speed color: viridis, dark purple when slow to yellow when fast. Its
-/// lightness rises steadily, so slow and fast stay apart for colorblind
-/// viewers too.
+
 /// Low to high on the track: blue, through teal and yellow, to red, so a
 /// channel's highs and lows stand apart on the line.
 fn heat_color(t: f32) -> Color32 {
@@ -2079,6 +2077,9 @@ fn heat_color(t: f32) -> Color32 {
     mix(STOPS[i], STOPS[i + 1], x - i as f32)
 }
 
+/// Speed color: viridis, dark purple when slow to yellow when fast. Its
+/// lightness rises steadily, so slow and fast stay apart for colorblind
+/// viewers too.
 fn speed_color(t: f32) -> Color32 {
     const STOPS: [Color32; 5] = [
         Color32::from_rgb(0x44, 0x01, 0x54),

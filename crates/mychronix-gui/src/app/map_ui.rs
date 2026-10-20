@@ -389,8 +389,9 @@ impl App {
             ui.painter().text(switch.left_bottom() + vec2(-10.0, -6.0), egui::Align2::RIGHT_BOTTOM, "Imagery © Esri, Maxar, Earthstar Geographics", regular(10.5), Color32::from_white_alpha(150));
         }
 
-        // The arrow keys step through the corners.
-        let (left, right) = ui.input(|i| (i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight)));
+        // The arrow keys step through the corners (unless they're moving a text cursor).
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        let (left, right) = ui.input(|i| (i.key_pressed(egui::Key::ArrowLeft) && !typing, i.key_pressed(egui::Key::ArrowRight) && !typing));
         if right {
             go_corner = Some(Some(if whole { 0 } else { (corner + 1) % n }));
         } else if left {
@@ -464,9 +465,10 @@ fn line_colors(model: &CornerModel, trace: usize, reference: usize, by: ColorBy,
         }
         ColorBy::Rpm => {
             let Some(ch) = rpm else { return vec![theme::GOOD; n] };
-            let v: Vec<f64> = tr.t.iter().map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64).unwrap_or(0.0)).collect();
-            let (lo, hi) = super::robust_range(v.iter().copied());
-            v.iter().map(|x| heat(((x - lo) / (hi - lo).max(1e-6)) as f32)).collect()
+            // Where RPM wasn't recorded, gray rather than the color of a low reading.
+            let v: Vec<Option<f64>> = tr.t.iter().map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64)).collect();
+            let (lo, hi) = super::robust_range(v.iter().flatten().copied());
+            v.iter().map(|x| x.map_or(LIFT, |x| heat(((x - lo) / (hi - lo).max(1e-6)) as f32))).collect()
         }
         ColorBy::Gain => {
             let r = &model.traces[reference];

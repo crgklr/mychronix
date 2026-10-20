@@ -27,9 +27,9 @@ pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xc7, 0x59);
 /// Deleting things: buttons and warnings.
 pub const DANGER: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
 pub const FAVORITE: Color32 = Color32::from_rgb(0xf5, 0xb7, 0x2e);
-/// Text on a `TEXT`-filled control (selected chip, primary button).
 /// The logo's cyan: marks what's open (the session indicator in the rail).
 pub const ACCENT: Color32 = Color32::from_rgb(0x19, 0xd3, 0xf2);
+/// Text on a `TEXT`-filled control (selected chip, primary button).
 pub const ON_TEXT: Color32 = Color32::from_rgb(0x0f, 0x11, 0x14);
 
 /// Channel colors, assigned in this fixed order and kept with the channel.
