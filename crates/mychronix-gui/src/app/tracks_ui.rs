@@ -483,17 +483,7 @@ impl App {
             start_finish: t.start_finish,
         };
 
-        let options = || walkers::HttpOptions {
-            cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
-            user_agent: Some(walkers::HeaderValue::from_static("Mychronix/0.1 (AiM MyChron data analysis; Linux desktop)")),
-            ..Default::default()
-        };
-        if self.map_tiles.is_none() {
-            self.map_tiles = Some(walkers::HttpTiles::with_options(walkers::sources::OpenStreetMap, options(), ui.ctx().clone()));
-        }
-        if self.map_satellite && self.sat_tiles.is_none() {
-            self.sat_tiles = Some(walkers::HttpTiles::with_options(EsriImagery, options(), ui.ctx().clone()));
-        }
+        tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), self.map_satellite);
         let center = t.start_finish.map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
         // Zoom to fit the drawn track once per selection.
         if std::mem::take(&mut self.fit_map) {
@@ -837,6 +827,20 @@ fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
                 .color(SECONDARY),
         );
     });
+}
+
+/// The map's tiles, OpenStreetMap or satellite, made on first use (shared by Tracks and Map).
+pub(super) fn tiles<'a>(street: &'a mut Option<walkers::HttpTiles>, imagery: &'a mut Option<walkers::HttpTiles>, ctx: &egui::Context, satellite: bool) -> &'a mut walkers::HttpTiles {
+    let options = || walkers::HttpOptions {
+        cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
+        user_agent: Some(walkers::HeaderValue::from_static("Mychronix/0.1 (AiM MyChron data analysis; Linux desktop)")),
+        ..Default::default()
+    };
+    if satellite {
+        imagery.get_or_insert_with(|| walkers::HttpTiles::with_options(EsriImagery, options(), ctx.clone()))
+    } else {
+        street.get_or_insert_with(|| walkers::HttpTiles::with_options(walkers::sources::OpenStreetMap, options(), ctx.clone()))
+    }
 }
 
 /// Esri World Imagery: satellite and aerial photos. Free for personal,

@@ -11,6 +11,7 @@ use egui_plot::{Line, Plot, PlotPoints, VLine};
 mod analysis_ui;
 mod charts_ui;
 mod corners_ui;
+mod map_ui;
 mod sensor_ui;
 mod datakey_ui;
 mod device_ui;
@@ -83,6 +84,8 @@ enum AnalysisView {
     Report,
     Splits,
     Corners,
+    /// The track up close: the line through each corner (new with the sidebar views).
+    Map,
     Histogram,
     Scatter,
     Compare,
@@ -161,7 +164,11 @@ pub struct App {
     driver_pick: compare_drivers_ui::DriverPick,
     /// Where the icon rail is (for opening it on hover), the session details and channel picker.
     rail_rect: Option<Rect>,
-    session_details: bool,
+    /// The session panel (opened from the pill or the rail), and where the pill is.
+    session_panel: bool,
+    pill_rect: Option<Rect>,
+    /// The Map view: corner or whole track, line colors, imagery, its own view of the map.
+    map_view: map_ui::MapState,
     channel_picker_open: bool,
     /// Events page: saved events, selection, championship filter, dialog, peak EGT per session.
     events: Option<crate::events::Events>,
@@ -677,7 +684,7 @@ impl eframe::App for App {
                 (Page::Settings, _, _) => self.settings_page(ui),
             });
 
-        self.rail(&ui.ctx().clone(), rail_space);
+        self.rail(&ui.ctx().clone(), rail_space, session.as_deref());
         self.window_controls(&ui.ctx().clone());
         // MYCHRONIX_SENSOR_CHECK=<logger id> checks that logger's downloaded sessions
         // as if just downloaded (development only).
@@ -1403,11 +1410,40 @@ impl App {
 
 impl App {
     fn analysis(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
-        self.session_bar(ui, session);
-        ui.add_space(12.0);
-        self.view_tabs(ui, session);
+        // A view that can't work for this session (no GPS) falls back to Graphs.
+        if analysis_ui::view_unavailable(session, self.analysis_view.rail_item()).is_some() {
+            self.analysis_view = AnalysisView::Session;
+        }
+        let pill = self.session_pill(ui, session);
+        self.pill_rect = Some(pill);
+        if let Some(i) = self.path.as_ref().and_then(|p| self.library.as_ref()?.sessions.iter().position(|s| &s.path == p)) {
+            self.want_weather(&[i], &ui.ctx().clone());
+        }
         ui.add_space(14.0);
+        let title = match self.analysis_view {
+            AnalysisView::Report => "Laps",
+            AnalysisView::Splits => "Splits",
+            AnalysisView::Corners => "Corners",
+            AnalysisView::Map => "Map",
+            AnalysisView::Compare => "Compare",
+            AnalysisView::Session | AnalysisView::Histogram | AnalysisView::Scatter => "Graphs",
+        };
+        // The map takes the whole view; everything else gets a title.
+        if self.analysis_view != AnalysisView::Map {
+            self.view_title(ui, title);
+            ui.add_space(12.0);
+        }
+        self.analysis_view_body(ui, session, start_ms, end_ms);
+        self.session_panel(&ui.ctx().clone(), session);
+        self.setup_dialog(ui.ctx());
+    }
+
+    fn analysis_view_body(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
         match self.analysis_view {
+            AnalysisView::Map => {
+                self.map_view(ui, session);
+                return;
+            }
             AnalysisView::Compare => {
                 self.compare_view(ui, session);
                 return;
@@ -1705,8 +1741,6 @@ impl App {
         // RPM by default, or speed when the session has no RPM recorded.
         let default = ["RPM", "GPS Speed"].iter().find_map(|n| session.channels.iter().position(|c| c.name == *n && !is_dead(c)));
         let color_ch = self.map_channel.filter(|&i| session.channels.get(i).is_some_and(|c| !is_dead(c))).or(default).or_else(|| self.selected.keys().next().copied());
-        let slot = color_ch.and_then(|i| self.selected.get(&i).copied()).unwrap_or(0);
-        let hue = SERIES[slot];
         let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
         // Time compare coloring: how fast the gap to the best lap grows (losing)
         // or shrinks (gaining), per meter, at each point.
@@ -1800,12 +1834,7 @@ impl App {
                     .map(|i| channel.and_then(|c| sample_at(c, gps.times_ms[i])))
                     .collect();
                 let (vmin, vmax) = robust_range(values.iter().flatten().copied());
-                let ramp = |v: f64| {
-                    let t = ((v - vmin) / (vmax - vmin).max(f64::EPSILON)).clamp(0.0, 1.0) as f32;
-                    let low = mix(hue, SURFACE, 0.62);
-                    let high = mix(hue, Color32::WHITE, 0.6);
-                    mix(low, high, t)
-                };
+                let ramp = |v: f64| heat_color(((v - vmin) / (vmax - vmin).max(f64::EPSILON)) as f32);
 
                 let painter = ui.painter_at(rect);
                 for k in 0..pts.len() - 1 {
@@ -2059,6 +2088,21 @@ fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggesti
 /// Speed color: viridis, dark purple when slow to yellow when fast. Its
 /// lightness rises steadily, so slow and fast stay apart for colorblind
 /// viewers too.
+/// Low to high on the track: blue, through teal and yellow, to red, so a
+/// channel's highs and lows stand apart on the line.
+fn heat_color(t: f32) -> Color32 {
+    const STOPS: [Color32; 5] = [
+        Color32::from_rgb(0x2f, 0x5b, 0xff),
+        Color32::from_rgb(0x16, 0xb8, 0xd4),
+        Color32::from_rgb(0xf2, 0xd1, 0x3b),
+        Color32::from_rgb(0xf0, 0x8c, 0x2b),
+        Color32::from_rgb(0xe5, 0x48, 0x4d),
+    ];
+    let x = t.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
+    let i = (x.floor() as usize).min(STOPS.len() - 2);
+    mix(STOPS[i], STOPS[i + 1], x - i as f32)
+}
+
 fn speed_color(t: f32) -> Color32 {
     const STOPS: [Color32; 5] = [
         Color32::from_rgb(0x44, 0x01, 0x54),

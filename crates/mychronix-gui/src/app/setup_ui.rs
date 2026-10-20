@@ -70,7 +70,6 @@ impl App {
                 has_own: r.source == Source::Own,
             });
         }
-        self.setup_dialog(ui.ctx());
     }
 
     /// The setup in force for the open session.
@@ -82,58 +81,34 @@ impl App {
         Some(setup::resolve(lib, baselines).swap_remove(i).setup)
     }
 
-    /// The setup in one line under the session title: summary, any change, Edit.
-    pub(super) fn setup_line(&mut self, ui: &mut Ui) {
+    /// The weather at the track when the session started, with its details on hover.
+    pub(super) fn weather_line(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };
-        if let Some(i) = self.library.get_or_insert_with(Library::load).sessions.iter().position(|s| s.path == path) {
-            self.want_weather(&[i], &ui.ctx().clone());
-        }
         let lib = self.library.get_or_insert_with(Library::load);
-        let Some(i) = lib.sessions.iter().position(|s| s.path == path) else { return };
-        let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
-        let resolved = setup::resolve(lib, baselines);
-        let r = &resolved[i];
-        let weather = lib.sessions[i].weather;
-        let check = gearing_check(&r.setup, self.measured_ratio);
-        let mut edit = false;
+        let Some(w) = lib.sessions.iter().find(|s| s.path == path).and_then(|s| s.weather) else { return };
         ui.horizontal(|ui| {
-            ui.add(Icon::Settings.image(DIM, 14.0));
-            let summary = r.setup.summary();
-            ui.label(RichText::new(if summary.is_empty() { "No setup recorded".to_string() } else { summary }).size(13.0).color(SECONDARY));
-            if !r.changes.is_empty() {
-                ui.label(RichText::new(format!("Changed: {}", r.changes.join(", "))).size(13.0).color(theme::FAVORITE));
-            }
-            if let Some((false, text)) = &check {
-                ui.label(RichText::new("Gearing doesn't match the data").size(13.0).color(theme::FAVORITE)).on_hover_text(text);
-            }
-            let link = ui.add(egui::Label::new(RichText::new("Edit setup").size(13.0).color(TEXT)).sense(Sense::click()));
-            if link.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            if link.clicked() {
-                edit = true;
-            }
-            if let Some(w) = weather {
-                ui.add_space(8.0);
-                ui.label(RichText::new(format!("·  {}", w.summary())).size(13.0).color(DIM)).on_hover_text(format!(
-                    "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
-                    crate::units::temp(w.air_c),
-                    w.humidity_pct,
-                    w.pressure_hpa,
-                    crate::units::temp(w.dew_point_c),
-                    u = crate::units::temp_unit()
-                ));
-            }
+            ui.label(RichText::new(w.summary()).size(13.0).color(SECONDARY)).on_hover_text(format!(
+                "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
+                crate::units::temp(w.air_c),
+                w.humidity_pct,
+                w.pressure_hpa,
+                crate::units::temp(w.dew_point_c),
+                u = crate::units::temp_unit()
+            ));
         });
-        if edit {
-            self.setup_edit = Some(SetupEdit {
-                path,
-                setup: r.setup.clone(),
-                before: setup::before(lib, baselines, i),
-                has_own: r.source == Source::Own,
-            });
+    }
+
+    /// When RPM and speed don't fit the setup's gearing: why, for a warning beside the pill.
+    pub(super) fn gearing_warning(&mut self) -> Option<String> {
+        let path = self.path.clone()?;
+        let lib = self.library.get_or_insert_with(Library::load);
+        let i = lib.sessions.iter().position(|s| s.path == path)?;
+        let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
+        let r = setup::resolve(lib, baselines).swap_remove(i);
+        match gearing_check(&r.setup, self.measured_ratio) {
+            Some((false, text)) => Some(text),
+            _ => None,
         }
-        self.setup_dialog(ui.ctx());
     }
 
     pub(super) fn setup_dialog(&mut self, ctx: &egui::Context) {

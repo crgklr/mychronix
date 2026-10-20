@@ -124,7 +124,7 @@ impl App {
                 ui.set_min_height(160.0);
                 ui.label(RichText::new("Pick laps to compare").font(semibold(17.0)).color(TEXT));
                 ui.label(
-                    RichText::new("Click laps in the strip above to add them; open another session (Sessions page) to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
+                    RichText::new("Click laps in the strip above to add them; pick another session from the panel at the top to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
                         .color(SECONDARY),
                 );
             });
@@ -275,7 +275,7 @@ impl App {
         hovered
     }
 
-    /// The reference lap's line, colored by where the second lap gains (blue)
+    /// The reference lap's line, colored by where the second lap gains (green)
     /// or loses (red) time against it, with the cursor.
     fn compare_map(&mut self, ui: &mut Ui, reference: &crate::compare::DistanceProfile) {
         let ref_lap = self.compare[0].clone();
@@ -355,9 +355,9 @@ impl App {
     }
 }
 
-/// Diverging color for time gained (−1, blue) through even (0, gray) to lost (+1, red).
+/// Diverging color for time gained (−1, green) through even (0, gray) to lost (+1, red).
 pub(super) fn gain_color(t: f32) -> Color32 {
-    const GAIN: Color32 = Color32::from_rgb(0x39, 0x87, 0xe5);
+    const GAIN: Color32 = theme::GOOD;
     const EVEN: Color32 = Color32::from_rgb(0x58, 0x5e, 0x66);
     const LOSE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
     let t = t.clamp(-1.0, 1.0);
