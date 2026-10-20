@@ -1943,30 +1943,6 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
 }
 
-fn summary_tiles(ui: &mut Ui, session: &Session) {
-    let slow = slow_laps(session);
-    let racing: Vec<_> = session.laps.iter().zip(&slow).filter(|(_, s)| !**s).map(|(l, _)| l).collect();
-    let best = session.best_lap(MIN_LAP_MS);
-    let avg = (!racing.is_empty()).then(|| racing.iter().map(|l| l.duration_ms()).sum::<i64>() / racing.len() as i64);
-    let span = session.laps.first().zip(session.laps.last()).map(|(a, b)| b.end_ms - a.start_ms);
-    let dash = || "—".to_string();
-    let tiles = [
-        (Icon::Timer, "Best lap", best.map(|l| format_lap_time(l.duration_ms())).unwrap_or_else(dash)),
-        (Icon::Activity, "Average lap", avg.map(format_lap_time).unwrap_or_else(dash)),
-        (Icon::Flag, "Laps", session.laps.len().to_string()),
-        (Icon::Clock, "On track", span.map(format_duration).unwrap_or_else(dash)),
-    ];
-
-    let gap = 10.0;
-    let width = (ui.available_width() - gap * (tiles.len() - 1) as f32) / tiles.len() as f32;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        for (icon, label, value) in tiles {
-            tile(ui, width, icon, label, value);
-        }
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Widgets
 
@@ -2225,24 +2201,6 @@ fn graph_card(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui)) {
             ui.set_width(ui.available_width());
             ui.set_height(height - 20.0);
             add(ui)
-        });
-}
-
-fn tile(ui: &mut Ui, width: f32, icon: Icon, label: &str, value: String) {
-    Frame::new()
-        .fill(SURFACE)
-        .corner_radius(CornerRadius::same(theme::RADIUS))
-        .inner_margin(Margin { left: 16, right: 12, top: 12, bottom: 12 })
-        .show(ui, |ui| {
-            ui.set_width(width - 28.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.horizontal(|ui| {
-                    ui.add(icon.image(DIM, 15.0));
-                    ui.add(egui::Label::new(RichText::new(label).size(13.0).color(SECONDARY)).truncate());
-                });
-                ui.add(egui::Label::new(RichText::new(value).font(semibold(24.0)).color(TEXT)).truncate());
-            });
         });
 }
 

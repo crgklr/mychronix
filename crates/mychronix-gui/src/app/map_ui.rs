@@ -1,5 +1,5 @@
-//! The Map view: the track up close, a corner at a time, on satellite imagery
-//! or the street map. The lap's line through each corner against the best you
+//! The Map view: the track up close, a corner at a time, drawn as a track or
+//! on satellite imagery. The lap's line through each corner against the best you
 //! drove that corner (the same comparison Corners makes, see `corner_model`),
 //! colored by how the kart slowed, speed, RPM or where time was gained and
 //! lost; every lap faint, to see how repeatable the line is; the corner's
@@ -13,6 +13,10 @@ use crate::corner_model::{CornerModel, Slowing, STEP_M};
 const BRAKE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
 const TRAIL: Color32 = Color32::from_rgb(0xf0, 0xa0, 0x4b);
 const LIFT: Color32 = Color32::from_rgb(0x59, 0x61, 0x6d);
+/// The drawn track (no imagery): its asphalt, edges and the ground around it.
+const TRACK: Color32 = Color32::from_rgb(0x22, 0x27, 0x2d);
+const TRACK_EDGE: Color32 = Color32::from_rgb(0x3a, 0x41, 0x4b);
+const GROUND: Color32 = Color32::from_rgb(0x0c, 0x0e, 0x11);
 /// The overlays' glass: dark enough to read over satellite imagery.
 const GLASS: Color32 = Color32::from_rgba_premultiplied(18, 21, 25, 225);
 
@@ -45,7 +49,7 @@ pub(super) struct MapState {
 
 impl Default for MapState {
     fn default() -> Self {
-        Self { whole: false, color: ColorBy::default(), all_laps: false, satellite: true, memory: walkers::MapMemory::default(), target: None, shown: None, anim: None }
+        Self { whole: false, color: ColorBy::default(), all_laps: false, satellite: false, memory: walkers::MapMemory::default(), target: None, shown: None, anim: None }
     }
 }
 
@@ -90,8 +94,12 @@ struct Path {
     dashed: bool,
 }
 
-/// Draws the lines and the corner numbers; reports a corner number clicked.
+/// Draws the track (without imagery), the lines and the corner numbers;
+/// reports a corner number clicked.
 struct Overlay {
+    /// The track drawn under the lines when there's no imagery: its middle,
+    /// how wide it is (m), and where the start/finish line is.
+    track: Option<(Vec<aim_track::LatLon>, f64, bool)>,
     paths: Vec<Path>,
     /// Each corner's number, its apex, a point a meter toward the outside of
     /// the corner (to place the number beside the line), and whether it's the one shown.
@@ -104,6 +112,20 @@ impl walkers::Plugin for Overlay {
         ui.set_clip_rect(response.rect.intersect(ui.clip_rect()));
         let painter = ui.painter();
         let to_screen = |p: &aim_track::LatLon| projector.project(walkers::lat_lon(p.lat, p.lon)).to_pos2();
+        if let Some((middle, width_m, closed)) = &self.track {
+            let pts: Vec<egui::Pos2> = middle.iter().map(to_screen).collect();
+            let px = projector.scale_pixel_per_meter(walkers::lat_lon(middle[0].lat, middle[0].lon)) * *width_m as f32;
+            // A loop is drawn closed, so the track joins itself at start/finish.
+            let line = |pts: Vec<egui::Pos2>, stroke| if *closed { egui::Shape::closed_line(pts, stroke) } else { egui::Shape::line(pts, stroke) };
+            painter.add(line(pts.clone(), Stroke::new(px + 3.0, TRACK_EDGE)));
+            painter.add(line(pts.clone(), Stroke::new(px, TRACK)));
+            // Start/finish: a dashed line across the track.
+            if pts.len() > 2 {
+                let d = (pts[1] - pts[0]).normalized();
+                let n = vec2(-d.y, d.x) * px / 2.0;
+                painter.extend(egui::Shape::dashed_line(&[pts[0] - n, pts[0] + n], Stroke::new(3.0, TEXT), 4.0, 4.0));
+            }
+        }
         for path in &self.paths {
             let pts: Vec<egui::Pos2> = path.points.iter().map(to_screen).collect();
             if path.dashed {
@@ -195,7 +217,21 @@ impl App {
             })
             .collect();
         let clicked = Arc::new(Mutex::new(None));
-        let overlay = Overlay { paths, corners, clicked: clicked.clone() };
+        // Without imagery, the track itself, worked out from where the laps went:
+        // as wide as the settings say the track is, else kart-track wide, or
+        // wider when AiM lists it as a race track (karts do run on car circuits).
+        let width = self.path.clone().and_then(|p| {
+            let lib = self.library.get_or_insert_with(Library::load);
+            let t = &lib.tracks[lib.sessions.iter().find(|s| s.path == p)?.track?];
+            let set = crate::settings::get().track_widths.iter().find(|(name, _)| name.eq_ignore_ascii_case(&t.name)).map(|(_, &w)| w).filter(|w| (2.0..=40.0).contains(w));
+            Some(set.unwrap_or(if t.track_kind == aim_track::TrackKind::RaceTrack { 12.0 } else { 8.0 }))
+        });
+        let width = width.unwrap_or(8.0);
+        let track = (!self.map_view.satellite).then(|| {
+            let (middle, closed) = track_shape(&model, width);
+            (middle.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect(), width, closed)
+        });
+        let overlay = Overlay { track, paths, corners, clicked: clicked.clone() };
 
         // Where to look: the whole track, or the corner from its braking point to the next one's.
         let rect = ui.available_rect_before_wrap();
@@ -222,8 +258,13 @@ impl App {
         let satellite = self.map_view.satellite;
         let start = walkers::lat_lon(lat0, lon0);
         let mut memory = std::mem::take(&mut self.map_view.memory);
-        let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite);
-        let map = ui.add(walkers::Map::new(Some(tiles), &mut memory, start).with_plugin(overlay));
+        ui.painter().rect_filled(ui.available_rect_before_wrap(), CornerRadius::same(theme::RADIUS), GROUND);
+        let map = if satellite {
+            let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
+            ui.add(walkers::Map::new(Some(tiles), &mut memory, start).with_plugin(overlay))
+        } else {
+            ui.add(walkers::Map::new(None, &mut memory, start).with_plugin(overlay))
+        };
         self.map_view.memory = memory;
         if let Some(k) = clicked.lock().unwrap().take() {
             self.corners.selected = Some((trace, k));
@@ -255,16 +296,9 @@ impl App {
         });
         let mut color = self.map_view.color;
         let mut sat = satellite;
-        ov(ui, Rect::from_min_size(pos2(rect.right() - 560.0, rect.top() + 14.0), vec2(546.0, 44.0)), &mut |ui| {
+        ov(ui, Rect::from_min_size(pos2(rect.right() - 474.0, rect.top() + 14.0), vec2(460.0, 44.0)), &mut |ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                if chip(ui, "Satellite", sat).clicked() {
-                    sat = true;
-                }
-                if chip(ui, "Map", !sat).clicked() {
-                    sat = false;
-                }
-                ui.add_space(8.0);
                 for (c, label) in [(ColorBy::Gain, "Gain / lose"), (ColorBy::Rpm, "RPM"), (ColorBy::Speed, "Speed"), (ColorBy::Slowing, "Braking · trail · lift")] {
                     if c == ColorBy::Rpm && rpm.is_none() {
                         continue;
@@ -277,7 +311,6 @@ impl App {
             });
         });
         self.map_view.color = color;
-        self.map_view.satellite = sat;
 
         // The numbers, on the right.
         let side = Rect::from_min_size(pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0), vec2(panel_w, rect.height() - 82.0));
@@ -339,9 +372,22 @@ impl App {
             let at_rect = Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 100.0 - 10.0 - 150.0), vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0));
             ov(ui, at_rect, &mut |ui| speed_trace(ui, &model, trace, reference, corner));
         }
-        let credit = if self.map_view.satellite { "Imagery © Esri, Maxar, Earthstar Geographics" } else { "© OpenStreetMap contributors" };
-        let ink = if self.map_view.satellite { Color32::from_white_alpha(150) } else { Color32::from_black_alpha(150) };
-        ui.painter().text(rect.right_bottom() - vec2(panel_w + 26.0, 6.0), egui::Align2::RIGHT_BOTTOM, credit, regular(10.5), ink);
+        // Satellite imagery under the track, on or off, in the lower right.
+        let switch = Rect::from_min_size(rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0), vec2(150.0, 44.0));
+        ov(ui, switch, &mut |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.add_space(4.0);
+                ui.label(RichText::new("Satellite").size(13.5).color(if sat { TEXT } else { SECONDARY }));
+                if toggle(ui, sat).on_hover_text("Satellite imagery under the track").clicked() {
+                    sat = !sat;
+                }
+            });
+        });
+        self.map_view.satellite = sat;
+        if satellite {
+            ui.painter().text(switch.left_bottom() + vec2(-10.0, -6.0), egui::Align2::RIGHT_BOTTOM, "Imagery © Esri, Maxar, Earthstar Geographics", regular(10.5), Color32::from_white_alpha(150));
+        }
 
         // The arrow keys step through the corners.
         let (left, right) = ui.input(|i| (i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight)));
@@ -662,4 +708,97 @@ fn speed_trace(ui: &mut Ui, model: &CornerModel, trace: usize, reference: usize,
             break;
         }
     }
+}
+
+/// An on/off switch.
+fn toggle(ui: &mut Ui, on: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(38.0, 22.0), Sense::click());
+    let t = ui.ctx().animate_bool_with_time(resp.id, on, 0.12);
+    let p = ui.painter();
+    p.rect_filled(rect, CornerRadius::same(255), super::mix(SURFACE_ACTIVE, theme::ACCENT, t));
+    let x = rect.left() + 11.0 + (rect.width() - 22.0) * t;
+    p.circle_filled(pos2(x, rect.center().y), 8.0, TEXT);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
+/// The track to draw without imagery, `width` meters wide, from where the laps
+/// went: its middle (meters, like the traces) and whether it's a loop.
+///
+/// Fast laps hug the inside of every corner, so in corners the inside edge sits
+/// just inside the tightest lines (ignoring the odd stray lap) and the track
+/// extends outward from there; on straights it's centered on the spread of the
+/// lines; in between, a blend by how sharply the line turns. A lap that
+/// doesn't end where it started (track learning off, a GPS dropout at the line)
+/// is drawn as it is, not joined up.
+fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
+    let b = &model.traces[model.best].xy;
+    let n = b.len();
+    if n < 40 {
+        return (b.clone(), false);
+    }
+    // Where the line would go next, and how far that is from where the lap started.
+    let next = (2.0 * b[n - 1].0 - b[n - 2].0, 2.0 * b[n - 1].1 - b[n - 2].1);
+    let gap = (b[0].0 - next.0, b[0].1 - next.1);
+    let closed = (gap.0 * gap.0 + gap.1 * gap.1).sqrt() < 25.0;
+    // A loop's end eased onto its start: GPS rarely puts the lap's last point
+    // exactly where its first was, which would leave a step at start/finish.
+    let best: Vec<(f64, f64)> = if closed {
+        let k = 15;
+        (0..n)
+            .map(|i| {
+                // Half the gap closed from each side, faded in over k points.
+                let f = if i + k >= n { 0.5 * (i + k + 1 - n) as f64 / k as f64 } else if i < k { -0.5 * (k - i) as f64 / k as f64 } else { 0.0 };
+                (b[i].0 + gap.0 * f, b[i].1 + gap.1 * f)
+            })
+            .collect()
+    } else {
+        b.clone()
+    };
+    let best = &best;
+    // Round the loop, or held at the ends of a line that isn't one.
+    let idx = |i: isize| if closed { i.rem_euclid(n as isize) as usize } else { i.clamp(0, n as isize - 1) as usize };
+    let lines: Vec<&Vec<(f64, f64)>> = (0..model.traces.len()).filter(|&t| model.counts[t] || t == model.best).map(|t| &model.traces[t].xy).collect();
+    // Of sorted values, the one `p` of the way up.
+    let pct = |v: &[f64], p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
+
+    let mut normals = Vec::with_capacity(n);
+    let mut turn = Vec::with_capacity(n);
+    let mut sides = Vec::with_capacity(n);
+    for i in 0..n as isize {
+        let dir = |a: isize, c: isize| {
+            let (p, q) = (best[idx(a)], best[idx(c)]);
+            (q.1 - p.1).atan2(q.0 - p.0)
+        };
+        let h = dir(i - 2, i + 2);
+        normals.push((-h.sin(), h.cos()));
+        // How sharply the line turns (1/m, left positive), over 10 m either side.
+        let d = (dir(i, i + 5) - dir(i - 5, i) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        turn.push(d / (5.0 * STEP_M));
+        // Each lap's line, meters to the left of the best lap's.
+        let p = best[i as usize];
+        let (nx, ny) = normals[i as usize];
+        let mut offs: Vec<f64> = lines.iter().filter_map(|l| l.get(i as usize)).map(|q| (q.0 - p.0) * nx + (q.1 - p.1) * ny).collect();
+        offs.sort_by(f64::total_cmp);
+        sides.push((pct(&offs, 0.1), pct(&offs, 0.9)));
+    }
+
+    // Where the middle is, meters left of the best lap's line.
+    let shift: Vec<f64> = (0..n)
+        .map(|i| {
+            let (lo, hi) = sides[i];
+            let straight = (lo + hi) / 2.0;
+            let corner = if turn[i] > 0.0 { hi + 0.5 - width / 2.0 } else { lo - 0.5 + width / 2.0 };
+            // Fully a corner at a 30 m radius or tighter.
+            let w = (turn[i].abs() * 30.0).min(1.0);
+            w * corner + (1.0 - w) * straight
+        })
+        .collect();
+    // Smoothed (about 16 m either side), so the edges flow.
+    let smooth = |v: &[f64]| -> Vec<f64> { (0..n as isize).map(|i| (-8..=8).map(|k| v[idx(i + k)]).sum::<f64>() / 17.0).collect() };
+    let shift = smooth(&smooth(&shift));
+    let middle = (0..n).map(|i| (best[i].0 + normals[i].0 * shift[i], best[i].1 + normals[i].1 * shift[i])).collect();
+    (middle, closed)
 }

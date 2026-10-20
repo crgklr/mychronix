@@ -14,9 +14,9 @@ pub(super) struct SetupEdit {
 }
 
 impl App {
-    /// Setup for the open session: what it was, where it came from, what changed,
-    /// and whether RPM and speed agree with the gearing.
-    pub(super) fn setup_strip(&mut self, ui: &mut Ui) {
+    /// The session panel's Setup section: what it was, where it came from,
+    /// what changed, and whether RPM and speed agree with the gearing.
+    pub(super) fn setup_section(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };
         let lib = self.library.get_or_insert_with(Library::load);
         let Some(i) = lib.sessions.iter().position(|s| s.path == path) else { return };
@@ -38,30 +38,29 @@ impl App {
         };
         let check = gearing_check(&r.setup, self.measured_ratio);
         let mut edit = false;
-        card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add(Icon::Settings.image(SECONDARY, 16.0));
-                ui.label(RichText::new("Setup").font(semibold(15.0)).color(TEXT));
-                let summary = r.setup.summary();
-                ui.label(RichText::new(if summary.is_empty() { "—".to_string() } else { summary }).color(TEXT));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if button(ui, None, "Edit setup", false).clicked() {
-                        edit = true;
-                    }
-                });
-            });
-            let mut line = vec![source];
-            if !r.changes.is_empty() {
-                line.push(format!("Changed: {}", r.changes.join(", ")));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            ui.label(RichText::new("SETUP").font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
+            let link = ui.add(egui::Label::new(RichText::new("Edit setup").size(13.0).color(theme::ACCENT)).sense(Sense::click()));
+            if link.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            ui.label(RichText::new(line.join("  ·  ")).size(12.5).color(if r.changes.is_empty() { DIM } else { theme::FAVORITE }));
-            if let Some((ok, text)) = check {
-                ui.label(RichText::new(text).size(12.5).color(if ok { DIM } else { theme::FAVORITE }));
-            }
-            if !r.setup.notes.trim().is_empty() {
-                ui.label(RichText::new(r.setup.notes.trim()).size(13.0).color(SECONDARY));
-            }
+            edit = link.clicked();
         });
+        ui.add_space(4.0);
+        let summary = r.setup.summary();
+        ui.add(egui::Label::new(RichText::new(if summary.is_empty() { "No setup recorded".to_string() } else { summary }).size(15.0).color(TEXT)).wrap());
+        let mut line = vec![source];
+        if !r.changes.is_empty() {
+            line.push(format!("Changed: {}", r.changes.join(", ")));
+        }
+        ui.add(egui::Label::new(RichText::new(line.join("  ·  ")).size(12.5).color(if r.changes.is_empty() { DIM } else { theme::FAVORITE })).wrap());
+        if let Some((ok, text)) = check {
+            ui.add(egui::Label::new(RichText::new(text).size(12.5).color(if ok { DIM } else { theme::FAVORITE })).wrap());
+        }
+        if !r.setup.notes.trim().is_empty() {
+            ui.add(egui::Label::new(RichText::new(r.setup.notes.trim()).size(13.0).color(SECONDARY)).wrap());
+        }
         if edit {
             self.setup_edit = Some(SetupEdit {
                 path,
@@ -86,16 +85,14 @@ impl App {
         let Some(path) = self.path.clone() else { return };
         let lib = self.library.get_or_insert_with(Library::load);
         let Some(w) = lib.sessions.iter().find(|s| s.path == path).and_then(|s| s.weather) else { return };
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(w.summary()).size(13.0).color(SECONDARY)).on_hover_text(format!(
-                "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
-                crate::units::temp(w.air_c),
-                w.humidity_pct,
-                w.pressure_hpa,
-                crate::units::temp(w.dew_point_c),
-                u = crate::units::temp_unit()
-            ));
-        });
+        ui.label(RichText::new(w.summary()).size(15.0).color(TEXT)).on_hover_text(format!(
+            "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
+            crate::units::temp(w.air_c),
+            w.humidity_pct,
+            w.pressure_hpa,
+            crate::units::temp(w.dew_point_c),
+            u = crate::units::temp_unit()
+        ));
     }
 
     /// When RPM and speed don't fit the setup's gearing: why, for a warning beside the pill.
