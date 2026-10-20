@@ -2781,12 +2781,16 @@ dependencies = [
  "image",
  "jiff",
  "log",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "serde",
  "serde_json",
  "trash",
  "walkers",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

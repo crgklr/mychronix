@@ -37,6 +37,10 @@ impl App {
                 Frame::new().fill(SIDEBAR).shadow(shadow).show(ui, |ui| {
                     ui.set_min_size(rect.size());
                     ui.set_max_size(rect.size());
+                    // Its empty space moves the window (no title bar on Linux); the items below take their own clicks.
+                    let empty = ui.interact(rect, egui::Id::new("rail_move"), Sense::click_and_drag());
+                    let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                    super::window_ui::move_or_maximize(ui.ctx(), &empty, maximized);
                     let painter = ui.painter_at(rect);
                     // Logo: the MyChron icon, then the wordmark as the rail opens.
                     let icon = Rect::from_min_size(rect.min + vec2((RAIL_W - 38.0) / 2.0, 18.0), Vec2::splat(38.0));

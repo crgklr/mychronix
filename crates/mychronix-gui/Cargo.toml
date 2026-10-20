@@ -30,6 +30,13 @@ trash = "5.2.9"
 
 # Linux packages, built by .github/workflows/release.yml (cargo-deb and
 # cargo-generate-rpm). Icons are rendered from the SVG into target/icons first.
+# Telling GNOME Mychronix has started (src/startup_notify.rs); winit already uses these.
+[target.'cfg(target_os = "linux")'.dependencies]
+raw-window-handle = "0.6"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
 [package.metadata.deb]
 name = "mychronix"
 maintainer = "Mychronix contributors"
