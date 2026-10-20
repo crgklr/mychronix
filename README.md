@@ -12,7 +12,7 @@ setup sheets, and follow your season — no Windows and no RaceStudio needed.
 AiM's own software, RaceStudio, runs only on Windows. Mychronix is for the kart
 racers and families who don't use Windows. If you're on Windows, use RaceStudio.
 
-![The Corners tab: a lap corner by corner against the best of each corner, beside the track map](docs/screenshots/corners.png)
+![The Corners view: a lap corner by corner against the best of each corner, beside the track map](docs/screenshots/corners.png)
 
 > Mychronix is an independent project. It is not affiliated with, endorsed by
 > or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of
@@ -72,16 +72,24 @@ and the track's GPS position, so share only what you're happy to make public.
 - **Sessions**: everything by race day, with best laps and lap-time sparklines.
   Filter by dates (presets or a calendar that marks your race days), drivers,
   tracks and timed laps; search by anything.
-- **Analysis**: channels over time or distance on a shared cursor, a track map
-  colored by any channel, every lap as a strip across the top.
+- **Analysis**, each view a click away in the sidebar, all on the session you
+  have open (click what you're looking at, at the top, to change session or lap).
+  **Laps** opens with the session in a few numbers: best lap, the best of every
+  corner and what's left on the table, consistency, pace, and the corner that
+  cost the most. **Graphs** shows channels over time or distance on a shared
+  cursor, with the track colored by any channel.
 - **Corners**, the way a data team reads them: each corner from its braking
   point to the next one's (so the exit counts), against the best you've driven
   each corner. One row per corner shows the speed given up, how the kart slowed
   (braking, trail braking, or lifting and sliding), steering and the time lost;
   the best of every corner adds up to the lap you've already proven you can
   drive. The selected corner is drawn up close, headed by what stands out.
-- **Lap by lap**, **Splits**, **Histogram** and **Scatter** (RPM against speed
-  with your gearing drawn in, the grip circle).
+- **Map**: your line through each corner up close, against the best you drove
+  it, colored by braking and lifting, speed, RPM or where time was won and lost;
+  every lap faintly, to see how consistent the line is. The track is drawn from
+  your own laps, with satellite imagery a switch away.
+- **Splits**, **Histogram** and **Scatter** (RPM against speed with your gearing
+  drawn in, the grip circle).
 - **MyChron 6 motion sensor**: worked out for however the MyChron is mounted,
   with nothing to set: braking and acceleration (Forward g), bumps (Vertical g),
   grip used around the lap, trail braking, bumps and curbs hit on most laps, and
@@ -115,10 +123,12 @@ and the track's GPS position, so share only what you're happy to make public.
 |---|---|
 | ![Garage: two drivers, their karts and MyChrons, seat time this season](docs/screenshots/garage.png) | ![Sessions by race day, filtered to sessions with timed laps](docs/screenshots/sessions.png) |
 | **Garage**: drivers, karts, MyChrons and seat time | **Sessions** by race day, with filters |
-| ![Analysis: RPM, speed and exhaust temperature over a lap, and the track map](docs/screenshots/analysis.png) | ![Compare: three laps with the time gap to the reference and where time changes on the map](docs/screenshots/compare.png) |
-| **Analysis**: channels over a lap, the track colored by RPM | **Compare**: the gap to the best lap and where it grows |
-| ![Settings: units, clock, internet use and the Mychronix Performance Engineer](docs/screenshots/settings.png) | |
-| **Settings**, with the Mychronix Performance Engineer | |
+| ![Laps: the session in a few numbers above every lap's figures](docs/screenshots/laps.png) | ![Map: a lap's line through a hairpin against the best through it, every lap faint](docs/screenshots/map.png) |
+| **Laps**: the session in a few numbers, then every lap | **Map**: your line through each corner, up close |
+| ![Graphs: RPM, speed and exhaust temperature over a lap, and the track colored by RPM](docs/screenshots/graphs.png) | ![Splits: each lap's time through each part of the track, and the splits on the track](docs/screenshots/splits.png) |
+| **Graphs**: channels over a lap, the track colored by RPM | **Splits**: each lap through each part of the track |
+| ![Compare: three laps with the time gap to the reference and where time changes on the map](docs/screenshots/compare.png) | ![Settings: units, clock, internet use and the Mychronix Performance Engineer](docs/screenshots/settings.png) |
+| **Compare**: the gap to the best lap and where it grows | **Settings**, with the Mychronix Performance Engineer |
 
 ## Install
 
