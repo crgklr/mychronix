@@ -38,7 +38,8 @@ pub struct Segment {
     pub to: f64,
 }
 
-/// One lap, sampled every [`STEP_M`].
+/// One lap, sampled every [`STEP_M`], plus a last sample at the lap's very
+/// end, so times through the corners add up to the whole lap.
 #[derive(Debug, Clone)]
 pub struct Trace {
     /// Index in `session.laps`.
@@ -157,6 +158,12 @@ impl CornerModel {
         let (lat0, lon0) = (*gps.latitude.first()?, *gps.longitude.first()?);
         let gps_t: Vec<f64> = gps.times_ms.iter().map(|&t| t as f64).collect();
         let n = (length_m / STEP_M) as usize;
+        // Every STEP_M along the best lap, and its very end (the last step is
+        // usually shorter): without it the corners would miss up to STEP_M of the lap.
+        let mut at_m: Vec<f64> = (0..=n).map(|k| k as f64 * STEP_M).collect();
+        if length_m - n as f64 * STEP_M > 0.01 {
+            at_m.push(length_m);
+        }
 
         let mut traces = Vec::new();
         let mut trace_counts = Vec::new();
@@ -171,15 +178,15 @@ impl CornerModel {
             let mut tr = Trace {
                 lap: i,
                 number: lap.number,
-                t: Vec::with_capacity(n + 1),
-                kmh: Vec::with_capacity(n + 1),
-                forward: Vec::with_capacity(n + 1),
-                cornering: Vec::with_capacity(n + 1),
-                steering: steering.map(|_| Vec::with_capacity(n + 1)),
-                xy: Vec::with_capacity(n + 1),
+                t: Vec::with_capacity(at_m.len()),
+                kmh: Vec::with_capacity(at_m.len()),
+                forward: Vec::with_capacity(at_m.len()),
+                cornering: Vec::with_capacity(at_m.len()),
+                steering: steering.map(|_| Vec::with_capacity(at_m.len())),
+                xy: Vec::with_capacity(at_m.len()),
             };
-            for k in 0..=n {
-                let t = interp(&p.dist_m, &times, k as f64 * STEP_M * scale);
+            for &m in &at_m {
+                let t = interp(&p.dist_m, &times, m * scale);
                 tr.t.push((t - lap.start_ms as f64) / 1000.0);
                 tr.kmh.push(interp(&gps_t, &gps.speed_kmh, t));
                 tr.forward.push(sample(forward, t));
@@ -266,7 +273,9 @@ impl CornerModel {
 fn corner_stats(tr: &Trace, segments: &[Segment], k: usize, s: &Segment, has_trail: bool) -> Stats {
     let last = tr.kmh.len() - 1;
     let idx = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(last);
-    let time_s = tr.t[idx(s.to)] - tr.t[idx(s.from)];
+    // The last corner runs to the lap's very end (the trace's last sample).
+    let end = if k + 1 == segments.len() { last } else { idx(s.to) };
+    let time_s = tr.t[end] - tr.t[idx(s.from)];
     // Braking point: the top speed before the corner, looking no further back
     // than just past the previous corner's apex.
     let back = if k > 0 { (segments[k - 1].apex + 4.0).max(s.from - 30.0) } else { 0.0 };
@@ -347,5 +356,20 @@ mod tests {
         // Without the IMU there's no telling trail braking apart.
         let s = corner_stats(&tr, &segs, 0, &segs[0], false);
         assert!(s.slowing.iter().all(|&x| x == Slowing::Brake) && s.trail_s.is_none());
+    }
+
+    #[test]
+    fn corner_times_add_up_to_the_whole_lap() {
+        // A 200.8 m lap: the last sample, at the lap's end, is 0.8 m past the last whole step.
+        let mut tr = trace(30.0);
+        let end = tr.t.last().unwrap() + 0.8 / (40.0 / 3.6);
+        tr.t.push(end);
+        tr.kmh.push(40.0);
+        tr.forward.push(0.0);
+        tr.cornering.push(0.0);
+        tr.xy.push((200.8, 0.0));
+        let segs = [Segment { from: 0.0, apex: 50.0, to: 120.0 }, Segment { from: 120.0, apex: 160.0, to: 200.8 }];
+        let total: f64 = (0..2).map(|k| corner_stats(&tr, &segs, k, &segs[k], true).time_s).sum();
+        assert!((total - end).abs() < 1e-9, "{total} vs {end}");
     }
 }

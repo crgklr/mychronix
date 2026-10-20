@@ -539,7 +539,9 @@ impl App {
             }
             let who = session_driver(s, &profiles);
             let mut job = egui::text::LayoutJob::default();
-            job.append(&format!("Session {}", s.summary.number.unwrap_or(0)), 0.0, egui::TextFormat { font_id: if on { semibold(15.0) } else { regular(15.0) }, color: TEXT, ..Default::default() });
+            // "Session 12", or the file's name when it has no number.
+            let name = s.summary.number.map(|n| format!("Session {n}")).unwrap_or_else(|| s.path.file_stem().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default());
+            job.append(&name, 0.0, egui::TextFormat { font_id: if on { semibold(15.0) } else { regular(15.0) }, color: TEXT, ..Default::default() });
             if !who.is_empty() {
                 job.append(&format!(" · {who}"), 0.0, egui::TextFormat { font_id: regular(15.0), color: TEXT, ..Default::default() });
             }
