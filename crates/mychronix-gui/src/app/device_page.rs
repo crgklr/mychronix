@@ -180,6 +180,26 @@ impl App {
 
         // Keep looking while nothing is connected; check now and then that a logger is still there.
         let now = ctx.input(|i| i.time);
+        // An AiM device Linux won't let Mychronix use (no USB rule yet).
+        if now - self.usb_checked > 2.0 {
+            self.usb_checked = now;
+            self.usb_blocked = crate::usb_access::blocked() || std::env::var_os("MYCHRONIX_FAKE_USB_BLOCKED").is_some();
+        }
+        if let Some(rx) = &self.usb_allow {
+            if let Ok(result) = rx.try_recv() {
+                self.usb_allow = None;
+                match result {
+                    Ok(()) => {
+                        self.usb_blocked = false;
+                        self.usb_checked = now;
+                        self.dev_message = Some((true, "USB access allowed. Your MyChron will show up in a moment.".into()));
+                        // Look again now rather than at the next scan.
+                        self.dev_last_scan = 0.0;
+                    }
+                    Err(e) => self.dev_message = Some((false, e)),
+                }
+            }
+        }
         let every = if self.dev_logger.is_some() { 15.0 } else { 4.0 };
         if self.dev_busy.is_none() && !self.dev_scanning && self.dev_last_scan != f64::MAX && now - self.dev_last_scan > every {
             self.dev_last_scan = now;
@@ -236,6 +256,7 @@ impl App {
                 Err(_) => {}
             }
         }
+        self.usb_access_card(ui);
         self.unplaced_connected(ui);
         self.key_panel(ui);
         if self.dev_logger.is_some() {
@@ -286,6 +307,49 @@ impl App {
             self.unplaced_card(ui, &u, &model);
             ui.add_space(14.0);
         }
+    }
+
+    /// Linux only: an AiM device is plugged in, but there's no rule letting
+    /// Mychronix use it. One button installs the rule (the computer asks for
+    /// an administrator's password once).
+    fn usb_access_card(&mut self, ui: &mut Ui) {
+        if !self.usb_blocked {
+            return;
+        }
+        let asking = self.usb_allow.is_some();
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(Icon::Usb.image(theme::FAVORITE, 30.0));
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    // Leave room for the button.
+                    ui.set_max_width((ui.available_width() - 270.0).max(240.0));
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.label(RichText::new("A MyChron is plugged in. Linux needs your OK first").font(semibold(17.0)).color(TEXT));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Linux lets an app use a USB device only when a rule allows it. This adds AiM's rule, once, so Mychronix can talk to MyChrons and the MyChron 4 data key. Your computer will ask for your password.")
+                                .size(13.5)
+                                .color(SECONDARY),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let label = if asking { "Waiting for your password…" } else { "Allow USB access" };
+                    if garage_manage_ui::look::big_button(ui, label, Some(Icon::Check), garage_manage_ui::look::Kind::Primary, !asking) {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let ctx = ui.ctx().clone();
+                        crate::jobs::spawn("usb-access", move || {
+                            let _ = tx.send(crate::usb_access::allow());
+                            ctx.request_repaint();
+                        });
+                        self.usb_allow = Some(rx);
+                    }
+                });
+            });
+        });
+        ui.add_space(14.0);
     }
 
     fn logger_dir(&self) -> Option<PathBuf> {

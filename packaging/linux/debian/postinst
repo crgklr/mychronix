@@ -1,0 +1,9 @@
+#!/bin/sh
+# Applies AiM's USB rule to a MyChron or data key already plugged in, so it
+# works without unplugging it first.
+set -e
+if [ "$1" = "configure" ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=11cc || true
+fi
+#DEBHELPER#

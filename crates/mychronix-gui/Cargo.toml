@@ -41,10 +41,12 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 name = "mychronix"
 maintainer = "Mychronix contributors"
 copyright = "Mychronix contributors"
-extended-description = "Download sessions from AiM MyChron kart data loggers (over WiFi, or a MyChron 4 data key), analyze laps and browse tracks. Independent project, not affiliated with AiM."
+extended-description = "Download sessions from AiM MyChron kart data loggers (over WiFi, a MyChron 6 by USB, or a MyChron 4 data key), analyze laps and browse tracks. Independent project, not affiliated with AiM."
 section = "utils"
 depends = "$auto"
 recommends = "network-manager"
+# Applies the USB rule to a device that's already plugged in.
+maintainer-scripts = "../../packaging/linux/debian/"
 assets = [
     ["target/release/mychronix-gui", "usr/bin/", "755"],
     ["target/release/mychronix", "usr/bin/", "755"],
@@ -63,6 +65,8 @@ assets = [
 [package.metadata.generate-rpm]
 name = "mychronix"
 summary = "Download and analyze AiM MyChron kart data"
+# Applies the USB rule to a MyChron or data key that's already plugged in.
+post_install_script = "udevadm control --reload-rules >/dev/null 2>&1 || :; udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=11cc >/dev/null 2>&1 || :"
 assets = [
     { source = "target/release/mychronix-gui", dest = "/usr/bin/mychronix-gui", mode = "755" },
     { source = "target/release/mychronix", dest = "/usr/bin/mychronix", mode = "755" },

@@ -170,8 +170,11 @@ from inside the app uses NetworkManager, which nearly every desktop has; without
 it, join the MyChron's network yourself and everything else works.
 
 **MyChron 6 over USB and the MyChron 4 data key:** Linux needs AiM's USB rule
-to let Mychronix talk to them without root. The `.deb` and `.rpm` install it. With the AppImage or the
-tarball, install it once (the tarball includes the file; for the AppImage it's
+to let Mychronix talk to them without root. The `.deb` and `.rpm` install it.
+With the AppImage or the tarball, plug the MyChron or key in and the Device page
+offers **Allow USB access**: one click and your password, once, and it works
+straight away. Without a password prompt on your desktop, install it by hand
+(the tarball includes the file; for the AppImage it's
 `packaging/linux/70-mychronix-aim.rules` in this repository):
 
 ```sh
