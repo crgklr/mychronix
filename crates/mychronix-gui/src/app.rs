@@ -226,6 +226,11 @@ pub struct App {
     dev_joined: Option<String>,
     /// The connected MyChron is plugged in by USB rather than on WiFi.
     dev_usb: bool,
+    /// Linux: an AiM USB device is plugged in that Mychronix may not open
+    /// (checked now and then), and the answer to "Allow USB access" while it runs.
+    usb_blocked: bool,
+    usb_checked: f64,
+    usb_allow: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     /// The last error and device message written to the log.
     logged_error: Option<String>,
     logged_dev_message: Option<(bool, String)>,

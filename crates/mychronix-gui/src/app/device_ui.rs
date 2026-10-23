@@ -239,7 +239,7 @@ impl App {
                     );
                     ui.add_space(6.0);
                     let note = if cfg!(target_os = "linux") {
-                        "Plugged in and nothing happens? Linux may need AiM's USB rule: see \"MyChron 4 data key\" in the README."
+                        "On Linux, the first time, Mychronix may ask to allow USB access: one click and your password."
                     } else {
                         "Plug it into any USB port."
                     };

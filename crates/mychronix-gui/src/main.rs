@@ -38,6 +38,7 @@ mod splits;
 mod storage;
 mod theme;
 mod units;
+mod usb_access;
 mod update;
 mod weather;
 mod tracks;

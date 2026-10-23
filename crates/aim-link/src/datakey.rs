@@ -30,7 +30,7 @@ pub enum KeyError {
     Unexpected(String),
 }
 
-const LINUX_HINT: &str = if cfg!(target_os = "linux") { " (on Linux this needs the AiM USB rule; see the README)" } else { "" };
+const LINUX_HINT: &str = if cfg!(target_os = "linux") { " (on Linux this needs the AiM USB rule: the Device page offers Allow USB access)" } else { "" };
 
 pub type Result<T> = std::result::Result<T, KeyError>;
 
