@@ -265,8 +265,8 @@
   <section id="features">
     <div class="title"><h2>Features</h2><p class="sub">Everything RaceStudio does for a kart racer, and some things it doesn't.</p></div>
     <div class="grid">
-      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-wifi"/></svg></div><div><h3>Download</h3><p>Over WiFi, or the MyChron 4's data key</p></div></div>
-        <p>Mychronix walks you through connecting, joins the MyChron's WiFi for you on Linux, and offers new sessions with RaceStudio-style details. Nothing already downloaded is ever overwritten.</p></div>
+      <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-wifi"/></svg></div><div><h3>Download</h3><p>Over WiFi or USB, or the MyChron 4's data key</p></div></div>
+        <p>Mychronix walks you through connecting, joins the MyChron's WiFi for you on Linux or finds a MyChron 6 plugged in by USB, and offers new sessions with RaceStudio-style details. Nothing already downloaded is ever overwritten.</p></div>
       <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-house"/></svg></div><div><h3>Garage</h3><p>Drivers, karts and their MyChrons</p></div></div>
         <p>Seat time and race days per driver. MyChrons can move between karts and drivers (handed down to a younger sibling, say) and every session stays with the kart it was recorded on.</p></div>
       <div class="card"><div class="card-head"><div class="tile"><svg class="i"><use href="#i-list"/></svg></div><div><h3>Sessions</h3><p>Everything by race day</p></div></div>
@@ -315,7 +315,7 @@
       <table class="table">
         <thead><tr><th>MyChron</th><th>How it downloads</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td>MyChron 6, 6T</td><td><span class="how"><svg class="i"><use href="#i-wifi"/></svg>Over the MyChron's own WiFi</span></td><td><span class="pill works">Works</span></td></tr>
+          <tr><td>MyChron 6, 6T</td><td><span class="how"><svg class="i"><use href="#i-wifi"/></svg>Over the MyChron's own WiFi, or a USB-C data cable</span></td><td><span class="pill works">Works</span></td></tr>
           <tr><td>MyChron 5, 5S, 5 2T, 5S 2T</td><td><span class="how"><svg class="i"><use href="#i-wifi"/></svg>Over WiFi, the same way</span></td><td><span class="pill expected">Expected to work</span></td></tr>
           <tr><td>MyChron 4, 4 2T, 4 660</td><td><span class="how"><svg class="i"><use href="#i-usb"/></svg>AiM's USB data key</span></td><td><span class="pill works">Works</span></td></tr>
           <tr><td>MyChron 4 with expansions</td><td><span class="how"><svg class="i"><use href="#i-usb"/></svg>Data key</span></td><td><span class="pill expected">Expected to work</span></td></tr>
@@ -371,7 +371,7 @@ echo "deb [signed-by=/etc/apt/keyrings/mychronix.gpg] @URL@/deb ./" | sudo tee /
         <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/Mychronix-@VERSION@-x86_64.AppImage"><b><svg class="i"><use href="#i-download"/></svg>AppImage</b><span>No install: make it executable and double-click it. AppImage updaters keep it current.</span></a>
         <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/mychronix-@VERSION@-x86_64.tar.gz"><b><svg class="i"><use href="#i-download"/></svg>Tarball</b><span>Unpack anywhere and run <code>bin/mychronix-gui</code>.</span></a>
       </div>
-      <p class="note">For a MyChron 4's data key, Linux needs AiM's USB rule once (the .rpm and .deb install it): see <a href="https://github.com/@REPO@#linux">the README</a>.</p>
+      <p class="note">For a MyChron 6 over USB or a MyChron 4's data key, Linux needs AiM's USB rule once (the .rpm and .deb install it): see <a href="https://github.com/@REPO@#linux">the README</a>.</p>
     </div>
   </section>
 

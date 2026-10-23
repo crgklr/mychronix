@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use aim_link::{AP_ADDRESS, Logger};
+use aim_link::{AP_ADDRESS, Link};
 use aim_xrk::{Session, format_lap_time};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -47,7 +47,7 @@ enum Command {
         /// Folder of sessions (default: ~/Mychronix/sessions/<each logger>).
         dir: Option<PathBuf>,
     },
-    /// Talk to a MyChron over WiFi. Join its AiM-MYC… network first.
+    /// Talk to a MyChron: a MyChron 6 plugged in by USB, else over WiFi (join its AiM-MYC… network first).
     #[command(subcommand)]
     Device(DeviceCommand),
     /// Read a MyChron 4 data key plugged into this computer.
@@ -196,6 +196,14 @@ fn info(file: &PathBuf, list_channels: bool) -> anyhow::Result<()> {
 fn device(cmd: DeviceCommand) -> anyhow::Result<()> {
     match cmd {
         DeviceCommand::Probe => {
+            if aim_link::usb::is_present() {
+                let id = aim_link::usb::UsbLogger::open().and_then(|mut l| l.logger_id()).context("a MyChron is plugged in by USB but didn't answer")?;
+                println!("MyChron on USB");
+                if let Some(id) = id {
+                    println!("Logger id  {id}");
+                }
+                return Ok(());
+            }
             let beacon = probe()?;
             println!("Logger at {} answered in {} ms", beacon.address, beacon.round_trip.as_millis());
             if let Some(id) = beacon.logger_id {
@@ -236,13 +244,18 @@ fn probe() -> anyhow::Result<aim_link::Beacon> {
     )
 }
 
-fn connect() -> anyhow::Result<Logger> {
-    Logger::connect_ap().context("couldn't open a connection to the MyChron on 10.0.0.1:2000")
+/// USB when a MyChron 6 is plugged in, else its WiFi.
+fn connect() -> anyhow::Result<Link> {
+    Link::connect().context("couldn't open a connection to the MyChron (USB, or WiFi at 10.0.0.1:2000)")
 }
 
 fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
-    let beacon = probe()?;
-    let id = beacon.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "unknown".into());
+    let logger_id = if aim_link::usb::is_present() {
+        aim_link::usb::UsbLogger::open().and_then(|mut l| l.logger_id()).context("a MyChron is plugged in by USB but didn't answer")?
+    } else {
+        probe()?.logger_id
+    };
+    let id = logger_id.map(|id| id.to_string()).unwrap_or_else(|| "unknown".into());
     let dir = match to {
         Some(dir) => dir,
         None => dirs_home()?.join("Mychronix").join("sessions").join(&id),

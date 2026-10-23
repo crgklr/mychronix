@@ -22,7 +22,7 @@ racers and families who don't use Windows. If you're on Windows, use RaceStudio.
 
 | MyChron | How it downloads | Status |
 |---|---|---|
-| **MyChron 6, 6T** | Over the MyChron's own WiFi | Works; tested on a MyChron 6 |
+| **MyChron 6, 6T** | Over the MyChron's own WiFi, or a USB-C data cable | Works; tested on a MyChron 6, both ways |
 | **MyChron 5, 5S, 5 2T, 5S 2T** | Over WiFi, the same way | Expected to work; not yet tested on one |
 | **MyChron 4, 4 2T, 4 660** | With AiM's USB data key | Works; tested on a MyChron 4 with the key |
 | MyChron 4 with an expansion box or CAN devices | Data key | Read the way RaceStudio 2 reads them; not yet tested on hardware |
@@ -57,7 +57,8 @@ and the track's GPS position, so share only what you're happy to make public.
 
 - **Download** from your MyChron. Add it from the Device page and Mychronix walks
   you through connecting: over WiFi it can join the MyChron's network for you
-  (on Linux), and with the data key it finds the key when you plug it in. New
+  (on Linux), a MyChron 6 can simply be plugged in with a USB-C data cable, and
+  with the data key it finds the key when you plug it in. New
   sessions are offered for download with RaceStudio-style details (driver, kart,
   championship, session type, track, comment). Nothing already downloaded is
   ever overwritten.
@@ -168,8 +169,8 @@ They run on Ubuntu 22.04 and newer, or any distribution from 2022 on (glibc
 from inside the app uses NetworkManager, which nearly every desktop has; without
 it, join the MyChron's network yourself and everything else works.
 
-**MyChron 4 data key:** Linux needs AiM's USB rule to let Mychronix read the
-key without root. The `.deb` and `.rpm` install it. With the AppImage or the
+**MyChron 6 over USB and the MyChron 4 data key:** Linux needs AiM's USB rule
+to let Mychronix talk to them without root. The `.deb` and `.rpm` install it. With the AppImage or the
 tarball, install it once (the tarball includes the file; for the AppImage it's
 `packaging/linux/70-mychronix-aim.rules` in this repository):
 
@@ -304,6 +305,10 @@ anything else you share in that chat.
 - **The MyChron isn't found over WiFi:** make sure its WiFi is on in its own
   menu and that this computer has joined its `AiM-MYC…` network; the MyChron
   gives no internet, so the computer may warn about that.
+- **The MyChron 6 isn't found over USB:** use a USB-C cable that carries data
+  (many charging cables don't), make sure the MyChron is on (it switches itself
+  off after a while with no engine running), and on Linux install the USB rule
+  (see Install).
 - **The data key isn't found on Linux:** install the USB rule (see Install).
 - **A session has no lap times:** track learning was probably off (see above).
 
@@ -312,8 +317,8 @@ anything else you share in that chat.
 ```sh
 mychronix info session.xrz        # a session's laps and channels
 mychronix sessions                # downloaded sessions
-mychronix device probe            # is a MyChron answering over WiFi?
-mychronix device pull             # download every new session over WiFi
+mychronix device probe            # is a MyChron answering (USB, else WiFi)?
+mychronix device pull             # download every new session (USB, else WiFi)
 ```
 
 `-v` / `-vv` print more. On a Mac the tool is inside the app, at
@@ -335,14 +340,15 @@ downloads; `.github/workflows/release.yml` runs them for every `v*` tag.
 ## How it works
 
 AiM doesn't publish how its loggers talk to a computer. The WiFi protocol was
-worked out from recordings of RaceStudio 3 talking to a MyChron 6, and the data
+worked out from recordings of RaceStudio 3 talking to a MyChron 6 (over USB the
+MyChron 6 answers the same requests in a different envelope), and the data
 key's from RaceStudio 2, for interoperability with hardware we own. Everything
 known, where it came from and how sure we are of it is in
 [docs/protocol-notes.md](docs/protocol-notes.md).
 
 | Part | What it does |
 |---|---|
-| `crates/aim-link` | Talking to MyChrons: WiFi discovery and messages, the data key over USB. Read-only by design. |
+| `crates/aim-link` | Talking to MyChrons: WiFi discovery and messages, the MyChron 6 and the data key over USB. Read-only by design. |
 | `crates/aim-xrk` | Session files: `.xrk`/`.xrz` (via [libxrk](https://github.com/m3rlin45/libxrk)), RaceStudio 2's `.drk` and its GPS files, MyChron 4 runs, sensor scaling |
 | `crates/aim-track` | AiM track files (`.ria` lists, `.tkk` tracks) |
 | `crates/mychronix-cli` | The `mychronix` command |
