@@ -42,7 +42,7 @@ struct Known {
 
 /// The series a person can pick: name, models, how it downloads, drawing.
 const SERIES: [(&str, &str, Option<Way>, &str, (&str, &[u8])); 4] = [
-    ("MyChron 6", "MyChron 6 and 6T", Some(Way::Wifi), "Downloads over WiFi", ("bytes://mychron6.svg", include_bytes!("../../assets/devices/mychron6.svg"))),
+    ("MyChron 6", "MyChron 6 and 6T", Some(Way::Wifi), "Downloads over WiFi or USB", ("bytes://mychron6.svg", include_bytes!("../../assets/devices/mychron6.svg"))),
     ("MyChron 5", "MyChron 5, 5S, 5 2T and 5S 2T", Some(Way::Wifi), "Downloads over WiFi", ("bytes://mychron5.svg", include_bytes!("../../assets/devices/mychron5.svg"))),
     ("MyChron 4", "MyChron 4, 4 2T and 4 660", Some(Way::DataKey), "Downloads with AiM's data key", ("bytes://mychron4.svg", include_bytes!("../../assets/devices/mychron4.svg"))),
     ("MyChron 3", "MyChron 3 and its variants", None, "Not supported yet (serial cable)", ("bytes://mychron3.svg", include_bytes!("../../assets/devices/mychron3.svg"))),
@@ -146,7 +146,8 @@ impl App {
                         let status = if by_key {
                             if key_serial.as_deref() == Some(&k.id) { "Data key plugged in (above)" } else { "Downloads with the data key" }
                         } else {
-                            "Downloads over WiFi · off or out of range"
+                            // USB checked on the MyChron 6 only.
+                            if k.model.starts_with("MyChron 6") { "Downloads over WiFi or USB · not connected" } else { "Downloads over WiFi · off or out of range" }
                         };
                         ui.label(RichText::new(status).size(13.0).color(SECONDARY));
                         let newest = k.newest.map(|d| format!("  ·  newest {}", crate::events::us_short(d))).unwrap_or_default();
