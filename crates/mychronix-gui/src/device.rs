@@ -1,6 +1,7 @@
-//! The Device page's worker: finds the MyChron's WiFi, joins it, talks to the
-//! logger and downloads sessions, all on a background thread so the window
-//! never stalls. The UI sends [`Command`]s and reads [`Event`]s.
+//! The Device page's worker: finds the MyChron (plugged in by USB, or its
+//! WiFi, which it joins), talks to the logger and downloads sessions, all on
+//! a background thread so the window never stalls. The UI sends [`Command`]s
+//! and reads [`Event`]s.
 //!
 //! On Linux, WiFi goes through NetworkManager (`nmcli`). While joined to the logger,
 //! other WiFi networks stop auto-joining so the computer doesn't wander back
@@ -13,12 +14,12 @@ use std::process::Command as Process;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use aim_link::{AP_ADDRESS, Beacon, DirEntry, Logger};
+use aim_link::{AP_ADDRESS, Beacon, DirEntry, Link};
 use aim_xrk::SessionSummary;
 use serde::{Deserialize, Serialize};
 
 pub enum Command {
-    /// Look for a logger at 10.0.0.1 and list AiM networks in range.
+    /// Look for a logger on USB, then at 10.0.0.1, and list AiM networks in range.
     Scan,
     Join { ssid: String },
     Leave,
@@ -29,8 +30,9 @@ pub enum Command {
 }
 
 pub enum Event {
-    /// Result of a scan: the logger if one answered, AiM networks in range, and the current WiFi network.
-    Scanned { logger: Option<Beacon>, networks: Vec<(String, u8)>, current: Option<String> },
+    /// Result of a scan: the logger if one answered (`usb` when it's plugged
+    /// in), AiM networks in range, and the current WiFi network.
+    Scanned { logger: Option<Beacon>, usb: bool, networks: Vec<(String, u8)>, current: Option<String> },
     Joined { ssid: String },
     Left,
     /// The logger's sessions, plus how many custom tracks were copied from it into the library.
@@ -121,6 +123,11 @@ impl Worker {
             while let Ok(cmd) = cmd_rx.recv() {
                 match cmd {
                     Command::Scan => {
+                        // A MyChron plugged in by USB comes first: no WiFi to join.
+                        if let Some(logger) = usb_logger() {
+                            send(Event::Scanned { logger: Some(logger), usb: true, networks: Vec::new(), current: current_wifi() });
+                            continue;
+                        }
                         let logger = aim_link::probe(AP_ADDRESS, Duration::from_millis(700)).ok();
                         let (networks, current) = if logger.is_some() { (Vec::new(), current_wifi()) } else { (aim_networks(), current_wifi()) };
                         log::debug!(
@@ -129,7 +136,7 @@ impl Worker {
                             current,
                             networks
                         );
-                        send(Event::Scanned { logger, networks, current });
+                        send(Event::Scanned { logger, usb: false, networks, current });
                     }
                     Command::Join { ssid } => {
                         log::info!("joining {ssid}");
@@ -185,8 +192,31 @@ impl Worker {
     }
 }
 
+/// A MyChron plugged in by USB, if there is one, as a scan would find it on WiFi.
+fn usb_logger() -> Option<Beacon> {
+    if !aim_link::usb::is_present() {
+        return None;
+    }
+    let started = std::time::Instant::now();
+    let found = aim_link::usb::UsbLogger::open().and_then(|mut l| l.logger_id());
+    match found {
+        Ok(logger_id) => {
+            log::debug!("scan: MyChron {logger_id:?} on USB");
+            Some(Beacon { address: std::net::Ipv4Addr::UNSPECIFIED, logger_id, round_trip: started.elapsed(), raw: Vec::new() })
+        }
+        Err(e) => {
+            log::warn!("scan: a MyChron is plugged in by USB but didn't answer: {e}");
+            None
+        }
+    }
+}
+
+fn connect() -> Result<Link, String> {
+    Link::connect().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))
+}
+
 fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
-    let mut logger = Logger::connect_ap().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))?;
+    let mut logger = connect()?;
     let listing = logger.list(aim_link::SESSIONS_DIR).map_err(|e| format!("Couldn't list sessions: {e}"))?;
     let summaries = listing
         .iter()
@@ -203,7 +233,7 @@ fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
 /// `0:/tkk/o/<id>.tkk`) into `~/Mychronix/tracks/custom` when they're new, so
 /// sessions recorded on them have a track to attach to. RaceStudio does the
 /// same while connecting. Returns how many were copied.
-fn copy_custom_tracks(logger: &mut Logger) -> usize {
+fn copy_custom_tracks(logger: &mut Link) -> usize {
     let Some(dir) = crate::paths::data("tracks/custom") else { return 0 };
     let Ok(index) = logger.read_file("0:/tkk/dev.ria", |_, _| {}) else { return 0 };
     let Ok(tracks) = aim_track::parse_ria(&index) else { return 0 };
@@ -232,7 +262,7 @@ fn copy_custom_tracks(logger: &mut Logger) -> usize {
 /// Keeps a copy of the logger's own AiM track list (`0:/tkk/al.ria`), so a
 /// computer that has never been online still knows the tracks by name and
 /// start/finish line. Read only when it isn't saved yet (it's ~340 KB).
-fn copy_track_list(logger: &mut Logger) {
+fn copy_track_list(logger: &mut Link) {
     let Some(target) = crate::aim_tracks::mychron_list_target() else { return };
     if target.exists() {
         return;
@@ -253,7 +283,7 @@ fn copy_track_list(logger: &mut Logger) {
 /// canceled download never looks complete.
 fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)) -> Result<usize, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
-    let mut logger = Logger::connect_ap().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))?;
+    let mut logger = connect()?;
     let count = files.len();
     let mut saved = 0;
     for (index, (entry, meta)) in files.iter().enumerate() {

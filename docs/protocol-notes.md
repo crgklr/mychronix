@@ -158,6 +158,28 @@ came back short in the capture (capture loss vs. RS3 stopping early).
 | Newer AiM USB devices are vendor-class WinUSB (`Class=USBDevice`); PID `0130` = "AiM Device 1.3". On Linux they are reachable from userspace (libusb/`nusb`) with no kernel driver | reported | aim-racestudio3-mac `installer/wine-patch/README.md` |
 | aim-racestudio3-mac patches Wine's USB layer and has a USB reinit plan | reported | `installer/wine-patch/build-wineusb-so.sh`, `docs/plans/2026-06-18-usb-prefix-reinit.md` |
 
+### MyChron 6 over USB (`11cc:0110`) — verified Oct 22, 2026
+
+Implemented in `aim-link/src/usb.rs`; checked on a MyChron 6 (firmware as
+shipped Oct 2026): the folder listing, an `.xri`, the settings file and a
+2.2 MB session, all byte-identical to the WiFi downloads. Wire facts first
+from rodrigobrim/myoverlay's notes (GPL-3.0; facts only, no code taken),
+then confirmed and corrected on the device.
+
+| Fact | Status | Source |
+|---|---|---|
+| One vendor-class interface (class `0xFF`), bulk IN `0x81`, bulk OUT `0x02`, 64-byte packets, USB 1.1 full speed. Reachable from userspace with libusb/`nusb`, no kernel driver; the udev rule for vendor `11cc` covers it | observed | `lsusb -v` |
+| A charge-only USB-C cable gives a USB-C "partner" but no USB device at all; a data cable is needed | observed | |
+| A request is the same 64-byte body as over TCP, with `0x0038` at bytes 4–5, a sequence number at 6–7 and `0x00000a01` at 24–27; sent as a **vendor control OUT, request 1** (bmRequestType `0x40`) | observed (layout per myoverlay) | |
+| The reply is a **vendor control IN, request 1**, 64 bytes: on this firmware it echoes the request, with the TCP-style phase `0x0a09` at 24 and `0xfc00` (64,512) at 20 — not the `"cpa"` prefix myoverlay describes | observed | |
+| **Vendor control IN, request 2**, 8 bytes: `[state u32, length u32]`. State 0: a chunk of `length` bytes is ready on bulk IN. State `0x14`: nothing ready (busy preparing the next chunk, or idle after a transfer, keeping the last length) | observed | |
+| After reading a chunk, an empty **vendor control OUT, request 2** asks for the next; chunks are at most 64,512 bytes | observed | |
+| There is no end-of-file state: a file's size comes from its folder listing | observed | |
+| A transfer left unfinished **carries on at the next connection, even after a new request**: the logger serves the rest of the old file. So connecting first reads out any chunks still ready | observed | |
+| Speed: ~2.2 MB in ~4.5 s (~500 KB/s) | observed | |
+| The logger's serial is in `1:/mem/prm_cfg.cff`, in an `SRC` record whose payload is the same `idn` record the WiFi discovery reply carries (serial 12 bytes in) | observed | |
+| Never sent here: identify (`0x00010010`), which on firmware 667+ stages a settings bundle that must be read out before anything else is answered (myoverlay) | reported | myoverlay |
+
 ## Session files
 
 `.xrk`/`.xrz` parsing uses [libxrk](https://github.com/m3rlin45/libxrk) (MIT),
@@ -453,7 +475,8 @@ are not read.
 ### MyChron 6 notes from another project (rodrigobrim/myoverlay, GPL-3.0; facts only)
 
 - USB download exists (device `11cc:0110`, AiM's driver; same 64-byte
-  command bodies as WiFi). Not implemented here.
+  command bodies as WiFi). Implemented and verified Oct 22, 2026: see
+  "MyChron 6 over USB" above.
 - Firmware 667 stages an identify bundle that must be read before the
   listing is served, and a staged payload can outlive the connection that
   asked for it. Mychronix never sends identify; when a reply announces a
