@@ -35,7 +35,7 @@ impl App {
         }
         for e in events {
             match e {
-                Event::Scanned { logger, networks, current } => {
+                Event::Scanned { logger, usb, networks, current } => {
                     self.dev_scanning = false;
                     // Switched to another network some other way (e.g. GNOME's menu):
                     // undo the pause on the other networks' auto-connect.
@@ -43,15 +43,17 @@ impl App {
                         let _ = self.dev.as_ref().unwrap().tx.send(Command::Leave);
                         self.dev_message = Some((true, format!("You're back on {}. Your networks will connect automatically again.", current.clone().unwrap_or_default())));
                     }
-                    let newly = logger.is_some() && self.dev_logger.is_none();
+                    // Newly connected, or moved between USB and WiFi: read the list again.
+                    let newly = logger.is_some() && (self.dev_logger.is_none() || usb != self.dev_usb);
                     self.dev_logger = logger;
+                    self.dev_usb = usb;
                     self.dev_networks = networks;
                     self.dev_current_wifi = current;
                     if self.dev_busy.as_deref() == Some("Looking for your MyChron…") {
                         self.dev_busy = None;
                     }
                     // Remember which MyChron model this logger is, from its WiFi name.
-                    if let (Some(id), Some(ssid)) = (self.dev_logger.as_ref().and_then(|b| b.logger_id), self.dev_current_wifi.as_deref()) {
+                    if let (Some(id), Some(ssid)) = (self.dev_logger.as_ref().and_then(|b| b.logger_id), self.dev_current_wifi.as_deref().filter(|_| !usb)) {
                         let model = model_from_ssid(ssid);
                         if model.starts_with("MyChron") {
                             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
@@ -308,14 +310,21 @@ impl App {
             match &self.dev_logger {
                 Some(b) => {
                     let id = b.logger_id.map(|i| i.to_string()).unwrap_or_default();
-                    let model = self.dev_joined.as_deref().or(self.dev_current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron");
+                    // On USB there's no network name to tell the model: what the Garage knows.
+                    let known = profiles.get(&id).map(|p| p.model.clone()).filter(|m| !m.is_empty());
+                    let model = match (self.dev_usb, known) {
+                        (true, Some(m)) => m,
+                        (true, None) => "MyChron".to_string(),
+                        (false, _) => self.dev_joined.as_deref().or(self.dev_current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron").to_string(),
+                    };
                     let who = profiles.get(&id).map(|p| p.driver.clone()).filter(|d| !d.is_empty());
                     ui.horizontal(|ui| {
                         ui.add(Icon::Mychron.image(theme::GOOD, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new(format!("{model} connected")).font(semibold(17.0)).color(TEXT));
-                            let line = [Some(format!("Logger {id}")), who, self.dev_current_wifi.clone(), Some(format!("answered in {} ms", b.round_trip.as_millis()))]
+                            let how = if self.dev_usb { Some("USB".to_string()) } else { self.dev_current_wifi.clone() };
+                            let line = [Some(format!("Logger {id}")), who, how, Some(format!("answered in {} ms", b.round_trip.as_millis()))]
                                 .into_iter()
                                 .flatten()
                                 .collect::<Vec<_>>()

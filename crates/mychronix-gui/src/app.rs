@@ -224,6 +224,8 @@ pub struct App {
     dev_current_wifi: Option<String>,
     /// The AiM network Mychronix joined (so it can leave it).
     dev_joined: Option<String>,
+    /// The connected MyChron is plugged in by USB rather than on WiFi.
+    dev_usb: bool,
     /// The last error and device message written to the log.
     logged_error: Option<String>,
     logged_dev_message: Option<(bool, String)>,
@@ -874,7 +876,7 @@ impl App {
                 ui.horizontal_centered(|ui| {
                     match &self.dev_logger {
                         Some(b) => {
-                            ui.add(Icon::Wifi.image(theme::GOOD, 14.0));
+                            ui.add(if self.dev_usb { Icon::Usb } else { Icon::Wifi }.image(theme::GOOD, 14.0));
                             let id = b.logger_id.map(|i| format!("logger {i}")).unwrap_or_else(|| "logger".into());
                             ui.label(RichText::new(format!("MyChron connected  ·  {id}")).size(12.0).color(SECONDARY));
                         }

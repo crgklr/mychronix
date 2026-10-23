@@ -302,7 +302,7 @@ impl Logger {
 /// firmware, reset WiFi. Mychronix only reads, and refuses to build these.
 const DESTRUCTIVE: [(u16, u16); 7] = [(0x06, 0x04), (0x07, 0x04), (0x08, 0x04), (0x09, 0x04), (0x0d, 0x04), (0x1000, 0x05), (0x05, 0x0c)];
 
-fn request_body(command: u16, sub: u16, path: &str) -> Result<Vec<u8>, Error> {
+pub(crate) fn request_body(command: u16, sub: u16, path: &str) -> Result<Vec<u8>, Error> {
     if DESTRUCTIVE.contains(&(command, sub)) {
         return Err(Error::Protocol(format!("refusing destructive command {command:#x}/{sub:#x}")));
     }
