@@ -56,7 +56,32 @@ pub fn open_session(path: &std::path::Path) -> Result<aim_xrk::Session, String> 
     if session.channels.iter().all(|c| c.values.is_empty()) {
         return Err("it has no recorded data (it may not be a session file)".into());
     }
+    let mut session = session;
+    relap(&mut session, path);
     Ok(session)
+}
+
+/// Laps timed from GPS when the logger's look untimed (one long lap, or laps
+/// run together), against the start/finish lines of the tracks within a few
+/// kilometers of where the session was recorded (see `aim_xrk::relap`).
+fn relap(session: &mut aim_xrk::Session, path: &std::path::Path) {
+    if !aim_xrk::relap::needs_retiming(session) {
+        return;
+    }
+    let Some(gps) = session.gps.as_ref() else { return };
+    let (Some(&lat), Some(&lon)) = (gps.latitude.first(), gps.longitude.first()) else { return };
+    // Your own tracks' lines first, so every session at a place starts its
+    // laps at the same line; AiM's when none of yours fits.
+    let (own, aim) = crate::tracks::start_finishes_near(lat, lon, 3_000.0);
+    let before = session.laps.len();
+    for lines in [own, aim] {
+        if let Some((k, laps)) = aim_xrk::relap::fix(session, &lines) {
+            log::info!("{}: {before} lap(s) as the logger timed it; {} timed from GPS against start/finish {:?}", path.display(), laps.len(), lines[k]);
+            session.laps = laps;
+            session.info.laps_from_gps = true;
+            return;
+        }
+    }
 }
 
 #[cfg(test)]
