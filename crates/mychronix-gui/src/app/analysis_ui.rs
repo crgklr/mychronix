@@ -399,6 +399,14 @@ impl App {
                 ui.label(RichText::new(part).font(if strong { medium(15.0) } else { regular(15.0) }).color(if strong { TEXT } else { SECONDARY }));
             }
         });
+        // Laps the MyChron didn't time, timed from GPS (see `jobs::relap`).
+        if session.info.laps_from_gps {
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(RichText::new("Laps timed from GPS at the track's start/finish line: the MyChron didn't time them (it recorded one long lap, or laps run together).").size(13.0).color(DIM))
+                    .wrap(),
+            );
+        }
         ui.add_space(14.0);
         panel_tiles(ui, session);
         ui.add_space(16.0);

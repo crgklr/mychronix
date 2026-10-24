@@ -23,6 +23,15 @@ pub struct Digest {
     /// The logger's model when the file says which, e.g. "MyChron 6".
     #[serde(default)]
     pub model: String,
+    /// The laps were timed from GPS (the logger's weren't): then these stand
+    /// in for the logger's summary, which still counts one long lap.
+    #[serde(default)]
+    pub laps_from_gps: bool,
+    /// Every lap, out-lap and in-lap included, and the best (number, ms).
+    #[serde(default)]
+    pub lap_count: u32,
+    #[serde(default)]
+    pub best: Option<(u32, u64)>,
 }
 
 impl Digest {
@@ -33,6 +42,9 @@ impl Digest {
             working: aim_xrk::checks::working_sensors(session),
             issues: aim_xrk::checks::sensor_issues(session).iter().map(|i| (i.channel.clone(), kind_text(i.kind))).collect(),
             model: session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string).unwrap_or_default(),
+            laps_from_gps: session.info.laps_from_gps,
+            lap_count: session.laps.len() as u32,
+            best: session.best_lap(crate::app::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
         }
     }
 
@@ -72,7 +84,8 @@ fn key(path: &Path) -> String {
 
 impl Digests {
     fn file() -> Option<PathBuf> {
-        crate::paths::cache_dir().map(|d| d.join("session-digests-v2.json"))
+        // v3: laps timed from GPS (see `jobs::relap`).
+        crate::paths::cache_dir().map(|d| d.join("session-digests-v3.json"))
     }
 
     pub fn load() -> Self {

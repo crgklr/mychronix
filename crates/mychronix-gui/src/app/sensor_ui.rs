@@ -19,6 +19,8 @@ pub(super) struct SensorState {
     /// Sessions already looked up (digest known, or asked for), so the pages
     /// that want digests on every frame don't touch the disk again for them.
     pub digests_asked: std::collections::HashSet<PathBuf>,
+    /// A digest came back with laps timed from GPS: the library reloads to show them.
+    pub relapped: bool,
     /// Weather being fetched, and the sessions already asked about this run.
     pub weather_rx: Option<std::sync::mpsc::Receiver<(PathBuf, crate::weather::Weather)>>,
     pub weather_asked: std::collections::HashSet<PathBuf>,
@@ -98,12 +100,34 @@ impl App {
     }
 
     /// Asks for the digests of `paths` not yet known; picks up finished ones.
+    /// Sessions the logger may not have timed get looked at in the background
+    /// (see `jobs::relap`); when laps come back timed from GPS, the library
+    /// reloads so the Sessions page, Garage and Events show them.
+    pub(super) fn relap_poll(&mut self, ctx: &egui::Context) {
+        if self.sensors.digest_rx.is_none() {
+            let pending = self.library.as_mut().map(|l| std::mem::take(&mut l.relap_pending)).unwrap_or_default();
+            if !pending.is_empty() {
+                log::info!("looking at {} sessions the logger may not have timed", pending.len());
+                self.want_digests(pending.into_iter(), ctx);
+            }
+        } else {
+            // Collect what's arrived, whichever page is showing.
+            self.want_digests(std::iter::empty(), ctx);
+        }
+        if std::mem::take(&mut self.sensors.relapped) {
+            self.library = None;
+        }
+    }
+
     pub(super) fn want_digests(&mut self, paths: impl Iterator<Item = PathBuf>, ctx: &egui::Context) {
         let digests = self.sensors.digests.get_or_insert_with(Digests::load);
         if let Some(rx) = &self.sensors.digest_rx {
             loop {
                 match rx.try_recv() {
-                    Ok((p, d)) => digests.insert(&p, d),
+                    Ok((p, d)) => {
+                        self.sensors.relapped |= d.laps_from_gps;
+                        digests.insert(&p, d)
+                    }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         self.sensors.digest_rx = None;

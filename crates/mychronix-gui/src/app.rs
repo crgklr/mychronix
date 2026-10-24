@@ -661,6 +661,7 @@ impl eframe::App for App {
         if !warnings.is_empty() {
             self.error = Some(warnings.join("\n"));
         }
+        self.relap_poll(&ui.ctx().clone());
         let session = self.session.take();
         let window = session.as_ref().map(|s| self.window(s));
 

@@ -116,6 +116,9 @@ pub struct Library {
     pub sessions: Vec<LocalSession>,
     /// Where each source came from, for the page's footnote.
     pub sources: Vec<String>,
+    /// Sessions the logger may not have timed (one lap or none, but minutes
+    /// long) that haven't been looked at yet: their laps may come from GPS.
+    pub relap_pending: Vec<PathBuf>,
 }
 
 impl LocalSession {
@@ -311,6 +314,21 @@ impl Library {
             t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));
         }
 
+        // Laps timed from GPS (see `jobs::relap`) stand in for the logger's summary.
+        let digests = crate::digest::Digests::load();
+        for s in &mut lib.sessions {
+            match digests.get(&s.path) {
+                Some(d) if d.laps_from_gps => {
+                    s.summary.laps = Some(d.lap_count);
+                    s.summary.best_lap_number = d.best.map(|b| b.0);
+                    s.summary.best_lap_ms = d.best.map(|b| b.1);
+                }
+                Some(_) => {}
+                None if s.summary.laps.unwrap_or(0) <= 1 && s.summary.duration_ms.unwrap_or(0) > 120_000 => lib.relap_pending.push(s.path.clone()),
+                None => {}
+            }
+        }
+
         // Visited tracks first, then custom, then by name.
         lib.sort();
         for t in &mut lib.tracks {
@@ -463,4 +481,33 @@ impl Favorites {
         let Some(path) = Self::path() else { return Ok(()) };
         crate::storage::save(&path, self)
     }
+}
+
+/// Start/finish lines within `within_m` of a spot, nearest first: your own
+/// tracks' (custom ones, as on your MyChron), then AiM's database's. The
+/// lines a session recorded there may have been meant to cross (see
+/// `aim_xrk::relap`). Reads the track files themselves, not the whole library.
+pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
+    let ours = crate::paths::data("tracks").unwrap_or_default();
+    let here = LatLon { lat, lon };
+    let mut own: Vec<LatLon> = files_with_ext(&ours, "tkk").iter().filter_map(|p| aim_track::read_tkk(p).ok()?.start_finish).collect();
+    let mut aim: Vec<LatLon> = Vec::new();
+    let mut rias = files_with_ext(&ours, "ria");
+    rias.extend(crate::aim_tracks::list_path());
+    rias.extend(crate::aim_tracks::mychron_list_path());
+    for path in rias {
+        let custom = path.file_name().is_some_and(|n| n == "dev.ria");
+        if let Ok(records) = aim_track::read_ria(&path) {
+            let points = records.into_iter().filter_map(|r| r.start_finish);
+            if custom { own.extend(points) } else { aim.extend(points) }
+        }
+    }
+    let near = |points: Vec<LatLon>| {
+        let mut v: Vec<(f64, LatLon)> = points.into_iter().map(|p| (p.distance_m(&here), p)).filter(|(d, _)| *d <= within_m).collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // The same line from several sources, once.
+        v.dedup_by(|a, b| a.1.distance_m(&b.1) < 1.0);
+        v.into_iter().map(|(_, p)| (p.lat, p.lon)).collect::<Vec<_>>()
+    };
+    (near(own), near(aim))
 }

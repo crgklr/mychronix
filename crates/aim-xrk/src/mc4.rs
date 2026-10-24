@@ -382,6 +382,7 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
         logger_model: u16_at(h, 0x7C).and_then(crate::mychron_model).map(str::to_string),
         vehicle: None,
         imu_mount: None,
+        laps_from_gps: false,
     };
     if channels.iter().all(|c| c.values.is_empty()) && laps.is_empty() {
         return Err(Error::Parse("the downloaded run holds no data".into()));
