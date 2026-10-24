@@ -136,6 +136,11 @@ and the track's GPS position, so share only what you're happy to make public.
 Download the latest release from the
 [Releases page](https://github.com/crgklr/mychronix/releases).
 
+**Using Mychronix? Please star it on GitHub** (the ☆ Star button at the top of
+[this page](https://github.com/crgklr/mychronix)). Mychronix has no analytics
+and never reports anything about you, so stars are the only way to know people
+are using it.
+
 ### Linux
 
 **Fedora**: add the Mychronix repository once, and `dnf upgrade` (or GNOME
