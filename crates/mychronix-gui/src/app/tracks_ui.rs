@@ -98,8 +98,8 @@ impl App {
         self.track_sel = Some(i);
         let t = &lib.tracks[i];
         self.track_file = t.tkk.as_ref().and_then(|p| aim_track::read_tkk(p).ok()).map(|f| (i, f));
-        if let Some(sf) = t.start_finish {
-            self.map_memory.center_at(walkers::lat_lon(sf.lat, sf.lon));
+        if let Some(c) = t.start_finish.or(t.center) {
+            self.map_memory.center_at(walkers::lat_lon(c.lat, c.lon));
             let _ = self.map_memory.set_zoom(16.5);
         }
         self.fit_map = true;
@@ -312,6 +312,8 @@ impl App {
     fn track_detail(&mut self, ui: &mut Ui, lib: &Library, i: usize, map_h: f32) {
         let t = &lib.tracks[i];
         let file = self.track_file.as_ref().filter(|(j, _)| *j == i).map(|(_, f)| f);
+        // The track file's own start/finish, read on selection (AiM tracks' come with the details).
+        let start_finish = file.and_then(|f| f.start_finish).or(t.start_finish);
         let info = file.map(|f| &f.info);
 
         // AiM's details for the venue, laid out like RaceStudio's track view.
@@ -364,7 +366,7 @@ impl App {
                     if let Some(tz) = file.and_then(|f| f.timezone.as_deref()) {
                         ui.label(RichText::new(format!("Time zone: {tz}")).size(13.0).color(SECONDARY));
                     }
-                    if let Some(sf) = t.start_finish {
+                    if let Some(sf) = start_finish {
                         let ns = if sf.lat >= 0.0 { "N" } else { "S" };
                         let ew = if sf.lon >= 0.0 { "E" } else { "W" };
                         ui.label(
@@ -467,7 +469,7 @@ impl App {
         let sectors = (mode == MapMode::Splits)
             .then(|| {
                 let reference = if !outline.is_empty() { outline.clone() } else { lap.map(|l| l.points.clone()).unwrap_or_default() };
-                splits::Sectors::even(&reference, t.start_finish, self.split_count)
+                splits::Sectors::even(&reference, start_finish, self.split_count)
             })
             .flatten();
         let overlay = TrackOverlay {
@@ -480,11 +482,11 @@ impl App {
             speed: show_speed.then(|| lap.cloned()).flatten(),
             sectors: sectors.as_ref().map(|s| (s.path.clone(), s.boundaries.clone())),
             elevation: (mode == MapMode::Elevation).then(|| (outline.clone(), elevation.clone())),
-            start_finish: t.start_finish,
+            start_finish,
         };
 
         tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), self.map_satellite);
-        let center = t.start_finish.map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
+        let center = start_finish.or(t.center).map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
         // Zoom to fit the drawn track once per selection.
         if std::mem::take(&mut self.fit_map) {
             let drawn: Vec<aim_track::LatLon> = match (&overlay.speed, &overlay.sectors, &overlay.elevation) {

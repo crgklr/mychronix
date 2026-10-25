@@ -53,7 +53,9 @@ pub struct TrackRecord {
     pub country: String,
     /// State or region code where the database has one, e.g. `CT`.
     pub region: String,
-    pub start_finish: Option<LatLon>,
+    /// The track's center: where a logger looks to tell which track it's at.
+    /// Not the start/finish line, which only the track's `.tkk` records.
+    pub center: Option<LatLon>,
     pub length_m: Option<f32>,
     /// Eight-character id, also the track's `.tkk` file name.
     pub id: String,
@@ -83,7 +85,7 @@ fn parse_ria_record(r: &[u8]) -> Option<TrackRecord> {
         name,
         country: c_str(&r[28..32]),
         region: c_str(&r[32..36]),
-        start_finish: LatLon::from_e7(i32_at(36), i32_at(40)),
+        center: LatLon::from_e7(i32_at(36), i32_at(40)),
         length_m: Some(f32::from_le_bytes(r[48..52].try_into().unwrap())).filter(|l| l.is_finite() && *l > 0.0),
         id: c_str(&r[56..64]),
         guid: hex(&r[64..72]),
@@ -102,6 +104,11 @@ pub struct TrackFile {
     pub guid: Option<String>,
     pub country: String,
     pub region: String,
+    /// The track's center (the point its `.ria` record carries). A track
+    /// the MyChron made puts it on the start/finish; AiM's and RaceStudio's
+    /// put it mid-track.
+    pub center: Option<LatLon>,
+    /// Where laps start and end (as the logger records in each session).
     pub start_finish: Option<LatLon>,
     pub length_m: Option<f32>,
     pub kind: TrackKind,
@@ -188,14 +195,18 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
     };
 
     // Vnfo: name 0..28, country 28..32, region 32..36, length f32 at 44,
-    // start/finish at 48..56, type at 72, guid in the last 8 bytes.
+    // center at 48..56, type at 72, start/finish at 80..88, guid in the last
+    // 8 bytes. The start/finish matches what loggers record in sessions at
+    // the track (verified on NKA and on a custom track, Oct 24, 2026).
     if let Some(v) = find("Vnfo") {
         let u32_at = |o: usize| v.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
         t.name = c_str(v.get(0..28).unwrap_or_default());
         t.country = c_str(v.get(28..32).unwrap_or_default());
         t.region = c_str(v.get(32..36).unwrap_or_default());
         t.length_m = u32_at(44).map(f32::from_bits).filter(|l| l.is_finite() && *l > 0.0);
-        t.start_finish = u32_at(48).zip(u32_at(52)).and_then(|(a, b)| LatLon::from_e7(a as i32, b as i32));
+        let point = |o: usize| u32_at(o).zip(u32_at(o + 4)).and_then(|(a, b)| LatLon::from_e7(a as i32, b as i32));
+        t.center = point(48);
+        t.start_finish = point(80);
         t.kind = u32_at(72).map(TrackKind::from_code).unwrap_or_default();
         t.guid = v.len().checked_sub(8).map(|o| hex(&v[o..])).filter(|g| g != "0000000000000000");
     }
@@ -345,8 +356,8 @@ mod tests {
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].name, "10 Mile");
         assert_eq!((tracks[0].country.as_str(), tracks[0].region.as_str()), ("US", "LA"));
-        let sf = tracks[0].start_finish.unwrap();
-        assert!((sf.lat - 30.9553461).abs() < 1e-9 && (sf.lon + 92.8034725).abs() < 1e-9);
+        let c = tracks[0].center.unwrap();
+        assert!((c.lat - 30.9553461).abs() < 1e-9 && (c.lon + 92.8034725).abs() < 1e-9);
         assert_eq!(tracks[0].id, "0s5jo9ob");
         assert_eq!(tracks[0].guid, "530d2de3440e0000");
         assert_eq!(tracks[1].region, "");
@@ -370,6 +381,8 @@ mod tests {
         info[468..476].copy_from_slice(&0x0001_ae52_e9e5_2ea3u64.to_le_bytes());
         info[48..52].copy_from_slice(&451_234_567i32.to_le_bytes());
         info[52..56].copy_from_slice(&(-91_234_567i32).to_le_bytes());
+        info[80..84].copy_from_slice(&451_239_999i32.to_le_bytes());
+        info[84..88].copy_from_slice(&(-91_230_000i32).to_le_bytes());
         let mut pts = Vec::new();
         for k in 0..3i32 {
             pts.extend((451_234_567 + k * 100).to_le_bytes());
@@ -413,7 +426,9 @@ mod tests {
         let mut buf2 = frame::Frame::new(b"Ptkk", header2).encode();
         buf2.extend(frame::Frame::new(b"pts\0", zero_first).encode());
         assert_eq!(parse_tkk(&buf2).unwrap().elevation_m, [265.0, 265.0, 266.0, 267.0, 267.0]);
-        assert!((t.start_finish.unwrap().lat - 45.1234567).abs() < 1e-9);
+        assert!((t.center.unwrap().lat - 45.1234567).abs() < 1e-9);
+        let sf = t.start_finish.unwrap();
+        assert!((sf.lat - 45.1239999).abs() < 1e-9 && (sf.lon + 9.123).abs() < 1e-9);
         assert_eq!(t.guid.as_deref(), Some("a32ee5e952ae0100"));
     }
 

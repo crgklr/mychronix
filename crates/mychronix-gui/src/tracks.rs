@@ -38,6 +38,10 @@ pub struct Track {
     pub tkk: Option<PathBuf>,
     pub country: String,
     pub region: String,
+    /// Where the track is, for finding the nearest one (see `aim_track::TrackRecord::center`).
+    pub center: Option<LatLon>,
+    /// Where laps start and end, from the track's `.tkk`: at load for custom
+    /// tracks, with the details for AiM ones.
     pub start_finish: Option<LatLon>,
     pub guid: String,
     pub kind: Kind,
@@ -176,6 +180,7 @@ impl Library {
                 tkk: Some(path.clone()),
                 country: t.country,
                 region: t.region,
+                center: t.center.or(t.start_finish),
                 start_finish: t.start_finish,
                 guid,
                 kind: Kind::Custom,
@@ -219,7 +224,8 @@ impl Library {
                     tkk,
                     country: r.country,
                     region: r.region,
-                    start_finish: r.start_finish,
+                    center: r.center,
+                    start_finish: None,
                     guid: r.guid,
                     kind: if custom_db { Kind::Custom } else { Kind::Aim },
                     outline: Vec::new(),
@@ -238,12 +244,12 @@ impl Library {
             if !lib.tracks[i].country.is_empty() && (lib.tracks[i].kind != Kind::Custom || lib.tracks[i].city.is_some()) {
                 continue;
             }
-            let Some(here) = lib.tracks[i].start_finish else { continue };
+            let Some(here) = lib.tracks[i].center else { continue };
             let nearest = lib
                 .tracks
                 .iter()
                 .filter(|t| t.kind == Kind::Aim && !t.country.is_empty())
-                .filter_map(|t| t.start_finish.map(|p| (p.distance_m(&here), t)))
+                .filter_map(|t| t.center.map(|p| (p.distance_m(&here), t)))
                 .filter(|(d, _)| *d < 20_000.0)
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .map(|(_, t)| (t.country.clone(), t.region.clone(), t.tkk.clone()));
@@ -340,7 +346,7 @@ impl Library {
     /// A track by name, preferring the one nearest where the session was recorded.
     fn match_by_name(&self, name: &str, s: &SessionSummary) -> Option<usize> {
         let place = s.start_finish.map(|(lat, lon)| LatLon { lat, lon });
-        let distance = |t: &Track| match (place, t.start_finish) {
+        let distance = |t: &Track| match (place, t.center) {
             (Some(a), Some(b)) => a.distance_m(&b),
             _ => f64::MAX / 2.0,
         };
@@ -355,7 +361,7 @@ impl Library {
         }
         let name = s.track.as_deref()?;
         let place = s.start_finish.map(|(lat, lon)| LatLon { lat, lon });
-        let near = |t: &Track| match (place, t.start_finish) {
+        let near = |t: &Track| match (place, t.center) {
             (Some(a), Some(b)) => a.distance_m(&b) < SAME_PLACE_M,
             _ => true,
         };
@@ -398,6 +404,7 @@ impl Library {
         if t.outline.is_empty() {
             t.outline = d.outline;
         }
+        t.start_finish = t.start_finish.or(d.start_finish);
         t.index();
     }
 
@@ -429,6 +436,7 @@ pub struct Details {
     pub kind: aim_track::TrackKind,
     pub surface: Vec<&'static str>,
     pub outline: Vec<LatLon>,
+    pub start_finish: Option<LatLon>,
 }
 
 /// Reads track files on a background thread, sending details as they're read.
@@ -444,6 +452,7 @@ pub fn load_details(files: Vec<(usize, PathBuf)>, ctx: eframe::egui::Context) ->
                 kind: t.kind,
                 surface: t.surface,
                 outline: t.outline,
+                start_finish: t.start_finish,
             };
             if tx.send((i, d)).is_err() {
                 return;
@@ -497,10 +506,14 @@ pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<(f64, f64)
     rias.extend(crate::aim_tracks::mychron_list_path());
     for path in rias {
         let custom = path.file_name().is_some_and(|n| n == "dev.ria");
-        if let Ok(records) = aim_track::read_ria(&path) {
-            let points = records.into_iter().filter_map(|r| r.start_finish);
-            if custom { own.extend(points) } else { aim.extend(points) }
-        }
+        let Ok(records) = aim_track::read_ria(&path) else { continue };
+        // A list records each track's center; its start/finish is in its own file.
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let points = records
+            .into_iter()
+            .filter(|r| r.center.is_some_and(|c| c.distance_m(&here) <= within_m))
+            .filter_map(|r| aim_track::read_tkk(dir.join(format!("{}.tkk", r.id))).ok()?.start_finish);
+        if custom { own.extend(points) } else { aim.extend(points) }
     }
     let near = |points: Vec<LatLon>| {
         let mut v: Vec<(f64, LatLon)> = points.into_iter().map(|p| (p.distance_m(&here), p)).filter(|(d, _)| *d <= within_m).collect();

@@ -87,7 +87,7 @@ impl App {
                 if s.weather.is_some() || self.sensors.weather_asked.contains(&s.path) {
                     return None;
                 }
-                let pos = s.summary.start_finish.or_else(|| s.track.and_then(|t| lib.tracks[t].start_finish).map(|p| (p.lat, p.lon)))?;
+                let pos = s.summary.start_finish.or_else(|| s.track.and_then(|t| lib.tracks[t].center).map(|p| (p.lat, p.lon)))?;
                 let date = s.summary.date.map(crate::events::iso)?;
                 let hour = s.summary.start_time.as_deref().and_then(|t| t.get(..2)).and_then(|h| h.parse().ok()).unwrap_or(12usize).min(23);
                 Some(crate::weather::Want { session: s.path.clone(), lat: pos.0, lon: pos.1, date, hour })
