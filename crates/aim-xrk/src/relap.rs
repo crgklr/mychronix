@@ -127,7 +127,9 @@ pub fn retime(session: &Session, candidates: &[(f64, f64)]) -> Option<(usize, Ve
         }
         let mut times: Vec<i64> = passes.windows(2).map(|w| w[1].time_ms - w[0].time_ms).collect();
         times.sort_unstable();
-        let median = times[times.len() / 2] as f64;
+        // The typical lap: the lower middle one. With only a few laps, slow
+        // ones (a warm-up, a stop) would otherwise make it the slow one.
+        let median = times[(times.len() - 1) / 2] as f64;
         // Laps within a fifth of the typical one: real laps, not a pit stop or a spin.
         let good = times.iter().filter(|&&t| (t as f64 - median).abs() <= median * 0.2).count();
         if good < 2 || good * 2 < times.len() {
@@ -211,6 +213,34 @@ mod tests {
         // The point at x = 0 is passed twice a lap, one way then the other: laps, not half-laps.
         let laps = lap_crossings(&crossings(&g, (lat0, lon0)));
         assert!(laps.windows(2).all(|w| (w[1].time_ms - w[0].time_ms - 40_000).abs() < 100), "{laps:?}");
+    }
+
+    #[test]
+    fn a_few_laps_with_slow_ones_still_count() {
+        // As a real session can go: 15 s to the line, then laps of 40 s (a
+        // warm-up), 20, 20, 90 (a stop) and 20: the circle at a different pace
+        // each time round, with the line where each lap starts.
+        let one = circle(1);
+        let mut gps = GpsTrack::default();
+        let mut t0 = 0;
+        for secs in [15, 40, 20, 20, 90, 20] {
+            for i in 0..200 {
+                gps.times_ms.push(t0 + one.times_ms[i] * secs / 20);
+                gps.latitude.push(one.latitude[i]);
+                gps.longitude.push(one.longitude[i]);
+                gps.speed_kmh.push(36.0);
+                gps.yaw_rate_dps.push(0.0);
+            }
+            t0 += secs * 1000;
+        }
+        let rpm = crate::Channel { name: "RPM".into(), group: None, units: String::new(), decimals: 0, interpolate: true, times_ms: gps.times_ms.clone(), values: vec![9000.0; gps.len()] };
+        let session = Session { info: Default::default(), channels: vec![rpm], laps: vec![Lap { number: 1, start_ms: 0, end_ms: t0 }], gps: Some(gps) };
+        // Two real laps among four: enough to trust the line. (Taking the
+        // upper middle lap, 40 s, as typical counted only one.)
+        let (_, laps) = retime(&session, &[(41.0 + R / 110_540.0, -73.0)]).expect("a line");
+        let times: Vec<i64> = laps.iter().map(Lap::duration_ms).collect();
+        assert_eq!(laps.len(), 6, "{times:?}");
+        assert!(laps[2..4].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 100), "{times:?}");
     }
 
     #[test]

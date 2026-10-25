@@ -84,8 +84,9 @@ fn key(path: &Path) -> String {
 
 impl Digests {
     fn file() -> Option<PathBuf> {
-        // v3: laps timed from GPS (see `jobs::relap`).
-        crate::paths::cache_dir().map(|d| d.join("session-digests-v3.json"))
+        // v3: laps timed from GPS (see `jobs::relap`); v4: against tracks'
+        // real start/finish lines, and with few laps.
+        crate::paths::cache_dir().map(|d| d.join("session-digests-v4.json"))
     }
 
     pub fn load() -> Self {
