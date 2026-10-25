@@ -45,11 +45,13 @@ pub(super) struct MapState {
     target: Option<(f64, f64, f64)>,
     shown: Option<(f64, f64, f64)>,
     anim: Option<((f64, f64, f64), f64)>,
+    /// The key's size when last drawn, to fit it beside the lap picker.
+    legend: Vec2,
 }
 
 impl Default for MapState {
     fn default() -> Self {
-        Self { whole: false, color: ColorBy::default(), all_laps: false, satellite: false, memory: walkers::MapMemory::default(), target: None, shown: None, anim: None }
+        Self { whole: false, color: ColorBy::default(), all_laps: false, satellite: false, memory: walkers::MapMemory::default(), target: None, shown: None, anim: None, legend: Vec2::ZERO }
     }
 }
 
@@ -144,7 +146,9 @@ impl walkers::Plugin for Overlay {
             painter.circle_filled(c, r + 2.0, Color32::from_black_alpha(170));
             painter.circle_filled(c, r, if *on { TEXT } else { SURFACE_ACTIVE });
             painter.text(c, egui::Align2::CENTER_CENTER, (number + 1).to_string(), semibold(12.5), if *on { ON_TEXT } else { TEXT });
-            let hit = ui.interact(Rect::from_center_size(c, Vec2::splat(30.0)), ui.id().with(("map_corner", number)), Sense::click());
+            // Click and drag: a hand moves a little while pressing, and the
+            // map underneath would take that as a drag and pan away.
+            let hit = ui.interact(Rect::from_center_size(c, Vec2::splat(30.0)), ui.id().with(("map_corner", number)), Sense::click_and_drag());
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -268,11 +272,12 @@ impl App {
         let rect = map.rect;
 
         // Overlays: corners along the top left, color and imagery top right, the
-        // numbers on the right, the lap and legend bottom left, speed above them.
-        let ov = |ui: &mut Ui, at: Rect, add: &mut dyn FnMut(&mut Ui)| {
+        // numbers on the right, the lap bottom left with the key beside it, speed above.
+        let ov = |ui: &mut Ui, at: Rect, add: &mut dyn FnMut(&mut Ui)| -> Rect {
             ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                Frame::new().fill(GLASS).stroke(Stroke::new(1.0, theme::OUTLINE)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(6)).show(ui, |ui| add(ui));
-            });
+                Frame::new().fill(GLASS).stroke(Stroke::new(1.0, theme::OUTLINE)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(6)).show(ui, |ui| add(ui)).response.rect
+            })
+            .inner
         };
         let n = model.segments.len();
         let mut go_corner: Option<Option<usize>> = None;
@@ -325,7 +330,7 @@ impl App {
         let pos = laps_with.iter().position(|&t| t == trace).unwrap_or(0);
         let mut step: Option<usize> = None;
         let mut all = self.map_view.all_laps;
-        ov(ui, Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 58.0), vec2(rect.width() - panel_w - 60.0, 44.0)), &mut |ui| {
+        let picker = ov(ui, Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 58.0), vec2(rect.width() - panel_w - 60.0, 44.0)), &mut |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 if chip(ui, "‹", false).on_hover_text("Previous lap").clicked() && pos > 0 {
@@ -358,17 +363,26 @@ impl App {
             });
         });
         self.map_view.all_laps = all;
-        // What the colors mean.
-        ov(ui, Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 100.0), vec2(rect.width() - panel_w - 60.0, 36.0)), &mut |ui| {
-            legend(ui, color, &model, trace, rpm, lap.start_ms);
-        });
+        // What the colors mean: on the bottom row, centered in the room between
+        // the lap picker and the satellite switch, or above the lap picker when
+        // that room is too narrow.
+        let switch = Rect::from_min_size(rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0), vec2(150.0, 44.0));
+        let (room_l, room_r) = (picker.right() + 12.0, switch.left() - 12.0);
+        let size = self.map_view.legend;
+        let beside = size.x > 0.0 && size.x <= room_r - room_l;
+        let at = if beside {
+            Rect::from_min_size(pos2((room_l + room_r - size.x) / 2.0, picker.center().y - size.y / 2.0), size + vec2(1.0, 1.0))
+        } else {
+            Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 100.0), vec2(rect.width() - panel_w - 60.0, 36.0))
+        };
+        self.map_view.legend = ov(ui, at, &mut |ui| legend(ui, color, &model, trace, rpm, lap.start_ms)).size();
         // Speed through the corner, this lap against the best of it, with how the kart slowed underneath.
         if !whole {
-            let at_rect = Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 100.0 - 10.0 - 150.0), vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0));
+            let above = if beside { 58.0 } else { 100.0 };
+            let at_rect = Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - above - 10.0 - 150.0), vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0));
             ov(ui, at_rect, &mut |ui| speed_trace(ui, &model, trace, reference, corner));
         }
         // Satellite imagery under the track, on or off, in the lower right.
-        let switch = Rect::from_min_size(rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0), vec2(150.0, 44.0));
         ov(ui, switch, &mut |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -381,7 +395,7 @@ impl App {
         });
         self.map_view.satellite = sat;
         if satellite {
-            ui.painter().text(switch.left_bottom() + vec2(-10.0, -6.0), egui::Align2::RIGHT_BOTTOM, "Imagery © Esri, Maxar, Earthstar Geographics", regular(10.5), Color32::from_white_alpha(150));
+            ui.painter().text(switch.right_top() + vec2(-4.0, -6.0), egui::Align2::RIGHT_BOTTOM, "Imagery © Esri, Maxar, Earthstar Geographics", regular(10.5), Color32::from_white_alpha(150));
         }
 
         // The arrow keys step through the corners (unless they're moving a text cursor).

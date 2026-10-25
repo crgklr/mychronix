@@ -288,6 +288,8 @@ pub struct App {
     speed_laps: std::collections::HashMap<String, Option<SpeedLap>>,
     /// What the Tracks map shows.
     track_map: MapMode,
+    /// The driver whose sessions the Tracks page lists (None: everyone's).
+    track_driver: Option<String>,
     /// Number of sectors on the Splits view.
     split_count: usize,
     /// Set when a track is selected; the map zooms to fit it on the next draw.
@@ -548,7 +550,9 @@ impl eframe::App for App {
     }
 
     /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames;
-    /// "frame:x,y:dy" scrolls the wheel there by dy points instead (for testing).
+    /// "frame:x,y:dy" scrolls the wheel there by dy points instead, and
+    /// "frame:x,y>x2,y2" presses at one point and lets go at the other, as a
+    /// hand does (for testing).
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.input_frames += 1;
         // Touch vs mouse: a touchscreen tap also moves the pointer, so remember
@@ -571,6 +575,10 @@ impl eframe::App for App {
                 Some((xy, dy)) => (xy, dy.trim().parse::<f32>().ok()),
                 None => (xy, None),
             };
+            let (xy, to) = match xy.split_once('>') {
+                Some((a, b)) => (a, b.split_once(',').and_then(|(x, y)| Some(pos2(x.trim().parse().ok()?, y.trim().parse().ok()?)))),
+                None => (xy, None),
+            };
             let (Ok(f), Some((x, y))) = (f.trim().parse::<u32>(), xy.split_once(',')) else { continue };
             let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>()) else { continue };
             let pos = pos2(x, y);
@@ -584,6 +592,16 @@ impl eframe::App for App {
                         phase: egui::TouchPhase::Move,
                         modifiers: Default::default(),
                     }),
+                    _ => {}
+                }
+                continue;
+            }
+            if let Some(to) = to {
+                match self.input_frames.checked_sub(f) {
+                    Some(0) => raw.events.push(egui::Event::PointerMoved(pos)),
+                    Some(1) => raw.events.push(button(true)),
+                    Some(2..=4) => raw.events.push(egui::Event::PointerMoved(pos + (to - pos) * (self.input_frames - f - 1) as f32 / 3.0)),
+                    Some(5) => raw.events.push(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }),
                     _ => {}
                 }
                 continue;

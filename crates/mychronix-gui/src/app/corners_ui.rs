@@ -294,6 +294,7 @@ impl App {
                     ui.label(RichText::new(text).size(12.0).color(DIM));
                     ui.add_space(8.0);
                 };
+                key(theme::GOOD, "not slowing (on the throttle)");
                 key(BRAKE, "braking");
                 if model.has_trail {
                     key(TRAIL, "braking while turning (trail)");
@@ -340,7 +341,9 @@ fn corners_map(ui: &mut Ui, model: &CornerModel, trace: usize, selected: usize, 
         let p = ui.painter_at(rect);
         for (k, seg) in model.segments.iter().enumerate() {
             let pts: Vec<egui::Pos2> = (idx(seg.from)..=idx(seg.to)).map(|i| pt(best.xy[i])).collect();
-            let (color, w) = if k == selected { (TEXT, 6.0) } else if hovered == Some(k) { (SECONDARY, 5.0) } else { (SURFACE_ACTIVE, 5.0) };
+            // The selected corner green where this lap isn't slowing (back on
+            // the throttle), as on the Map; its slowing is drawn over it below.
+            let (color, w) = if k == selected { (theme::GOOD, 6.0) } else if hovered == Some(k) { (SECONDARY, 5.0) } else { (SURFACE_ACTIVE, 5.0) };
             p.add(egui::Shape::line(pts, Stroke::new(w, color)));
         }
         // This lap's slowing for the selected corner, along the line.
