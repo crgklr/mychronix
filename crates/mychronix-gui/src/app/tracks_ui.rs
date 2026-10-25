@@ -592,13 +592,36 @@ impl App {
         }
         ui.add_space(10.0);
 
-        // Sessions recorded here.
+        // Sessions recorded here, everyone's or one driver's.
         let mut open = None;
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let who: Vec<(usize, String)> = t.sessions.iter().map(|&si| (si, super::sessions_filter_ui::session_driver(&lib.sessions[si], &profiles))).collect();
+        let mut drivers: Vec<&str> = who.iter().map(|(_, d)| d.as_str()).filter(|d| !d.is_empty()).collect();
+        drivers.sort_unstable();
+        drivers.dedup();
+        // A driver picked at another track who hasn't driven this one: everyone's.
+        let picked = self.track_driver.clone().filter(|d| drivers.len() > 1 && drivers.contains(&d.as_str()));
+        let shown: Vec<(usize, &str)> = who.iter().filter(|(_, d)| picked.as_deref().is_none_or(|p| p == d)).map(|(si, d)| (*si, d.as_str())).collect();
+        let shown_best = shown.iter().filter_map(|&(si, _)| lib.sessions[si].summary.best_lap_ms).min();
+        let mut pick = None;
         section(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Your sessions here").font(semibold(16.0)).color(TEXT));
+                // Whose, when more than one person has driven here.
+                if drivers.len() > 1 {
+                    ui.add_space(8.0);
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if chip(ui, "All", picked.is_none()).clicked() {
+                        pick = Some(None);
+                    }
+                    for d in &drivers {
+                        if chip(ui, d, picked.as_deref() == Some(*d)).clicked() {
+                            pick = Some(Some(d.to_string()));
+                        }
+                    }
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(best) = t.best_lap_ms(lib) {
+                    if let Some(best) = shown_best {
                         ui.label(RichText::new(format_lap_time(best as i64)).font(semibold(16.0)).color(theme::GOOD));
                     }
                 });
@@ -608,11 +631,11 @@ impl App {
                 ui.label(RichText::new("None yet. Sessions you download from your MyChron show up here.").color(SECONDARY));
                 return;
             }
-            let track_best = t.best_lap_ms(lib);
+            let track_best = shown_best;
             // Part of the page (no scroll box of its own), so scrolling the page reaches every session.
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                for &si in &t.sessions {
+                for &(si, driver) in &shown {
                     let s = &lib.sessions[si];
                     let sum = &s.summary;
                     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
@@ -625,7 +648,8 @@ impl App {
                         let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
                         let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
                         p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.0), TEXT);
-                        let when = [sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
+                        let who = Some(driver.to_string()).filter(|d| !d.is_empty());
+                        let when = [who, sum.date.map(crate::events::us_short), sum.start_time.as_deref().map(crate::events::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
                         p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, when, regular(12.5), DIM);
                         let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
                         let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
@@ -639,6 +663,9 @@ impl App {
                 }
             });
         });
+        if let Some(p) = pick {
+            self.track_driver = p;
+        }
         if let Some(path) = open {
             self.load(path);
         }

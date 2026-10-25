@@ -89,10 +89,6 @@ impl Track {
         }
         out
     }
-
-    pub fn best_lap_ms(&self, lib: &Library) -> Option<u64> {
-        self.sessions.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -317,7 +313,9 @@ impl Library {
             lib.sessions.push(LocalSession { path, logger, summary, track, meta, setup, weather, kart: None });
         }
         for t in &mut lib.tracks {
-            t.sessions.sort_by_key(|&i| std::cmp::Reverse(lib.sessions[i].summary.number));
+            // Newest first: by when they started (sessions from several MyChrons
+            // mix here, and each numbers its own), then by number.
+            t.sessions.sort_by_key(|&i| std::cmp::Reverse((lib.sessions[i].start(), lib.sessions[i].summary.number)));
         }
 
         // Laps timed from GPS (see `jobs::relap`) stand in for the logger's summary.
