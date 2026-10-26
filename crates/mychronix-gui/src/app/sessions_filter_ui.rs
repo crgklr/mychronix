@@ -45,10 +45,9 @@ pub(crate) fn session_driver(s: &tracks::LocalSession, profiles: &crate::profile
         .unwrap_or_default()
 }
 
-/// A session's track name: the one it's assigned to, else the one its MyChron recorded.
+/// A session's track name (see `LocalSession::track_name`).
 pub(crate) fn session_track(lib: &Library, i: usize) -> Option<String> {
-    let s = &lib.sessions[i];
-    s.track.map(|t| lib.tracks[t].name.clone()).or_else(|| s.summary.track.clone())
+    lib.sessions[i].track_name(&lib.tracks)
 }
 
 fn naive(d: Date) -> Option<Day> {

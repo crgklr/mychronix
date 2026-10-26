@@ -273,22 +273,6 @@ pub(super) mod look {
         ui.add(egui::TextEdit::multiline(value).font(regular(16.5)).margin(Margin::symmetric(14, 12)).desired_width(width).desired_rows(rows).hint_text(hint))
     }
 
-    /// A dropdown `width` wide, styled like `text`: its choices, the one
-    /// shown, and the text when nothing is chosen. True when one was picked.
-    pub fn dropdown(ui: &mut Ui, id: &str, value: &mut String, choices: &[String], empty: &str, width: f32) -> bool {
-        let mut picked = false;
-        let shown = if value.is_empty() { RichText::new(empty).font(regular(16.5)).color(DIM) } else { RichText::new(value.as_str()).font(regular(16.5)).color(TEXT) };
-        egui::ComboBox::from_id_salt(id).selected_text(shown).width(width).height(420.0).show_ui(ui, |ui| {
-            for c in choices {
-                if ui.selectable_label(value == c, RichText::new(c).font(regular(16.0))).clicked() {
-                    *value = c.clone();
-                    picked = true;
-                }
-            }
-        });
-        picked
-    }
-
     /// A text field sized for a window.
     pub fn field(ui: &mut Ui, text: &mut String, hint: &str) -> egui::Response {
         ui.add(egui::TextEdit::singleline(text).font(regular(16.0)).margin(Margin::symmetric(14, 12)).desired_width(ui.available_width()).hint_text(hint))

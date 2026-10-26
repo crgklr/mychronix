@@ -548,7 +548,7 @@ impl App {
                 }
                 last_date = Some(s.summary.date);
                 let date = s.summary.date.map(|d| long_date(d).rsplit_once(", ").map(|(day, _)| day.to_string()).unwrap_or_default()).unwrap_or_else(|| "Unknown date".into());
-                let place = s.track.map(|t| lib.tracks[t].name.clone()).or_else(|| s.summary.track.clone()).unwrap_or_default();
+                let place = s.track_name(&lib.tracks).unwrap_or_default();
                 let head = if place.is_empty() { date } else { format!("{date} · {place}") };
                 ui.label(RichText::new(head.to_uppercase()).font(medium(12.0)).color(DIM).extra_letter_spacing(0.5));
                 ui.add_space(4.0);

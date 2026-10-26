@@ -62,7 +62,7 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
             let days = per_day.iter().map(|x| x.0).collect();
             // The track with the most on-track sessions, and the best lap there.
             // The library's track (a chosen one wins over the logger's name).
-            let track_of = |i: usize| lib.sessions[i].track.map(|t| lib.tracks[t].name.clone()).or_else(|| lib.sessions[i].summary.track.clone());
+            let track_of = |i: usize| lib.sessions[i].track_name(&lib.tracks);
             let mut counts: Vec<(String, usize)> = Vec::new();
             for &i in &on {
                 let t = track_of(i).unwrap_or_default();
@@ -743,7 +743,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add(Icon::Calendar.image(SECONDARY, 16.0));
                     ui.label(RichText::new(date.map(long_date).unwrap_or_else(|| "Unknown date".into())).font(semibold(16.0)).color(TEXT));
-                    let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track.map(|t| lib.tracks[t].name.clone()).or_else(|| lib.sessions[i].summary.track.clone())).collect();
+                    let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track_name(&lib.tracks)).collect();
                     tracks.dedup();
                     ui.label(RichText::new(tracks.join(", ")).color(SECONDARY));
                 });
