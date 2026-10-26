@@ -99,10 +99,8 @@ impl UsbLogger {
     fn wait_ready(&self, wait: Duration) -> Result<Option<usize>, Error> {
         let start = Instant::now();
         while start.elapsed() < wait {
-            if let (READY, len) = self.state()? {
-                if len > 0 {
-                    return Ok(Some(len as usize));
-                }
+            if let (READY, len) = self.state()? && len > 0 {
+                return Ok(Some(len as usize));
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -182,10 +180,8 @@ impl UsbLogger {
     /// Downloads a file. Its size comes from its folder's listing (read now
     /// if it hasn't been). `progress(done, total)` is called after every chunk.
     pub fn read_file(&mut self, path: &str, progress: impl FnMut(u64, u64)) -> Result<Vec<u8>, Error> {
-        if !self.sizes.contains_key(path) {
-            if let Some((dir, _)) = path.rsplit_once('/') {
-                self.list(dir)?;
-            }
+        if !self.sizes.contains_key(path) && let Some((dir, _)) = path.rsplit_once('/') {
+            self.list(dir)?;
         }
         let size = *self.sizes.get(path).ok_or_else(|| Error::Protocol(format!("{path}: not on the MyChron")))?;
         if size == 0 {

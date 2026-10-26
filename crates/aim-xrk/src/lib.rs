@@ -104,9 +104,9 @@ pub struct SessionInfo {
     /// How a logger with a built-in IMU sits on the kart, when it could be
     /// worked out (see [`imu`]); its "Forward g" and "Vertical g" channels exist then.
     pub imu_mount: Option<imu::Mount>,
-    /// The laps were timed from GPS because the logger's weren't (see
-    /// [`relap`]); set by whoever re-timed them.
-    pub laps_from_gps: bool,
+    /// The laps were timed from GPS, and why (see [`relap`]); set by
+    /// whoever re-timed them.
+    pub laps_from_gps: Option<relap::Retimed>,
 }
 
 /// A recorded channel. `times_ms` and `values` have the same length.
@@ -199,7 +199,7 @@ impl From<libxrk::XrkFile> for Session {
             logger_model: m.logger_model,
             logger_model_id: m.logger_model_id,
             imu_mount: None,
-            laps_from_gps: false,
+            laps_from_gps: None,
         };
         let channels: Vec<Channel> = file
             .channels

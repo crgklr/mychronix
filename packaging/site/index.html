@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  /* The app's palette (crates/mychronix-gui/src/theme.rs). Dark only, like the app. */
+  /* The app's palette (crates/mychronix/src/theme.rs). Dark only, like the app. */
   :root {
     --window: #0f1114; --sidebar: #14171b; --surface: #1b1f24; --hover: #24292f;
     --active: #2d333c; --outline: #262b32;
@@ -369,7 +369,7 @@ echo "deb [signed-by=/etc/apt/keyrings/mychronix.gpg] @URL@/deb ./" | sudo tee /
       <p>Arch, CachyOS, openSUSE and the rest: anything from 2022 on.</p>
       <div class="downloads">
         <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/Mychronix-@VERSION@-x86_64.AppImage"><b><svg class="i"><use href="#i-download"/></svg>AppImage</b><span>No install: make it executable and double-click it. AppImage updaters keep it current.</span></a>
-        <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/mychronix-@VERSION@-x86_64.tar.gz"><b><svg class="i"><use href="#i-download"/></svg>Tarball</b><span>Unpack anywhere and run <code>bin/mychronix-gui</code>.</span></a>
+        <a class="download" href="https://github.com/@REPO@/releases/download/v@VERSION@/mychronix-@VERSION@-x86_64.tar.gz"><b><svg class="i"><use href="#i-download"/></svg>Tarball</b><span>Unpack anywhere and run <code>bin/mychronix</code>.</span></a>
       </div>
       <p class="note">For a MyChron 6 over USB or a MyChron 4's data key, Linux needs AiM's USB rule once (the .rpm and .deb install it): see <a href="https://github.com/@REPO@#linux">the README</a>.</p>
     </div>

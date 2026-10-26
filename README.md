@@ -1,6 +1,6 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="crates/mychronix-gui/assets/mychronix.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="crates/mychronix/assets/mychronix.svg">
     <img src="docs/logo/mychronix-light.svg" alt="Mychronix" width="420">
   </picture>
 </h1>
@@ -167,7 +167,7 @@ Or download one from the [latest release](https://github.com/crgklr/mychronix/re
 | `Mychronix-<version>-x86_64.AppImage` | Any distribution, no install: make it executable and double-click it. AppImage updaters such as Gear Lever update it from GitHub. |
 | `mychronix_<version>-1_amd64.deb` | Ubuntu, Debian, Mint, Pop!_OS: `sudo apt install ./mychronix_*.deb` |
 | `mychronix-<version>-1.x86_64.rpm` | Fedora, openSUSE: `sudo dnf install ./mychronix-*.rpm` |
-| `mychronix-<version>-x86_64.tar.gz` | Anything else: unpack and run `bin/mychronix-gui`. |
+| `mychronix-<version>-x86_64.tar.gz` | Anything else: unpack and run `bin/mychronix`. |
 
 They run on Ubuntu 22.04 and newer, or any distribution from 2022 on (glibc
 2.35+: Debian 12, Fedora 36, Mint 21 and later). Joining the MyChron's WiFi
@@ -295,7 +295,7 @@ the assistant and ask it things like *"How did Saturday go, and where is the
 time in each corner?"*
 
 It's an [MCP](https://modelcontextprotocol.io) server built into Mychronix
-(`mychronix-gui --mcp`). It's read-only: it can list sessions, read a session's
+(`mychronix --mcp`). It's read-only: it can list sessions, read a session's
 laps, setup and weather, go corner by corner, compare two laps, read a channel
 through a lap, and follow race days over a season, with the same numbers as the
 app's own screens. It can't change your data or talk to a MyChron, and it's off
@@ -323,14 +323,14 @@ anything else you share in that chat.
 ## Command line
 
 ```sh
-mychronix info session.xrz        # a session's laps and channels
-mychronix sessions                # downloaded sessions
-mychronix device probe            # is a MyChron answering (USB, else WiFi)?
-mychronix device pull             # download every new session (USB, else WiFi)
+mychronix-cli info session.xrz        # a session's laps and channels
+mychronix-cli sessions                # downloaded sessions
+mychronix-cli device probe            # is a MyChron answering (USB, else WiFi)?
+mychronix-cli device pull             # download every new session (USB, else WiFi)
 ```
 
 `-v` / `-vv` print more. On a Mac the tool is inside the app, at
-`Mychronix.app/Contents/MacOS/mychronix`.
+`Mychronix.app/Contents/MacOS/mychronix-cli`.
 
 ## Building from source
 
@@ -359,8 +359,8 @@ known, where it came from and how sure we are of it is in
 | `crates/aim-link` | Talking to MyChrons: WiFi discovery and messages, the MyChron 6 and the data key over USB. Read-only by design. |
 | `crates/aim-xrk` | Session files: `.xrk`/`.xrz` (via [libxrk](https://github.com/m3rlin45/libxrk)), RaceStudio 2's `.drk` and its GPS files, MyChron 4 runs, sensor scaling |
 | `crates/aim-track` | AiM track files (`.ria` lists, `.tkk` tracks) |
-| `crates/mychronix-cli` | The `mychronix` command |
-| `crates/mychronix-gui` | The app, built with [egui](https://github.com/emilk/egui) and [fastframe](https://github.com/crmne/fastframe) |
+| `crates/mychronix-cli` | The `mychronix-cli` command |
+| `crates/mychronix` | The app, built with [egui](https://github.com/emilk/egui) and [fastframe](https://github.com/crmne/fastframe) |
 | `tools/` | Development aids: regenerating the sensor table from RaceStudio 2, and a bridge for recording RaceStudio 2 with the data key |
 
 ## Still to do
@@ -392,7 +392,7 @@ Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
 your option.
 
 Third-party parts keep their own licenses: Lucide icons (ISC, see
-`crates/mychronix-gui/assets/icons/LICENSE.txt`), the Inter typeface bundled by
+`crates/mychronix/assets/icons/LICENSE.txt`), the Inter typeface bundled by
 fastframe (SIL Open Font License), and the Rust dependencies (MIT, Apache-2.0
 and other permissive licenses). Track data comes from AiM; map data from
 OpenStreetMap contributors; satellite imagery from Esri.

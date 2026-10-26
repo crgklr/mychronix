@@ -78,7 +78,7 @@ def main() -> None:
 
     a.out.mkdir(parents=True, exist_ok=True)
     (a.out / "index.html").write_text(page)
-    assets = ROOT / "crates/mychronix-gui/assets"
+    assets = ROOT / "crates/mychronix/assets"
     shutil.copy(assets / "mychronix.svg", a.out)
     shutil.copy(assets / "mychronix-icon.svg", a.out)
     shutil.copytree(ROOT / "docs/screenshots", a.out / "screenshots", dirs_exist_ok=True)

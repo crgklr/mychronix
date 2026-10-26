@@ -44,10 +44,9 @@ cask "mychronix" do
   end
 
   depends_on arch: :arm64
-  depends_on macos: ">= :big_sur"
 
   app "Mychronix.app"
-  binary "#{appdir}/Mychronix.app/Contents/MacOS/mychronix"
+  binary "#{appdir}/Mychronix.app/Contents/MacOS/mychronix-cli"
 
   caveats <<~CAVEATS
     Mychronix isn't signed by Apple yet. The first time you open it (and after

@@ -253,7 +253,7 @@ fn samples(h: &[u8], data: &[u8]) -> Result<Samples> {
     if order.is_empty() {
         return Err(Error::Parse("this MyChron 4 run lists no channels Mychronix knows".into()));
     }
-    let w: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let w: Vec<u16> = data.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
     let mut raw = vec![Vec::new(); chans.len()];
     let (mut i, mut slot) = (0usize, 0usize);
     let (mut markers, mut misplaced) = (0usize, 0usize);
@@ -331,7 +331,7 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
     // Laps: one 64-byte record each, time in hundredths at +4.
     let mut laps = Vec::new();
     let mut t = 0i64;
-    for (k, rec) in p.laps.chunks_exact(64).enumerate() {
+    for (k, rec) in p.laps.as_chunks::<64>().0.iter().enumerate() {
         let Some(cs) = u32_at(rec, 4).filter(|&c| c > 0 && c < 0x7FFF_FFFF) else { continue };
         let ms = cs as i64 * 10;
         laps.push(Lap { number: k as i32 + 1, start_ms: t, end_ms: t + ms });
@@ -382,7 +382,7 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
         logger_model: u16_at(h, 0x7C).and_then(crate::mychron_model).map(str::to_string),
         vehicle: None,
         imu_mount: None,
-        laps_from_gps: false,
+        laps_from_gps: None,
     };
     if channels.iter().all(|c| c.values.is_empty()) && laps.is_empty() {
         return Err(Error::Parse("the downloaded run holds no data".into()));
