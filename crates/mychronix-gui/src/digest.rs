@@ -32,6 +32,10 @@ pub struct Digest {
     pub lap_count: u32,
     #[serde(default)]
     pub best: Option<(u32, u64)>,
+    /// The laps look untimed but no start/finish line nearby fitted: worth
+    /// another look when the tracks change (see `Digests::load`).
+    #[serde(default)]
+    pub untimed: bool,
 }
 
 impl Digest {
@@ -43,6 +47,7 @@ impl Digest {
             issues: aim_xrk::checks::sensor_issues(session).iter().map(|i| (i.channel.clone(), kind_text(i.kind))).collect(),
             model: session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string).unwrap_or_default(),
             laps_from_gps: session.info.laps_from_gps,
+            untimed: !session.info.laps_from_gps && aim_xrk::relap::needs_retiming(session),
             lap_count: session.laps.len() as u32,
             best: session.best_lap(crate::app::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
         }
@@ -75,6 +80,9 @@ fn parse_kind(s: &str) -> Option<IssueKind> {
 pub struct Digests {
     #[serde(default)]
     by_key: BTreeMap<String, Digest>,
+    /// The tracks these were worked out with (see `tracks::stamp`).
+    #[serde(default)]
+    tracks: String,
 }
 
 fn key(path: &Path) -> String {
@@ -89,8 +97,17 @@ impl Digests {
         crate::paths::cache_dir().map(|d| d.join("session-digests-v4.json"))
     }
 
+    /// The saved digests. When the tracks have changed since (a custom track
+    /// copied from a MyChron, AiM's list updated), sessions whose laps looked
+    /// untimed are dropped, to be timed again against the new lines.
     pub fn load() -> Self {
-        crate::storage::load_or_default(Self::file())
+        let mut d: Self = crate::storage::load_or_default(Self::file());
+        let now = crate::tracks::stamp();
+        if d.tracks != now {
+            d.by_key.retain(|_, v| !v.untimed);
+            d.tracks = now;
+        }
+        d
     }
 
     pub fn save(&self) {

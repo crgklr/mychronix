@@ -295,9 +295,10 @@ fn unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
-/// A track length the way RaceStudio writes it: meters under a kilometer,
-/// kilometers above, and ovals as the nearest standard fraction of a mile.
-pub fn length_label(length_m: f32, kind: TrackKind) -> String {
+/// A track length the way it's usually quoted: ovals as the nearest
+/// standard fraction of a mile; otherwise meters under a kilometer and
+/// kilometers above, or in US units feet under a mile and miles above.
+pub fn length_label(length_m: f32, kind: TrackKind, us_units: bool) -> String {
     const MILE: f32 = 1609.344;
     const OVALS: [(&str, f32); 21] = [
         ("1/20", 0.05), ("1/10", 0.1), ("1/9", 1.0 / 9.0), ("1/8", 0.125), ("1/7", 1.0 / 7.0), ("1/6", 1.0 / 6.0),
@@ -315,6 +316,13 @@ pub fn length_label(length_m: f32, kind: TrackKind) -> String {
         {
             return format!("{label} mi");
         }
+    }
+    if us_units {
+        if length_m < MILE {
+            let feet = (length_m * 3.280_84).round() as u32;
+            return if feet >= 1000 { format!("{},{:03} ft", feet / 1000, feet % 1000) } else { format!("{feet} ft") };
+        }
+        return format!("{:.2} mi", length_m / MILE);
     }
     if length_m < 1000.0 { format!("{length_m:.0} m") } else { format!("{:.2} km", length_m / 1000.0) }
 }
@@ -434,10 +442,13 @@ mod tests {
 
     #[test]
     fn length_labels() {
-        assert_eq!(length_label(637.2, TrackKind::KartTrack), "637 m");
-        assert_eq!(length_label(1750.0, TrackKind::RaceTrack), "1.75 km");
-        assert_eq!(length_label(603.5, TrackKind::Oval), "3/8 mi");
-        assert_eq!(length_label(826.9, TrackKind::Oval), "1/2 mi");
+        assert_eq!(length_label(637.2, TrackKind::KartTrack, false), "637 m");
+        assert_eq!(length_label(1750.0, TrackKind::RaceTrack, false), "1.75 km");
+        assert_eq!(length_label(603.5, TrackKind::Oval, false), "3/8 mi");
+        assert_eq!(length_label(826.9, TrackKind::Oval, true), "1/2 mi");
+        assert_eq!(length_label(312.0, TrackKind::KartTrack, true), "1,024 ft");
+        assert_eq!(length_label(250.0, TrackKind::KartTrack, true), "820 ft");
+        assert_eq!(length_label(6515.0, TrackKind::RaceTrack, true), "4.05 mi");
     }
 
     #[test]

@@ -23,8 +23,9 @@ pub enum Command {
     Scan,
     Join { ssid: String },
     Leave,
-    /// Read the logger's session list (folder listing + summary file).
-    List,
+    /// Read the logger's session list (folder listing + summary file), and
+    /// copy its new custom tracks, noting which MyChron (serial) they came from.
+    List { serial: Option<u32> },
     /// Each file with the details to save beside it.
     Download { files: Vec<(DirEntry, SessionMeta)>, dir: PathBuf },
 }
@@ -50,6 +51,14 @@ pub struct SessionMeta {
     pub championship: String,
     /// The track the session belongs to: the logger's own unless changed at download.
     pub track: String,
+    /// When `track` was entered by hand, the track it was linked to then
+    /// (its guid), or "" when no track by that name was nearby. Missing on
+    /// sessions from before this was kept (see `Library::load`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_guid: Option<String>,
+    /// Tracks offered for `track` later (by guid) that you chose not to use.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub track_declined: Vec<String>,
     /// RaceStudio's session types: "Practice 1", "Heat 2", "Final", …
     #[serde(default)]
     pub session_type: String,
@@ -156,9 +165,9 @@ impl Worker {
                         leave();
                         send(Event::Left);
                     }
-                    Command::List => {
+                    Command::List { serial } => {
                         let started = std::time::Instant::now();
-                        match list() {
+                        match list(serial) {
                             Ok((files, summaries, new_tracks)) => {
                                 log::info!("listed {} files, {} summaries, {} new custom tracks in {:?}", files.len(), summaries.len(), new_tracks, started.elapsed());
                                 for f in &files {
@@ -215,7 +224,7 @@ fn connect() -> Result<Link, String> {
     Link::connect().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))
 }
 
-fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
+fn list(serial: Option<u32>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
     let mut logger = connect()?;
     let listing = logger.list(aim_link::SESSIONS_DIR).map_err(|e| format!("Couldn't list sessions: {e}"))?;
     let summaries = listing
@@ -224,36 +233,61 @@ fn list() -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usize), String> {
         .and_then(|_| logger.read_file("1:/mem/summary1.csv", |_, _| {}).ok())
         .map(|csv| aim_xrk::parse_summary_csv(&String::from_utf8_lossy(&csv)))
         .unwrap_or_default();
-    let new_tracks = copy_custom_tracks(&mut logger);
+    let new_tracks = copy_custom_tracks(&mut logger, serial);
     copy_track_list(&mut logger);
     Ok((listing, summaries, new_tracks))
 }
 
-/// Copies the logger's custom tracks (listed in `0:/tkk/dev.ria`, stored as
-/// `0:/tkk/o/<id>.tkk`) into `~/Mychronix/tracks/custom` when they're new, so
-/// sessions recorded on them have a track to attach to. RaceStudio does the
-/// same while connecting. Returns how many were copied.
-fn copy_custom_tracks(logger: &mut Link) -> usize {
+/// Copies the logger's custom tracks (stored as `0:/tkk/o/<id>.tkk`) into
+/// `~/Mychronix/tracks/custom` when they're new, so sessions recorded on them
+/// have a track to attach to. RaceStudio does the same while connecting.
+/// Those the MyChron made itself are listed in `0:/tkk/dev.ria`; those sent
+/// from RaceStudio aren't (only in its full list), so the folder is listed
+/// too, skipping any of AiM's own tracks there. Beside each goes
+/// `<id>.mychron`, the serial of the MyChron it came from. Returns how many
+/// were copied.
+fn copy_custom_tracks(logger: &mut Link, serial: Option<u32>) -> usize {
     let Some(dir) = crate::paths::data("tracks/custom") else { return 0 };
-    let Ok(index) = logger.read_file("0:/tkk/dev.ria", |_, _| {}) else { return 0 };
-    let Ok(tracks) = aim_track::parse_ria(&index) else { return 0 };
+    let new = |id: &str| aim_link::is_safe_file_name(id) && !dir.join(format!("{id}.tkk")).exists();
+    let mut ids: Vec<String> = match logger.read_file("0:/tkk/dev.ria", |_, _| {}) {
+        Ok(index) => aim_track::parse_ria(&index).map(|t| t.into_iter().map(|t| t.id).collect()).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    match logger.list("0:/tkk/o") {
+        Ok(entries) => {
+            let mut sent: Vec<String> = entries
+                .iter()
+                .filter_map(|e| e.name.len().checked_sub(4).filter(|&n| e.name[n..].eq_ignore_ascii_case(".tkk")).map(|n| e.name[..n].to_string()))
+                .filter(|id| new(id) && !ids.contains(id))
+                .collect();
+            if !sent.is_empty() {
+                let aim: std::collections::HashSet<String> =
+                    [crate::aim_tracks::list_path(), crate::aim_tracks::mychron_list_path()].into_iter().flatten().filter_map(|p| aim_track::read_ria(p).ok()).flatten().map(|r| r.id).collect();
+                sent.retain(|id| !aim.contains(id));
+                ids.extend(sent);
+            }
+        }
+        Err(e) => log::info!("couldn't list the MyChron's track folder: {e}"),
+    }
     let mut copied = 0;
-    for t in tracks {
+    for id in ids {
         // The track id comes from the logger: only plain names make a file name.
-        if !aim_link::is_safe_file_name(&t.id) {
+        if !new(&id) {
             continue;
         }
-        let target = dir.join(format!("{}.tkk", t.id));
-        if target.exists() {
-            continue;
-        }
-        match logger.read_file(&format!("0:/tkk/o/{}.tkk", t.id), |_, _| {}) {
+        let target = dir.join(format!("{id}.tkk"));
+        match logger.read_file(&format!("0:/tkk/o/{id}.tkk"), |_, _| {}) {
             Ok(bytes) if aim_track::parse_tkk(&bytes).is_ok() => match crate::storage::write_atomic(&target, &bytes) {
-                Ok(()) => copied += 1,
+                Ok(()) => {
+                    copied += 1;
+                    if let Some(serial) = serial {
+                        let _ = crate::storage::write_atomic(&target.with_extension("mychron"), serial.to_string().as_bytes());
+                    }
+                }
                 Err(e) => log::warn!("couldn't save custom track {}: {e}", target.display()),
             },
-            Ok(_) => log::warn!("the MyChron's custom track {} couldn't be read as a track; skipped", t.id),
-            Err(e) => log::warn!("couldn't read custom track {} from the MyChron: {e}", t.id),
+            Ok(_) => log::warn!("the MyChron's custom track {id} couldn't be read as a track; skipped"),
+            Err(e) => log::warn!("couldn't read custom track {id} from the MyChron: {e}"),
         }
     }
     copied

@@ -64,19 +64,25 @@ pub fn open_session(path: &std::path::Path) -> Result<aim_xrk::Session, String> 
 /// Laps timed from GPS when the logger's look untimed (one long lap, or laps
 /// run together), against the start/finish lines of the tracks within a few
 /// kilometers of where the session was recorded (see `aim_xrk::relap`).
+/// The session's own track's line goes first (the one you picked, else the
+/// one its MyChron recorded), so a session at one configuration of a complex
+/// isn't timed from another's line; then your tracks', then AiM's.
 fn relap(session: &mut aim_xrk::Session, path: &std::path::Path) {
     if !aim_xrk::relap::needs_retiming(session) {
         return;
     }
     let Some(gps) = session.gps.as_ref() else { return };
     let (Some(&lat), Some(&lon)) = (gps.latitude.first(), gps.longitude.first()) else { return };
-    // Your own tracks' lines first, so every session at a place starts its
-    // laps at the same line; AiM's when none of yours fits.
     let (own, aim) = crate::tracks::start_finishes_near(lat, lon, 3_000.0);
+    let picked = crate::device::SessionMeta::load(path).and_then(|m| m.track_guid).filter(|g| !g.is_empty());
+    let recorded = || std::fs::read(path.with_extension("xri")).ok().and_then(|b| aim_xrk::parse_xri(&b).ok()).and_then(|s| s.track_guid);
+    let mine = picked.or_else(recorded);
+    let first: Vec<crate::tracks::Line> = own.iter().chain(&aim).filter(|l| mine.as_deref() == Some(l.guid.as_str())).cloned().collect();
     let before = session.laps.len();
-    for lines in [own, aim] {
-        if let Some((k, laps)) = aim_xrk::relap::fix(session, &lines) {
-            log::info!("{}: {before} lap(s) as the logger timed it; {} timed from GPS against start/finish {:?}", path.display(), laps.len(), lines[k]);
+    for lines in [first, own, aim] {
+        let at: Vec<(f64, f64)> = lines.iter().map(|l| l.at).collect();
+        if let Some((k, laps)) = aim_xrk::relap::fix(session, &at) {
+            log::info!("{}: {before} lap(s) as the logger timed it; {} timed from GPS against start/finish {:?}", path.display(), laps.len(), at[k]);
             session.laps = laps;
             session.info.laps_from_gps = true;
             return;

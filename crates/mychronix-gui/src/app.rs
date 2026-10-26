@@ -151,6 +151,10 @@ pub struct App {
     /// The "Add a MyChron" window, while open.
     add_mychron: Option<device_ui::AddMyChron>,
     track_pick: Option<track_pick_ui::TrackPick>,
+    /// Track offers put off this run (by the name you typed), asked again next time.
+    offers_closed: std::collections::HashSet<String>,
+    /// The track offer on screen and its pick.
+    offer_pick: Option<track_pick_ui::OfferPick>,
     /// When the last touchscreen touch was seen, and whether touch is in use.
     last_touch: Option<std::time::Instant>,
     touch_mode: bool,
@@ -552,7 +556,7 @@ impl eframe::App for App {
     /// MYCHRONIX_CLICKS="frame:x,y;…" clicks at logical points on those frames;
     /// "frame:x,y:dy" scrolls the wheel there by dy points instead, and
     /// "frame:x,y>x2,y2" presses at one point and lets go at the other, as a
-    /// hand does (for testing).
+    /// hand does, and "frame:type:text" types text (for testing).
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.input_frames += 1;
         // Touch vs mouse: a touchscreen tap also moves the pointer, so remember
@@ -571,6 +575,12 @@ impl eframe::App for App {
         let Ok(spec) = std::env::var("MYCHRONIX_CLICKS") else { return };
         for item in spec.split(';') {
             let Some((f, xy)) = item.split_once(':') else { continue };
+            if let Some(text) = xy.strip_prefix("type:") {
+                if f.trim().parse::<u32>().ok() == Some(self.input_frames) {
+                    raw.events.push(egui::Event::Text(text.to_string()));
+                }
+                continue;
+            }
             let (xy, scroll) = match xy.split_once(':') {
                 Some((xy, dy)) => (xy, dy.trim().parse::<f32>().ok()),
                 None => (xy, None),
@@ -723,6 +733,7 @@ impl eframe::App for App {
         self.key_poll(&ui.ctx().clone());
         self.sensor_dialog(&ui.ctx().clone());
         self.track_pick_dialog(&ui.ctx().clone());
+        self.track_offer_dialog(&ui.ctx().clone());
 
         // Put the session back, unless the page opened another one this frame.
         if self.session.is_none() {
@@ -1280,7 +1291,7 @@ fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best
                 sparkline(p, spark, &x.laps);
             }
         }
-        let track = s.track.map(|t| lib.tracks[t].name.clone()).or(sum.track.clone()).unwrap_or_else(|| "No track".into());
+        let track = s.track_name(&lib.tracks).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
         let line = [sum.start_time.as_deref().map(crate::events::clock_time), Some(driver.to_string()), Some(track), championship]
             .into_iter()

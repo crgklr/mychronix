@@ -66,7 +66,8 @@ impl App {
                     }
                     if newly {
                         self.dev_busy = Some("Reading the session list…".into());
-                        let _ = self.dev.as_ref().unwrap().tx.send(Command::List);
+                        let serial = self.dev_logger.as_ref().and_then(|b| b.logger_id);
+                        let _ = self.dev.as_ref().unwrap().tx.send(Command::List { serial });
                     }
                 }
                 Event::Joined { ssid } => {

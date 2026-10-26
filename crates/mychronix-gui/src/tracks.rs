@@ -15,6 +15,10 @@ use aim_xrk::SessionSummary;
 
 /// How far a session's start/finish may be from a track's to count as that track.
 const SAME_PLACE_M: f64 = 1_000.0;
+/// How far a track you named may be from where the session was recorded (a
+/// track's point is its center; a big circuit's start/finish can be a
+/// kilometer or two from it).
+const NAMED_NEAR_M: f64 = 5_000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -36,6 +40,8 @@ pub struct Track {
     pub id: String,
     /// The track's own file, where there is one.
     pub tkk: Option<PathBuf>,
+    /// For a custom track, the serial of the MyChron it was copied from, when known.
+    pub from_mychron: Option<String>,
     pub country: String,
     pub region: String,
     /// Where the track is, for finding the nearest one (see `aim_track::TrackRecord::center`).
@@ -78,7 +84,7 @@ impl Track {
     pub fn description(&self) -> String {
         let mut parts = Vec::new();
         if let Some(l) = self.length_m {
-            parts.push(aim_track::length_label(l, self.track_kind));
+            parts.push(aim_track::length_label(l, self.track_kind, crate::units::imperial()));
         }
         if self.track_kind != aim_track::TrackKind::Unknown {
             parts.push(self.track_kind.label());
@@ -119,9 +125,62 @@ pub struct Library {
     /// Sessions the logger may not have timed (one lap or none, but minutes
     /// long) that haven't been looked at yet: their laps may come from GPS.
     pub relap_pending: Vec<PathBuf>,
+    /// Tracks that arrived after you typed their name for sessions at the
+    /// same place: offered for those sessions (see `App::track_offer_dialog`).
+    pub offers: Vec<TrackOffer>,
+}
+
+/// Tracks that arrived where you'd named sessions after a track that wasn't
+/// there yet, offered for them.
+#[derive(Debug, Clone)]
+pub struct TrackOffer {
+    /// The name as you typed it.
+    pub typed: String,
+    /// Indices into [`Library::sessions`].
+    pub sessions: Vec<usize>,
+    /// Indices into [`Library::tracks`], the best guess first (see [`name_match`]).
+    pub tracks: Vec<usize>,
+}
+
+/// How well `typed` names track `t`: 0 its very name (capitals aside), 1 the
+/// same but for spaces and punctuation, 2 one inside the other ("kank" and
+/// "Kankakee Sh"); None when they're unrelated.
+pub fn name_match(typed: &str, t: &Track) -> Option<u8> {
+    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let names = std::iter::once(t.name.as_str()).chain(t.full_name.as_deref());
+    let typed_sq = squash(typed);
+    names
+        .filter_map(|n| {
+            let n_sq = squash(n);
+            if n.trim().eq_ignore_ascii_case(typed.trim()) {
+                Some(0)
+            } else if !typed_sq.is_empty() && n_sq == typed_sq {
+                Some(1)
+            } else if typed_sq.chars().count() >= 2 && (n_sq.contains(&typed_sq) || typed_sq.contains(&n_sq) && n_sq.chars().count() >= 2) {
+                Some(2)
+            } else {
+                None
+            }
+        })
+        .min()
 }
 
 impl LocalSession {
+    /// Where it was recorded, as its MyChron placed it (the start/finish of
+    /// the track it recorded on); None when it recorded no track.
+    pub fn place(&self) -> Option<LatLon> {
+        self.summary.start_finish.map(|(lat, lon)| LatLon { lat, lon })
+    }
+
+    /// Its track's name: the track it's assigned to, else the name you typed
+    /// for it, else the one its MyChron recorded.
+    pub fn track_name(&self, tracks: &[Track]) -> Option<String> {
+        self.track
+            .map(|t| tracks[t].name.clone())
+            .or_else(|| self.meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty()))
+            .or_else(|| self.summary.track.clone())
+    }
+
     /// When it started, as `Profiles::kart_for` compares it.
     pub fn start(&self) -> String {
         crate::profiles::stamp(self.summary.date, self.summary.start_time.as_deref())
@@ -174,6 +233,7 @@ impl Library {
                 surface: t.surface,
                 id: t.id,
                 tkk: Some(path.clone()),
+                from_mychron: std::fs::read_to_string(path.with_extension("mychron")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
                 country: t.country,
                 region: t.region,
                 center: t.center.or(t.start_finish),
@@ -218,6 +278,7 @@ impl Library {
                     surface: Vec::new(),
                     id: r.id,
                     tkk,
+                    from_mychron: None,
                     country: r.country,
                     region: r.region,
                     center: r.center,
@@ -274,12 +335,53 @@ impl Library {
             let session = lib.sessions.len();
             let logger = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let xrz = path.with_extension("xrz");
-            let meta = crate::device::SessionMeta::load(&xrz);
-            // A track chosen at download wins over the one the logger recorded.
+            let mut meta = crate::device::SessionMeta::load(&xrz);
+            // A track chosen at download, or changed since, wins over the one the logger recorded.
             let chosen = meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty() && Some(t) != summary.track.as_ref());
-            let track = match chosen {
-                Some(name) => lib.match_by_name(&name, &summary),
-                None => lib.match_track(&summary, &by_guid),
+            let track = match (chosen, meta.as_mut()) {
+                (Some(name), Some(m)) => {
+                    let near = lib.match_by_name(&name, &summary);
+                    let place = summary.start_finish.map(|(lat, lon)| LatLon { lat, lon });
+                    let around: Vec<usize> = place.map(|p| lib.near(p, NAMED_NEAR_M).into_iter().map(|(i, _)| i).collect()).unwrap_or_default();
+                    match m.track_guid.clone() {
+                        // Linked to a track: that one, while it's still here.
+                        Some(g) if !g.is_empty() => by_guid.get(&g).copied().or(near),
+                        // A name with no track to link to: tracks that arrived
+                        // here since are offered, not used (see `App::track_offer_dialog`).
+                        Some(_) => {
+                            let fresh: Vec<usize> = around.into_iter().filter(|&i| !m.track_declined.contains(&lib.tracks[i].guid)).collect();
+                            if !fresh.is_empty() {
+                                match lib.offers.iter_mut().find(|o| o.typed.eq_ignore_ascii_case(&name)) {
+                                    Some(o) => {
+                                        o.sessions.push(session);
+                                        for i in fresh {
+                                            if !o.tracks.contains(&i) {
+                                                o.tracks.push(i);
+                                            }
+                                        }
+                                    }
+                                    None => lib.offers.push(TrackOffer { typed: name.clone(), sessions: vec![session], tracks: fresh }),
+                                }
+                            }
+                            None
+                        }
+                        // From before links were kept: a track with the very
+                        // name here is linked, as it already was; otherwise
+                        // the tracks here now don't count as new, except ones
+                        // whose name is close to it (offered).
+                        None => {
+                            m.track_guid = Some(near.map(|i| lib.tracks[i].guid.clone()).unwrap_or_default());
+                            if near.is_none() {
+                                m.track_declined = around.iter().filter(|&&i| name_match(&name, &lib.tracks[i]).is_none()).map(|&i| lib.tracks[i].guid.clone()).collect();
+                            }
+                            if let Err(e) = m.save(&xrz) {
+                                log::warn!("couldn't save the track link for {}: {e}", xrz.display());
+                            }
+                            near
+                        }
+                    }
+                }
+                _ => lib.match_track(&summary, &by_guid),
             };
             if let Some(i) = track {
                 lib.tracks[i].sessions.push(session);
@@ -333,6 +435,14 @@ impl Library {
             }
         }
 
+        // Each offer's best guess first: the closest name, then the nearest.
+        for o in &mut lib.offers {
+            let place = o.sessions.first().and_then(|&i| lib.sessions[i].place());
+            let tracks = &lib.tracks;
+            let key = |&i: &usize| (name_match(&o.typed, &tracks[i]).unwrap_or(9), place.zip(tracks[i].center).map(|(a, b)| a.distance_m(&b) as i64).unwrap_or(i64::MAX));
+            o.tracks.sort_by_key(key);
+        }
+
         // Visited tracks first, then custom, then by name.
         lib.sort();
         for t in &mut lib.tracks {
@@ -341,8 +451,23 @@ impl Library {
         lib
     }
 
-    /// A track by name, preferring the one nearest where the session was recorded.
-    fn match_by_name(&self, name: &str, s: &SessionSummary) -> Option<usize> {
+    /// The tracks where a session was recorded (every configuration there),
+    /// nearest first, with how far; none when its MyChron didn't place it.
+    pub fn around(&self, s: &LocalSession) -> Vec<(usize, f64)> {
+        s.place().map(|p| self.near(p, NAMED_NEAR_M)).unwrap_or_default()
+    }
+
+    /// Tracks within `within_m` of `place`, nearest first, with how far.
+    pub fn near(&self, place: LatLon, within_m: f64) -> Vec<(usize, f64)> {
+        let mut v: Vec<(usize, f64)> = self.tracks.iter().enumerate().filter_map(|(i, t)| Some((i, t.center?.distance_m(&place)))).filter(|(_, d)| *d <= within_m).collect();
+        v.sort_by(|a, b| a.1.total_cmp(&b.1));
+        v
+    }
+
+    /// A track by name, the one nearest where the session was recorded, and
+    /// only one within a few kilometers of it (names repeat: an "ABC" in
+    /// Wisconsin isn't yours). Without a place to compare, the name alone.
+    pub fn match_by_name(&self, name: &str, s: &SessionSummary) -> Option<usize> {
         let place = s.start_finish.map(|(lat, lon)| LatLon { lat, lon });
         let distance = |t: &Track| match (place, t.center) {
             (Some(a), Some(b)) => a.distance_m(&b),
@@ -350,6 +475,7 @@ impl Library {
         };
         (0..self.tracks.len())
             .filter(|&i| self.tracks[i].name.eq_ignore_ascii_case(name) || self.tracks[i].full_name.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(name)))
+            .filter(|&i| distance(&self.tracks[i]) <= NAMED_NEAR_M || distance(&self.tracks[i]) == f64::MAX / 2.0)
             .min_by(|&a, &b| distance(&self.tracks[a]).total_cmp(&distance(&self.tracks[b])))
     }
 
@@ -490,15 +616,40 @@ impl Favorites {
     }
 }
 
+/// What GPS lap timing had to go on: your custom tracks and AiM's lists, by
+/// name and size. Changes when a track is added or a list is updated.
+pub fn stamp() -> String {
+    let mut parts = Vec::new();
+    let ours = crate::paths::data("tracks").unwrap_or_default();
+    let mut files: Vec<PathBuf> = files_with_ext(&ours, "tkk");
+    files.extend(files_with_ext(&ours, "ria"));
+    files.extend(crate::aim_tracks::list_path());
+    files.extend(crate::aim_tracks::mychron_list_path());
+    for f in files {
+        let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+        parts.push(format!("{}:{size}", f.file_name().unwrap_or_default().to_string_lossy()));
+    }
+    parts.join(",")
+}
+
+/// A track's start/finish line, as GPS lap timing uses it.
+#[derive(Debug, Clone)]
+pub struct Line {
+    pub at: (f64, f64),
+    /// The track's guid, to prefer a session's own track's line.
+    pub guid: String,
+}
+
 /// Start/finish lines within `within_m` of a spot, nearest first: your own
 /// tracks' (custom ones, as on your MyChron), then AiM's database's. The
 /// lines a session recorded there may have been meant to cross (see
 /// `aim_xrk::relap`). Reads the track files themselves, not the whole library.
-pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
+pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<Line>, Vec<Line>) {
     let ours = crate::paths::data("tracks").unwrap_or_default();
     let here = LatLon { lat, lon };
-    let mut own: Vec<LatLon> = files_with_ext(&ours, "tkk").iter().filter_map(|p| aim_track::read_tkk(p).ok()?.start_finish).collect();
-    let mut aim: Vec<LatLon> = Vec::new();
+    let line = |t: aim_track::TrackFile, guid: Option<String>| t.start_finish.map(|p| (p, guid.or(t.guid).unwrap_or_default()));
+    let mut own: Vec<(LatLon, String)> = files_with_ext(&ours, "tkk").iter().filter_map(|p| line(aim_track::read_tkk(p).ok()?, None)).collect();
+    let mut aim: Vec<(LatLon, String)> = Vec::new();
     let mut rias = files_with_ext(&ours, "ria");
     rias.extend(crate::aim_tracks::list_path());
     rias.extend(crate::aim_tracks::mychron_list_path());
@@ -510,15 +661,59 @@ pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<(f64, f64)
         let points = records
             .into_iter()
             .filter(|r| r.center.is_some_and(|c| c.distance_m(&here) <= within_m))
-            .filter_map(|r| aim_track::read_tkk(dir.join(format!("{}.tkk", r.id))).ok()?.start_finish);
+            .filter_map(|r| line(aim_track::read_tkk(dir.join(format!("{}.tkk", r.id))).ok()?, Some(r.guid)));
         if custom { own.extend(points) } else { aim.extend(points) }
     }
-    let near = |points: Vec<LatLon>| {
-        let mut v: Vec<(f64, LatLon)> = points.into_iter().map(|p| (p.distance_m(&here), p)).filter(|(d, _)| *d <= within_m).collect();
+    let near = |points: Vec<(LatLon, String)>| {
+        let mut v: Vec<(f64, LatLon, String)> = points.into_iter().map(|(p, g)| (p.distance_m(&here), p, g)).filter(|(d, _, _)| *d <= within_m).collect();
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
         // The same line from several sources, once.
-        v.dedup_by(|a, b| a.1.distance_m(&b.1) < 1.0);
-        v.into_iter().map(|(_, p)| (p.lat, p.lon)).collect::<Vec<_>>()
+        v.dedup_by(|a, b| a.1.distance_m(&b.1) < 1.0 && a.2 == b.2);
+        v.into_iter().map(|(_, p, guid)| Line { at: (p.lat, p.lon), guid }).collect::<Vec<_>>()
     };
     (near(own), near(aim))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(name: &str, full: Option<&str>) -> Track {
+        Track {
+            name: name.into(),
+            full_name: full.map(str::to_string),
+            city: None,
+            length_m: None,
+            track_kind: aim_track::TrackKind::Unknown,
+            surface: Vec::new(),
+            id: String::new(),
+            tkk: None,
+            from_mychron: None,
+            country: String::new(),
+            region: String::new(),
+            center: None,
+            start_finish: None,
+            guid: String::new(),
+            kind: Kind::Aim,
+            outline: Vec::new(),
+            sessions: Vec::new(),
+            sort_key: String::new(),
+            search: String::new(),
+        }
+    }
+
+    #[test]
+    fn names_match_closest_first() {
+        let short = track("Kankakee Sh", Some("Kankakee Short Course"));
+        let full = track("Kankakee", None);
+        assert_eq!(name_match("kankakee", &full), Some(0));
+        assert_eq!(name_match("KANKAKEE SH", &short), Some(0));
+        assert_eq!(name_match("kankakee-sh", &short), Some(1));
+        assert_eq!(name_match("kank", &short), Some(2));
+        assert_eq!(name_match("short", &short), Some(2));
+        assert_eq!(name_match("Kankakee", &short), Some(2));
+        assert_eq!(name_match("OVRP", &track("Kankakee", None)), None);
+        // One letter matches too much to mean anything.
+        assert_eq!(name_match("k", &short), None);
+    }
 }
