@@ -105,6 +105,9 @@ impl App {
                     self.dev_progress = Some((index, count, file, done, total));
                 }
                 Event::Downloaded { saved } => {
+                    // Replaced sessions' saved lap summaries were dropped: don't save old ones back.
+                    self.sensors.digests = None;
+                    self.sensors.digests_asked.clear();
                     if let Some((path, setup)) = self.pending_setup.take() {
                         if let Err(e) = setup.save(&path) {
                             self.error = Some(format!("Couldn't save the setup: {e}"));
@@ -159,7 +162,10 @@ impl App {
                         let p = e.path();
                         let name = p.file_name().unwrap().to_string_lossy().into_owned();
                         if name.ends_with(".xrz") {
-                            files.push(aim_link::DirEntry { name: name.clone(), size: e.metadata().map(|m| m.len()).unwrap_or(0), date: String::new(), time: String::new() });
+                            // Listed as the download noted it, so saved sessions read as downloaded.
+                            let listed = crate::device::SessionMeta::load(&p).map(|m| m.listed).unwrap_or_default();
+                            let (date, time) = listed.split_once(' ').map(|(d, t)| (d.to_string(), t.to_string())).unwrap_or_default();
+                            files.push(aim_link::DirEntry { name: name.clone(), size: e.metadata().map(|m| m.len()).unwrap_or(0), date, time });
                             if let Some(mut sum) = std::fs::read(p.with_extension("xri")).ok().and_then(|b| aim_xrk::parse_xri(&b).ok()) {
                                 sum.file = Some(name);
                                 summaries.push(sum);
@@ -246,6 +252,7 @@ impl App {
                 setup: self.latest_setup(&id),
                 setup_before: self.latest_setup(&id),
                 setup_open: false,
+                replace: true,
             });
         }
         // MYCHRONIX_ADD_MYCHRON=wifi|key opens the "Add a MyChron" window at its steps (for testing).
@@ -483,6 +490,7 @@ impl App {
                             setup: setup_now.clone(),
                             setup_before: setup_now.clone(),
                             setup_open: false,
+                            replace: true,
                         });
                     }
                     if chip(ui, "None", false).clicked() {
@@ -569,6 +577,14 @@ impl App {
         let mut cancel = false;
         let n = self.dev_selected.len();
         let field_w = 460.0;
+        // Picked sessions already saved here, as "Session 10".
+        let dir = self.logger_dir();
+        let again: Vec<String> = self
+            .dev_files
+            .iter()
+            .filter(|e| self.dev_selected.contains(&e.name) && dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
+            .map(|e| aim_xrk::summary::session_number(&e.name).map(|k| format!("Session {k}")).unwrap_or(e.name.clone()))
+            .collect();
         let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
             use garage_manage_ui::look;
             let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
@@ -624,6 +640,26 @@ impl App {
                     look::label(ui, "Comment");
                     look::text_area(ui, &mut dlg.meta.comment, "Optional: conditions, how it went", field_w, 2);
                     ui.end_row();
+                    // Sessions picked again that are already here: replace them, or keep both.
+                    if !again.is_empty() {
+                        look::label(ui, "Already here");
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 6.0;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                if chip(ui, "Replace", dlg.replace).clicked() {
+                                    dlg.replace = true;
+                                }
+                                if chip(ui, "Keep both", !dlg.replace).clicked() {
+                                    dlg.replace = false;
+                                }
+                            });
+                            let which = if again.len() == 1 { format!("{} is", again[0]) } else { format!("{} of these are", again.len()) };
+                            let what = if dlg.replace { "Its copy here is updated with the details filled in above; blank ones keep what it had." } else { "A second copy is saved beside it." };
+                            look::note(ui, &format!("{which} already on this computer. {what}"), DIM);
+                        });
+                        ui.end_row();
+                    }
                     look::label(ui, "Setup");
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
@@ -703,7 +739,7 @@ impl App {
             } else if let Some(dir) = self.logger_dir() {
                 self.dev_busy = Some("Downloading…".into());
                 self.dev_message = None;
-                let _ = self.dev.as_ref().unwrap().tx.send(crate::device::Command::Download { files, dir });
+                let _ = self.dev.as_ref().unwrap().tx.send(crate::device::Command::Download { files, dir, replace: dlg.replace });
             }
         } else if open && !cancel {
             self.dev_dialog = Some(dlg);

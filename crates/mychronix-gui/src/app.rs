@@ -74,6 +74,9 @@ struct DownloadDialog {
     setup: crate::setup::Setup,
     setup_before: crate::setup::Setup,
     setup_open: bool,
+    /// Sessions picked that are already on this computer: replace those
+    /// copies (true), or keep them and save these beside them.
+    replace: bool,
 }
 
 /// Tabs on the Analysis page.

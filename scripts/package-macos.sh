@@ -48,9 +48,20 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.sports</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Mychronix talks to your MyChron over its WiFi network to download sessions.</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 Mychronix contributors. Free and open source (MIT or Apache 2.0).</string>
 </dict>
 </plist>
 PLIST
+
+# The About window's text, under the name and version.
+cat > "$app/Contents/Resources/Credits.html" <<'HTML'
+<html><body style="font-family: -apple-system, sans-serif; font-size: 11px; text-align: center">
+<p>Download and analyze sessions from AiM MyChron data loggers.</p>
+<p><a href="https://github.com/crgklr/mychronix">github.com/crgklr/mychronix</a></p>
+<p><i>Dedicated to my two boys</i></p>
+<p style="color: gray">An independent project, not affiliated with AiM.</p>
+</body></html>
+HTML
 
 # Ad-hoc signature: Apple Silicon won't run unsigned code, and without one a
 # downloaded app shows as "damaged" instead of offering Open Anyway.
