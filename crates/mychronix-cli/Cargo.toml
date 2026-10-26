@@ -6,10 +6,6 @@ publish.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "mychronix"
-path = "src/main.rs"
-
 [dependencies]
 log.workspace = true
 aim-xrk.workspace = true

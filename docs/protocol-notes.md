@@ -73,7 +73,7 @@ echoing the request, with the file size as u32le at bytes 16–19 and `c0 ff 00 
 at 20–23, then the file in `STCP` chunks of up to 65,476 bytes, each with a 4-byte
 prefix before the data (`00 00 00 00` or `c0 ff 00 00`). Concatenating the chunk data
 rebuilt `a_0033.xrz` and `a_0034.xrz` byte-exact to the advertised size, and both
-open in `mychronix info` (track, date, laps and channels all read correctly). `.xrz` is the
+open in `mychronix-cli info` (track, date, laps and channels all read correctly). `.xrz` is the
 zlib-compressed session (`78 01` header).
 
 **libxrk on MyChron 6 files (observed).** Channels and laps decode, but libxrk warns

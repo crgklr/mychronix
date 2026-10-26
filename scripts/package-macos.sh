@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds the Mac download into target/dist: Mychronix-<version>-arm64.dmg,
 # holding Mychronix.app (with the `mychronix` command-line tool inside it at
-# Mychronix.app/Contents/MacOS/mychronix) and a shortcut to Applications.
+# Mychronix.app/Contents/MacOS/mychronix-cli) and a shortcut to Applications.
 #
 # Runs on an Apple Silicon Mac (the release workflow uses GitHub's). Needs
 # rsvg-convert (brew install librsvg) for the icon. The app is signed ad hoc,
@@ -17,14 +17,14 @@ rm -rf target/macos
 mkdir -p "$dist" "$app/Contents/MacOS" "$app/Contents/Resources"
 
 export MACOSX_DEPLOYMENT_TARGET=11.0
-cargo build --release --locked -p mychronix-gui -p mychronix-cli
+cargo build --release --locked -p mychronix -p mychronix-cli
 
-cp target/release/mychronix-gui target/release/mychronix "$app/Contents/MacOS/"
+cp target/release/mychronix target/release/mychronix-cli "$app/Contents/MacOS/"
 
 # Icon: every size macOS asks for, from the SVG.
 iconset=target/macos/Mychronix.iconset
 mkdir -p "$iconset"
-svg=crates/mychronix-gui/assets/mychronix-icon.svg
+svg=crates/mychronix/assets/mychronix-icon.svg
 for size in 16 32 128 256 512; do
   rsvg-convert -w "$size" -h "$size" "$svg" -o "$iconset/icon_${size}x${size}.png"
   rsvg-convert -w $((size * 2)) -h $((size * 2)) "$svg" -o "$iconset/icon_${size}x${size}@2x.png"
@@ -39,7 +39,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Mychronix</string>
   <key>CFBundleDisplayName</key><string>Mychronix</string>
   <key>CFBundleIdentifier</key><string>io.github.crgklr.mychronix</string>
-  <key>CFBundleExecutable</key><string>mychronix-gui</string>
+  <key>CFBundleExecutable</key><string>mychronix</string>
   <key>CFBundleIconFile</key><string>Mychronix</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>

@@ -107,10 +107,8 @@ pub fn sensor_issues(session: &Session) -> Vec<Issue> {
             issues.push(Issue { channel: c.name.clone(), kind: IssueKind::NoSignal });
             continue;
         }
-        if sensor_of(&c.name) == Some(Sensor::Rpm) {
-            if let Some(percent) = rpm_dropouts(session, c) {
-                issues.push(Issue { channel: c.name.clone(), kind: IssueKind::DropOuts { percent } });
-            }
+        if sensor_of(&c.name) == Some(Sensor::Rpm) && let Some(percent) = rpm_dropouts(session, c) {
+            issues.push(Issue { channel: c.name.clone(), kind: IssueKind::DropOuts { percent } });
         }
     }
     issues

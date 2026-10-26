@@ -19,6 +19,20 @@ const MOVING_KMH: f64 = 10.0;
 /// No real lap is quicker than this.
 const MIN_LAP_MS: i64 = 15_000;
 
+/// Why a session's laps were timed from GPS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retimed {
+    /// The logger didn't time them (one long lap, or laps run together).
+    Untimed,
+    /// You picked a track whose start/finish isn't where the logger timed
+    /// them (it had another track, or another layout, loaded).
+    PickedTrack,
+}
+
+/// How far the logger's start/finish may be from a track's for the logger's
+/// laps to count as timed at that track's line (GPS wanders a few meters).
+pub const SAME_LINE_M: f64 = 20.0;
+
 /// Meters east and north of `(lat0, lon0)`.
 fn local(lat0: f64, lon0: f64, lat: f64, lon: f64) -> (f64, f64) {
     ((lon - lon0) * 111_320.0 * lat0.to_radians().cos(), (lat - lat0) * 110_540.0)
@@ -151,6 +165,33 @@ pub fn retime(session: &Session, candidates: &[(f64, f64)]) -> Option<(usize, Ve
     Some((k, laps))
 }
 
+/// Where the logger timed its laps: the kart's position when its first
+/// full lap began. None without two laps or GPS there.
+pub fn logger_line(session: &Session) -> Option<(f64, f64)> {
+    let gps = session.gps.as_ref()?;
+    let lap = session.laps.get(1)?;
+    let i = gps.times_ms.partition_point(|&t| t < lap.start_ms);
+    Some((*gps.latitude.get(i)?, *gps.longitude.get(i)?)).filter(|(la, lo)| *la != 0.0 || *lo != 0.0)
+}
+
+/// Meters between two points (near enough for a few kilometers).
+pub fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (x, y) = local(a.0, a.1, b.0, b.1);
+    (x * x + y * y).sqrt()
+}
+
+/// The laps at the start/finish of a track you picked, when the logger
+/// timed its laps somewhere else (more than [`SAME_LINE_M`] from it). None
+/// when it timed them there, or the kart doesn't cross the picked line lap
+/// after lap (then the logger's laps stand).
+pub fn at_picked_line(session: &Session, line: (f64, f64)) -> Option<Vec<Lap>> {
+    let logger = logger_line(session)?;
+    if distance_m(logger, line) <= SAME_LINE_M {
+        return None;
+    }
+    retime(session, &[line]).map(|(_, laps)| laps)
+}
+
 /// The laps to use instead of the logger's, when its look untimed and GPS
 /// finds more: the candidate used and the laps. A session the logger timed
 /// right is left alone, stops and all (a stop crosses no line, so GPS finds
@@ -263,5 +304,28 @@ mod tests {
         // Out-lap to 10 s, four 20 s laps, in-lap from 90 s.
         assert_eq!(laps.len(), 6);
         assert!(laps[1..5].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 40), "{laps:?}");
+    }
+
+    #[test]
+    fn a_picked_track_with_its_line_elsewhere_retimes_the_laps() {
+        let gps = circle(5);
+        // The logger timed 20 s laps at the circle's top (where it starts).
+        let session = Session {
+            info: Default::default(),
+            channels: vec![crate::Channel { name: "RPM".into(), group: None, units: String::new(), decimals: 0, interpolate: true, times_ms: gps.times_ms.clone(), values: vec![9000.0; gps.len()] }],
+            laps: (0..5).map(|i| Lap { number: i + 1, start_ms: i as i64 * 20_000, end_ms: (i as i64 + 1) * 20_000 }).collect(),
+            gps: Some(gps),
+        };
+        let top = (41.0 + R / 110_540.0, -73.0);
+        assert!(distance_m(logger_line(&session).unwrap(), top) < 1.0);
+        // The picked track's line is where the logger timed them: its laps stand.
+        assert!(at_picked_line(&session, (top.0 + 5.0 / 110_540.0, top.1)).is_none());
+        // At the bottom, 64 m away: laps from there (out-lap to 10 s, four
+        // 20 s laps, in-lap from 90 s).
+        let laps = at_picked_line(&session, (41.0 - R / 110_540.0, -73.0)).unwrap();
+        assert_eq!(laps.len(), 6);
+        assert!(laps[1..5].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 40), "{laps:?}");
+        // A line the kart never crosses leaves the logger's laps alone.
+        assert!(at_picked_line(&session, (41.01, -73.0)).is_none());
     }
 }

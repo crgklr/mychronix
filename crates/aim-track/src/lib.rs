@@ -32,7 +32,7 @@ pub struct LatLon {
 
 impl LatLon {
     fn from_e7(lat: i32, lon: i32) -> Option<Self> {
-        (lat != 0 || lon != 0).then(|| Self { lat: lat as f64 * 1e-7, lon: lon as f64 * 1e-7 })
+        (lat != 0 || lon != 0).then_some(Self { lat: lat as f64 * 1e-7, lon: lon as f64 * 1e-7 })
     }
 
     /// Great-circle distance in meters.
@@ -65,15 +65,16 @@ pub struct TrackRecord {
 
 /// Parses a whole `.ria` database.
 pub fn parse_ria(buf: &[u8]) -> Result<Vec<TrackRecord>, Error> {
-    if buf.len() % RIA_RECORD != 0 {
+    if !buf.len().is_multiple_of(RIA_RECORD) {
         return Err(Error::Format(format!("{} bytes is not a whole number of {RIA_RECORD}-byte records", buf.len())));
     }
-    Ok(buf.chunks_exact(RIA_RECORD).filter_map(parse_ria_record).collect())
+    Ok(buf.as_chunks::<RIA_RECORD>().0.iter().filter_map(|r| parse_ria_record(r)).collect())
 }
 
 pub fn read_ria(path: impl AsRef<Path>) -> Result<Vec<TrackRecord>, Error> {
     parse_ria(&std::fs::read(path)?)
 }
+
 
 fn parse_ria_record(r: &[u8]) -> Option<TrackRecord> {
     let name = c_str(&r[0..28]);
@@ -219,7 +220,7 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
     // unless every value is a believable height.
     if let Some(p) = find("pts") {
         let mut elevation = Vec::new();
-        for c in p.chunks_exact(12) {
+        for c in p.as_chunks::<12>().0 {
             let at = |o: usize| i32::from_le_bytes(c[o..o + 4].try_into().unwrap());
             if let Some(pos) = LatLon::from_e7(at(0), at(4)) {
                 t.outline.push(pos);

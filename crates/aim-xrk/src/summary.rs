@@ -141,7 +141,7 @@ pub fn parse_text_records(buf: &[u8]) -> Result<Vec<TextRecord>, Error> {
             t += 1;
         }
         let trailer = buf.get(t..t + 12).ok_or_else(|| bad("truncated record trailer", t))?;
-        if trailer[0] != b'<' || trailer[11] != b'>' || &trailer[1..5] != &header[2..6] {
+        if trailer[0] != b'<' || trailer[11] != b'>' || trailer[1..5] != header[2..6] {
             return Err(bad("malformed record trailer", t));
         }
         let sum: u64 = std::str::from_utf8(&trailer[5..11])
@@ -213,10 +213,7 @@ pub fn summarize(s: &crate::Session, file: Option<&str>) -> SessionSummary {
     });
     let best = s.best_lap(10_000);
     // Where the first timed lap started: the start/finish line, for matching the track.
-    let start_finish = s.gps.as_ref().zip(s.laps.get(1)).and_then(|(g, lap)| {
-        let i = g.times_ms.partition_point(|&t| t < lap.start_ms);
-        Some((*g.latitude.get(i)?, *g.longitude.get(i)?)).filter(|(la, lo)| *la != 0.0 || *lo != 0.0)
-    });
+    let start_finish = crate::relap::logger_line(s);
     let rpm = ["RPM", "Engine", "Engine RPM"].iter().find_map(|n| s.channel(n));
     SessionSummary {
         number: file.and_then(session_number),

@@ -304,7 +304,8 @@ fn dirs_home() -> anyhow::Result<PathBuf> {
 
 fn progress_bar(label: &str) -> impl FnMut(u64, u64) + '_ {
     move |done, total| {
-        let pct = if total == 0 { 100 } else { done * 100 / total };
+        // No total yet: nothing left to wait for.
+        let pct = (done * 100).checked_div(total).unwrap_or(100);
         eprint!("\r{label:<24} {pct:>3}%  {:>9} / {total} bytes", done);
         let _ = std::io::stderr().flush();
     }

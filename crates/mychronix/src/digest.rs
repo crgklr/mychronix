@@ -1,0 +1,246 @@
+//! A small digest of each session file, for lists that shouldn't open every
+//! session: its racing lap times (for sparklines), the sensors that recorded
+//! real readings, and the sensor problems found (see `aim_xrk::checks`).
+//! Worked out in the background once per file and cached in
+//! `session-digests.json` in the cache folder, keyed by path and size.
+
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::path::{Path, PathBuf};
+
+use aim_xrk::checks::{Issue, IssueKind};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Digest {
+    pub logger: String,
+    /// Racing laps in order: (lap number, ms).
+    pub laps: Vec<(i32, i64)>,
+    /// Sensor channels that recorded real readings.
+    pub working: Vec<String>,
+    /// Sensor problems: (channel, kind) with kind "not connected", "no signal"
+    /// or "drop outs N%".
+    pub issues: Vec<(String, String)>,
+    /// The logger's model when the file says which, e.g. "MyChron 6".
+    #[serde(default)]
+    pub model: String,
+    /// The laps were timed from GPS (the logger's weren't): then these stand
+    /// in for the logger's summary, which still counts one long lap.
+    #[serde(default)]
+    pub laps_from_gps: bool,
+    /// Every lap, out-lap and in-lap included, and the best (number, ms).
+    #[serde(default)]
+    pub lap_count: u32,
+    #[serde(default)]
+    pub best: Option<(u32, u64)>,
+    /// The laps look untimed but no start/finish line nearby fitted: worth
+    /// another look when the tracks change (see `Digests::load`).
+    #[serde(default)]
+    pub untimed: bool,
+}
+
+impl Digest {
+    pub fn of(session: &aim_xrk::Session) -> Self {
+        Digest {
+            logger: session.info.logger_id.map(|i| i.to_string()).unwrap_or_default(),
+            laps: aim_xrk::notes::racing_laps(session).iter().map(|l| (l.number, l.duration_ms())).collect(),
+            working: aim_xrk::checks::working_sensors(session),
+            issues: aim_xrk::checks::sensor_issues(session).iter().map(|i| (i.channel.clone(), kind_text(i.kind))).collect(),
+            model: session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string).unwrap_or_default(),
+            laps_from_gps: session.info.laps_from_gps.is_some(),
+            untimed: session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session),
+            lap_count: session.laps.len() as u32,
+            best: session.best_lap(crate::app::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
+        }
+    }
+
+    /// The issues back in `aim_xrk` form.
+    pub fn issues(&self) -> Vec<Issue> {
+        self.issues.iter().filter_map(|(c, k)| Some(Issue { channel: c.clone(), kind: parse_kind(k)? })).collect()
+    }
+}
+
+fn kind_text(k: IssueKind) -> String {
+    match k {
+        IssueKind::NotConnected => "not connected".into(),
+        IssueKind::NoSignal => "no signal".into(),
+        IssueKind::DropOuts { percent } => format!("drop outs {percent}%"),
+    }
+}
+
+fn parse_kind(s: &str) -> Option<IssueKind> {
+    match s {
+        "not connected" => Some(IssueKind::NotConnected),
+        "no signal" => Some(IssueKind::NoSignal),
+        _ => s.strip_prefix("drop outs ")?.trim_end_matches('%').parse().ok().map(|percent| IssueKind::DropOuts { percent }),
+    }
+}
+
+/// All digests known so far, by session path.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Digests {
+    #[serde(default)]
+    by_key: BTreeMap<String, Digest>,
+    /// The tracks these were worked out with (see `tracks::stamp`).
+    #[serde(default)]
+    tracks: String,
+}
+
+fn key(path: &Path) -> String {
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    format!("{}|{size}", path.display())
+}
+
+impl Digests {
+    fn file() -> Option<PathBuf> {
+        // v3: laps timed from GPS (see `jobs::relap`); v4: against tracks'
+        // real start/finish lines, and with few laps.
+        crate::paths::cache_dir().map(|d| d.join("session-digests-v4.json"))
+    }
+
+    /// The saved digests. When the tracks have changed since (a custom track
+    /// copied from a MyChron, AiM's list updated), sessions whose laps looked
+    /// untimed are dropped, to be timed again against the new lines.
+    pub fn load() -> Self {
+        let mut d: Self = crate::storage::load_or_default(Self::file());
+        let now = crate::tracks::stamp();
+        if d.tracks != now {
+            d.by_key.retain(|_, v| !v.untimed);
+            d.tracks = now;
+        }
+        d
+    }
+
+    pub fn save(&self) {
+        if let Some(p) = Self::file() {
+            let _ = crate::storage::save(&p, self);
+        }
+    }
+
+    pub fn get(&self, path: &Path) -> Option<&Digest> {
+        self.by_key.get(&key(path))
+    }
+
+    /// The digest for `path`, reading the file if it isn't known yet.
+    pub fn ensure(&mut self, path: &Path) -> Option<&Digest> {
+        let k = key(path);
+        if !self.by_key.contains_key(&k) {
+            let session = crate::jobs::open_session(path).ok()?;
+            self.by_key.insert(k.clone(), Digest::of(&session));
+        }
+        self.by_key.get(&k)
+    }
+
+    /// Reads the saved digests, changes them and saves them, one change at a
+    /// time (the background job and a track change can both want to).
+    fn update(change: impl FnOnce(&mut Self)) {
+        let _one_at_a_time = FILE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut d = Self::load();
+        change(&mut d);
+        d.save();
+    }
+
+    /// Forgets what's known about these sessions (their track changed, so
+    /// their laps may time differently). A digest job running now won't put
+    /// back what it worked out for them before.
+    pub fn forget(paths: &[PathBuf]) {
+        let keys: Vec<String> = paths.iter().map(|p| key(p)).collect();
+        {
+            let mut forgotten = FORGOTTEN.lock().unwrap_or_else(|e| e.into_inner());
+            let now = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+            for k in &keys {
+                forgotten.insert(k.clone(), now);
+            }
+        }
+        Self::update(|d| {
+            for k in &keys {
+                d.by_key.remove(k);
+            }
+        });
+    }
+
+    pub fn insert(&mut self, path: &Path, digest: Digest) {
+        self.by_key.insert(key(path), digest);
+    }
+
+    /// The model of `logger`, when any of its sessions says.
+    pub fn model(&self, logger: &str) -> Option<String> {
+        self.by_key.values().find(|d| d.logger == logger && !d.model.is_empty()).map(|d| d.model.clone())
+    }
+
+    /// Whether `channel` recorded real readings in any session from `logger`.
+    pub fn worked(&self, logger: &str, channel: &str) -> bool {
+        self.by_key.values().any(|d| d.logger == logger && d.working.iter().any(|c| c == channel))
+    }
+
+    /// The issues in a session worth reporting (see `aim_xrk::checks::worth_reporting`).
+    pub fn reportable(&self, digest: &Digest) -> Vec<Issue> {
+        digest.issues().into_iter().filter(|i| aim_xrk::checks::worth_reporting(i, |c| self.worked(&digest.logger, c))).collect()
+    }
+}
+
+/// One change to the saved digests at a time (see `Digests::update`).
+static FILE: Mutex<()> = Mutex::new(());
+/// Counts `Digests::forget` calls; with when each session was last forgotten.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+static FORGOTTEN: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
+
+/// The digests worked out by a job that started at `started` (a
+/// [`GENERATION`]) that still hold: not for a session forgotten since.
+fn still_current(fresh: Vec<(String, Digest)>, forgotten: &HashMap<String, u64>, started: u64) -> impl Iterator<Item = (String, Digest)> + '_ {
+    fresh.into_iter().filter(move |(k, _)| forgotten.get(k).is_none_or(|&when| when <= started))
+}
+
+/// Works out the digests of `paths` in the background (cached ones come back
+/// at once), sending each as it's ready, then saves the ones it worked out:
+/// only those, so nothing changed meanwhile is overwritten, and none for a
+/// session forgotten since it started (its track changed while it ran).
+pub fn spawn(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Digest)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    crate::jobs::spawn("digests", move || {
+        let started = GENERATION.load(Ordering::SeqCst);
+        let mut digests = Digests::load();
+        let mut fresh: Vec<(String, Digest)> = Vec::new();
+        for (n, path) in paths.into_iter().enumerate() {
+            let known = digests.get(&path).is_some();
+            let Some(d) = digests.ensure(&path).cloned() else { continue };
+            if !known {
+                fresh.push((key(&path), d.clone()));
+            }
+            if tx.send((path, d)).is_err() {
+                break;
+            }
+            if n % 4 == 0 {
+                ctx.request_repaint();
+            }
+        }
+        if !fresh.is_empty() {
+            let forgotten = FORGOTTEN.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            Digests::update(|d| d.by_key.extend(still_current(fresh, &forgotten, started)));
+        }
+        ctx.request_repaint();
+    });
+    rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issue_kinds_round_trip() {
+        for k in [IssueKind::NotConnected, IssueKind::NoSignal, IssueKind::DropOuts { percent: 30 }] {
+            assert_eq!(parse_kind(&kind_text(k)), Some(k));
+        }
+    }
+
+    #[test]
+    fn a_session_forgotten_while_its_digest_was_worked_out_isnt_saved_back() {
+        let fresh = vec![("a|1".to_string(), Digest::default()), ("b|1".to_string(), Digest::default()), ("c|1".to_string(), Digest::default())];
+        // Started at generation 5: "a" was forgotten before (kept), "b" after (dropped), "c" never.
+        let forgotten = HashMap::from([("a|1".to_string(), 4), ("b|1".to_string(), 6)]);
+        let kept: Vec<String> = still_current(fresh, &forgotten, 5).map(|(k, _)| k).collect();
+        assert_eq!(kept, ["a|1", "c|1"]);
+    }
+}

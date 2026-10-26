@@ -6,12 +6,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
-cargo build --release -p mychronix-gui -p mychronix-cli
-install -Dm755 target/release/mychronix-gui "$HOME/.local/bin/mychronix-gui"
+cargo build --release -p mychronix -p mychronix-cli
 install -Dm755 target/release/mychronix "$HOME/.local/bin/mychronix"
+install -Dm755 target/release/mychronix-cli "$HOME/.local/bin/mychronix-cli"
+# Before 0.1.17 the app was mychronix-gui (and mychronix the command-line tool).
+rm -f "$HOME/.local/bin/mychronix-gui"
 
 icons="$HOME/.local/share/icons/hicolor"
-svg=crates/mychronix-gui/assets/mychronix-icon.svg
+svg=crates/mychronix/assets/mychronix-icon.svg
 install -Dm644 "$svg" "$icons/scalable/apps/mychronix.svg"
 for size in 16 24 32 48 64 128 256 512; do
   mkdir -p "$icons/${size}x${size}/apps"
@@ -20,8 +22,8 @@ done
 
 # Point the launcher at the installed binary by full path, so it doesn't depend on PATH.
 install -d "$HOME/.local/share/applications"
-sed "s|^Exec=mychronix-gui|Exec=$HOME/.local/bin/mychronix-gui|" packaging/linux/mychronix.desktop \
+sed "s|^Exec=mychronix|Exec=$HOME/.local/bin/mychronix|" packaging/linux/mychronix.desktop \
   > "$HOME/.local/share/applications/mychronix.desktop"
 gtk-update-icon-cache -q -t -f "$icons" 2>/dev/null || true
 update-desktop-database -q "$HOME/.local/share/applications" 2>/dev/null || true
-echo "Installed. Mychronix is in your app drawer; ~/.local/bin/mychronix-gui runs it from a terminal."
+echo "Installed. Mychronix is in your app drawer; ~/.local/bin/mychronix runs it from a terminal."

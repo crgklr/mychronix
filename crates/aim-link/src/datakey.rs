@@ -180,7 +180,7 @@ impl DataKey {
     /// The runs on the key, oldest first.
     pub fn runs(&mut self) -> Result<Vec<RunInfo>> {
         let dir = self.command(0x11, 0, 4096)?;
-        let count = dir.chunks_exact(16).take_while(|e| u16_at(e, 0).is_some_and(|m| m != 0xFFFF && m != 0)).count();
+        let count = dir.as_chunks::<16>().0.iter().take_while(|e| u16_at(e.as_slice(), 0).is_some_and(|m| m != 0xFFFF && m != 0)).count();
         let mut runs = Vec::with_capacity(count);
         for index in 0..count as u16 {
             let h = self.command(0x12, index as u32, 256)?;

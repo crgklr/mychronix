@@ -2754,18 +2754,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mychronix-cli"
-version = "0.1.16"
-dependencies = [
- "aim-link",
- "aim-xrk",
- "anyhow",
- "clap",
- "log",
-]
-
-[[package]]
-name = "mychronix-gui"
+name = "mychronix"
 version = "0.1.16"
 dependencies = [
  "aim-link",
@@ -2792,6 +2781,17 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols",
+]
+
+[[package]]
+name = "mychronix-cli"
+version = "0.1.16"
+dependencies = [
+ "aim-link",
+ "aim-xrk",
+ "anyhow",
+ "clap",
+ "log",
 ]
 
 [[package]]
