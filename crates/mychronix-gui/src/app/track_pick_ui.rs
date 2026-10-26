@@ -190,6 +190,10 @@ impl App {
                 }
             }
             log::info!("track set for {} session(s)", targets.len());
+            // Their laps are worked out again against the track now theirs.
+            crate::digest::Digests::forget(&targets);
+            self.sensors.digests = None;
+            self.sensors.digests_asked.clear();
             if let Some(e) = failed {
                 self.error = Some(format!("Couldn't save the track: {e}"));
             }
@@ -266,7 +270,10 @@ impl App {
             later = l;
             save = r;
         });
-        if closed || later {
+        // Only an answer closes it: a click beside it shouldn't make it vanish.
+        let _ = closed;
+        if later {
+            log::info!("asked later about {} session(s) named {}", offer.sessions.len(), offer.typed);
             self.offers_closed.insert(offer.typed.to_lowercase());
             return;
         }
@@ -297,6 +304,11 @@ impl App {
             if let Err(e) = m.save(p) {
                 failed = Some(e.to_string());
             }
+        }
+        if chosen.is_some() {
+            crate::digest::Digests::forget(&paths);
+            self.sensors.digests = None;
+            self.sensors.digests_asked.clear();
         }
         match &chosen {
             Some((name, _)) => log::info!("used track {name} for {} session(s) named {}", paths.len(), offer.typed),

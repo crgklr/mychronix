@@ -26,8 +26,9 @@ pub enum Command {
     /// Read the logger's session list (folder listing + summary file), and
     /// copy its new custom tracks, noting which MyChron (serial) they came from.
     List { serial: Option<u32> },
-    /// Each file with the details to save beside it.
-    Download { files: Vec<(DirEntry, SessionMeta)>, dir: PathBuf },
+    /// Each file with the details to save beside it; `replace` puts a
+    /// recording already saved here over its copy instead of beside it.
+    Download { files: Vec<(DirEntry, SessionMeta)>, dir: PathBuf, replace: bool },
 }
 
 pub enum Event {
@@ -102,6 +103,22 @@ fn target_for(dir: &Path, entry: &DirEntry) -> PathBuf {
 }
 
 impl SessionMeta {
+    /// These details put over `old`, a copy's (a session downloaded again in
+    /// its place): a field left blank keeps the old value, and the track link
+    /// stays with its track.
+    fn over(mut self, old: SessionMeta) -> SessionMeta {
+        for (new, was) in [(&mut self.driver, old.driver), (&mut self.kart, old.kart), (&mut self.championship, old.championship), (&mut self.session_type, old.session_type), (&mut self.comment, old.comment), (&mut self.track, old.track.clone())] {
+            if new.trim().is_empty() {
+                *new = was;
+            }
+        }
+        if old.track == self.track {
+            self.track_guid = old.track_guid;
+            self.track_declined = old.track_declined;
+        }
+        self
+    }
+
     pub fn path_for(session: &Path) -> PathBuf {
         session.with_extension("meta.json")
     }
@@ -181,9 +198,9 @@ impl Worker {
                             }
                         }
                     }
-                    Command::Download { files, dir } => {
-                        log::info!("downloading {} sessions to {}", files.len(), dir.display());
-                        match download(&files, &dir, &send) {
+                    Command::Download { files, dir, replace } => {
+                        log::info!("downloading {} sessions to {}{}", files.len(), dir.display(), if replace { ", replacing copies already here" } else { "" });
+                        match download(&files, &dir, replace, &send) {
                             Ok(saved) => {
                                 log::info!("downloaded {saved} sessions");
                                 send(Event::Downloaded { saved })
@@ -242,7 +259,7 @@ fn list(serial: Option<u32>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, usiz
 /// `~/Mychronix/tracks/custom` when they're new, so sessions recorded on them
 /// have a track to attach to. RaceStudio does the same while connecting.
 /// Those the MyChron made itself are listed in `0:/tkk/dev.ria`; those sent
-/// from RaceStudio aren't (only in its full list), so the folder is listed
+/// from RaceStudio aren't (only in its track lists), so the folder is listed
 /// too, skipping any of AiM's own tracks there. Beside each goes
 /// `<id>.mychron`, the serial of the MyChron it came from. Returns how many
 /// were copied.
@@ -261,8 +278,11 @@ fn copy_custom_tracks(logger: &mut Link, serial: Option<u32>) -> usize {
                 .filter(|id| new(id) && !ids.contains(id))
                 .collect();
             if !sent.is_empty() {
+                // AiM's own tracks, by AiM's database as downloaded. Not the
+                // MyChron's list of them: RaceStudio adds the tracks it sends
+                // to that list too.
                 let aim: std::collections::HashSet<String> =
-                    [crate::aim_tracks::list_path(), crate::aim_tracks::mychron_list_path()].into_iter().flatten().filter_map(|p| aim_track::read_ria(p).ok()).flatten().map(|r| r.id).collect();
+                    crate::aim_tracks::list_path().into_iter().filter_map(|p| aim_track::read_ria(p).ok()).flatten().map(|r| r.id).collect();
                 sent.retain(|id| !aim.contains(id));
                 ids.extend(sent);
             }
@@ -314,8 +334,10 @@ fn copy_track_list(logger: &mut Link) {
 
 /// Downloads each session (and its `.xri` summary) into `dir`, writing the
 /// metadata beside it. Files land under a temporary name first, so a
-/// canceled download never looks complete.
-fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)) -> Result<usize, String> {
+/// canceled download never looks complete. With `replace`, a recording
+/// already saved here goes over its copy, keeping that copy's track link
+/// when the track is the same (its setup and weather stay beside it).
+fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: &impl Fn(Event)) -> Result<usize, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let mut logger = connect()?;
     let count = files.len();
@@ -329,7 +351,8 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
         let data = logger
             .read_file(&path, |done, total| send(Event::Progress { index, count, file: entry.name.clone(), done, total }))
             .map_err(|e| format!("Downloading {} failed: {e}", entry.name))?;
-        let target = target_for(dir, entry);
+        let existing = replace.then(|| downloaded(dir, entry)).flatten();
+        let target = existing.clone().unwrap_or_else(|| target_for(dir, entry));
         crate::storage::write_atomic(&target, &data).map_err(|e| format!("Couldn't save {}: {e}", target.display()))?;
         log::info!("saved {} ({} bytes)", target.display(), data.len());
         // The small summary beside it, used by the Sessions and Tracks pages
@@ -343,8 +366,15 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, send: &impl Fn(Event)
             }
             Err(e) => log::warn!("couldn't read {} from the MyChron: {e}", xri.display()),
         }
-        let meta = SessionMeta { listed: listed(entry), ..meta.clone() };
+        let mut meta = SessionMeta { listed: listed(entry), ..meta.clone() };
+        if let Some(old) = existing.as_ref().and_then(|p| SessionMeta::load(p)) {
+            meta = meta.over(old);
+        }
         meta.save(&target).map_err(|e| e.to_string())?;
+        if existing.is_some() {
+            // Same file, new details: its laps are worked out again.
+            crate::digest::Digests::forget(std::slice::from_ref(&target));
+        }
         saved += 1;
     }
     Ok(saved)
@@ -615,6 +645,17 @@ mod tests {
     #[test]
     fn meta_sits_beside_the_session() {
         assert_eq!(SessionMeta::path_for(Path::new("/x/a_0035.xrz")), Path::new("/x/a_0035.meta.json"));
+    }
+
+    #[test]
+    fn downloading_again_keeps_what_was_left_blank() {
+        let old = SessionMeta { driver: "Ann".into(), kart: "Blue".into(), track: "Club".into(), track_guid: Some("g1".into()), comment: "wet".into(), ..Default::default() };
+        let new = SessionMeta { driver: "Ann B".into(), track: "Club".into(), ..Default::default() }.over(old.clone());
+        assert_eq!((new.driver.as_str(), new.kart.as_str(), new.comment.as_str()), ("Ann B", "Blue", "wet"));
+        assert_eq!(new.track_guid.as_deref(), Some("g1"));
+        // Another track: its link starts afresh.
+        let moved = SessionMeta { track: "Club North".into(), ..Default::default() }.over(old);
+        assert_eq!((moved.track.as_str(), moved.track_guid), ("Club North", None));
     }
 
     #[test]

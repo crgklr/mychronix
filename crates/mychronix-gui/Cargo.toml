@@ -31,6 +31,11 @@ trash = "5.2.9"
 # Linux packages, built by .github/workflows/release.yml (cargo-deb and
 # cargo-generate-rpm). Icons are rendered from the SVG into target/icons first.
 # Telling GNOME Mychronix has started (src/startup_notify.rs); winit already uses these.
+# Naming the app's menu on a Mac (winit names it after the program's file);
+# the same version winit already uses, so nothing new is downloaded.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.2.2", features = ["NSProcessInfo", "NSString"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 raw-window-handle = "0.6"
 wayland-backend = { version = "0.3", features = ["client_system"] }

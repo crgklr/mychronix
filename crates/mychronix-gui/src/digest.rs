@@ -130,6 +130,19 @@ impl Digests {
         self.by_key.get(&k)
     }
 
+    /// Forgets what's known about these sessions (their track changed, so
+    /// their laps may time differently), and saves.
+    pub fn forget(paths: &[PathBuf]) {
+        let mut d = Self::load();
+        let before = d.by_key.len();
+        for p in paths {
+            d.by_key.remove(&key(p));
+        }
+        if d.by_key.len() != before {
+            d.save();
+        }
+    }
+
     pub fn insert(&mut self, path: &Path, digest: Digest) {
         self.by_key.insert(key(path), digest);
     }

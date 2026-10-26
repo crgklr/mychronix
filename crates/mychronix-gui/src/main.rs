@@ -84,6 +84,15 @@ fn install_crash_handler() {
 }
 
 fn main() -> eframe::Result {
+    // A Mac's app menu ("About …", "Hide …", "Quit …") is named after the
+    // running program's file, mychronix-gui. Name it Mychronix, as the app is.
+    // SAFETY: first thing in main, before any other thread exists (setting
+    // the process name isn't thread safe); Mychronix keeps no user defaults
+    // under the old name.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("Mychronix"));
+    }
     let launch_token = startup_notify::take_token();
     logging::init();
     install_crash_handler();

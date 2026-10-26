@@ -2781,6 +2781,7 @@ dependencies = [
  "image",
  "jiff",
  "log",
+ "objc2-foundation 0.2.2",
  "raw-window-handle",
  "reqwest",
  "rfd",
