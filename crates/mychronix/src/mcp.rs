@@ -230,6 +230,12 @@ fn pick_lap(session: &aim_xrk::Session, number: Option<i64>) -> Result<aim_xrk::
     }
 }
 
+/// The MyChron's model ("MyChron 6"): as its summary says, else as learned
+/// when it was connected (a MyChron 5/6 summary doesn't name its model).
+fn logger_model(s: &crate::tracks::LocalSession, profiles: &crate::profiles::Profiles) -> Option<String> {
+    s.summary.model.clone().or_else(|| profiles.loggers.get(&s.logger).map(|l| l.model.clone()).filter(|m| !m.is_empty()))
+}
+
 fn kart_name(s: &crate::tracks::LocalSession, profiles: &crate::profiles::Profiles) -> Option<String> {
     s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id)).map(|k| k.name.clone())
 }
@@ -269,7 +275,7 @@ fn list_sessions(lib: &Library, profiles: &crate::profiles::Profiles, args: &Val
                 "laps": s.summary.laps,
                 "best_lap_s": s.summary.best_lap_ms.map(|ms| ms as f64 / 1000.0),
                 "max_rpm": s.summary.max_rpm,
-                "logger": s.summary.model.clone(),
+                "logger": logger_model(s, profiles),
             }),
         ));
     }
@@ -329,7 +335,7 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
         "driver": crate::app::session_driver(s, profiles),
         "kart": kart_name(s, profiles),
         "track": crate::app::session_track(lib, i),
-        "logger": s.summary.model,
+        "logger": logger_model(s, profiles).or_else(|| session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string)),
         "gps": session.gps.as_ref().is_some_and(|g| g.len() > 10),
         "speed_calculated_from_rpm": session.channel("GPS Speed").is_none() && session.channel(crate::setup::SPEED_FROM_RPM).is_some(),
         "weather": s.weather.as_ref().map(|w| w.summary()),
