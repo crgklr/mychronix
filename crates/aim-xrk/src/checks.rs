@@ -161,6 +161,22 @@ fn rpm_dropouts(session: &Session, rpm: &crate::Channel) -> Option<u32> {
     (n > 50 && zero * 10 > n).then(|| (zero * 100 / n) as u32)
 }
 
+/// Stretches over a second where the logger recorded nothing at all, no
+/// channel and no GPS, while the session ran: (from, to) in ms. A hiccup
+/// writing the file; graphs run straight across them.
+pub fn recording_gaps(session: &Session) -> Vec<(i64, i64)> {
+    // Channels sampled at least 5 times a second (one logged once a second
+    // has a gap between every sample).
+    let fast = |t: &[i64]| t.len() > 10 && t[t.len() - 1] - t[0] < 200 * t.len() as i64;
+    let mut times: Vec<i64> = session.channels.iter().filter(|c| fast(&c.times_ms)).flat_map(|c| c.times_ms.iter().copied()).collect();
+    if let Some(g) = session.gps.as_ref().filter(|g| fast(&g.times_ms)) {
+        times.extend(&g.times_ms);
+    }
+    times.sort_unstable();
+    times.dedup();
+    times.windows(2).filter(|w| w[1] - w[0] > 1000).map(|w| (w[0], w[1])).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +228,17 @@ mod tests {
         for n in ["Logger Temperature", "GPS Speed", "EGT Alarm_1", "Calculated_Gear", "External Voltage", "Luminosity", "Best Run Diff", "Oil Pressure Low", "ECU_ERR_FUEL_PRESS"] {
             assert_eq!(sensor_of(n), None, "{n}");
         }
+    }
+
+    #[test]
+    fn finds_stretches_nothing_was_recorded() {
+        // Two channels at 10 Hz, both missing 20.0-26.8 s; a once-a-second one carries on through it.
+        let gap = |c: Channel| Channel { times_ms: c.times_ms.iter().copied().filter(|t| !(20_000..26_800).contains(t)).collect(), ..c };
+        let rpm = gap(channel("RPM", vec![9000.0; 600]));
+        let speed = gap(channel("GPS Speed", vec![40.0; 600]));
+        let slow = Channel { times_ms: (0..60).map(|k| k * 1000).collect(), ..channel("Logger Temperature", vec![30.0; 60]) };
+        assert_eq!(recording_gaps(&session(vec![rpm.clone(), speed, slow])), [(19_900, 26_800)]);
+        // One channel's own gap isn't one when another recorded through it.
+        assert!(recording_gaps(&session(vec![rpm, channel("GPS Speed", vec![40.0; 600])])).is_empty());
     }
 }

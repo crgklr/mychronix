@@ -407,6 +407,10 @@ impl App {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(why).size(13.0).color(DIM)).wrap());
         }
+        if let Some(gaps) = recording_gaps_note(session, &self.recording_gaps) {
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(RichText::new(gaps).size(13.0).color(DIM)).wrap());
+        }
         ui.add_space(14.0);
         panel_tiles(ui, session);
         ui.add_space(16.0);
@@ -620,6 +624,28 @@ fn panel_tiles(ui: &mut Ui, session: &Session) {
             p.text(rect.left_top() + vec2(12.0, 47.0), egui::Align2::LEFT_CENTER, value, semibold(21.0), TEXT);
         }
     });
+}
+
+/// "No data for 6.8 s of lap 15: …", for stretches the MyChron recorded
+/// nothing (graphs run straight across them); None without any.
+fn recording_gaps_note(session: &Session, gaps: &[(i64, i64)]) -> Option<String> {
+    if gaps.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = gaps
+        .iter()
+        .map(|&(from, to)| {
+            let lap = session.laps.iter().find(|l| from >= l.start_ms && from < l.end_ms).map(|l| format!("lap {}", l.number)).unwrap_or_else(|| "the session".into());
+            format!("{:.1} s of {lap}", (to - from) as f64 / 1000.0)
+        })
+        .collect();
+    let list = match parts.as_slice() {
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [] => return None,
+    };
+    let there = if gaps.len() == 1 { "a gap there" } else { "gaps there" };
+    Some(format!("No data for {list}: the MyChron's recording has {there}, and graphs run straight across it."))
 }
 
 /// A click this frame outside `panel`, `pill` and the rail (whose session

@@ -202,6 +202,8 @@ pub struct App {
     update: Option<crate::update::Release>,
     update_notes: bool,
     measured_ratio: Option<f64>,
+    /// Stretches of the open session with nothing recorded (see `aim_xrk::checks::recording_gaps`).
+    recording_gaps: Vec<(i64, i64)>,
     /// Channel that colors the track map (None: RPM if present).
     map_channel: Option<usize>,
     /// Color the Graphs map by where the open lap gains and loses time against the best lap.
@@ -253,6 +255,7 @@ impl App {
             Ok(mut session) => {
                 self.fill_names(&mut session, &path);
                 self.measured_ratio = crate::setup::measured_rpm_per_kmh(&session);
+                self.recording_gaps = aim_xrk::checks::recording_gaps(&session);
                 self.selected.clear();
                 self.graph_order.clear();
                 for i in default_channels(&session) {

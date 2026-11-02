@@ -342,6 +342,11 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
         "comment": s.meta.as_ref().map(|m| m.comment.clone()).filter(|c| !c.is_empty()),
         "units": units(),
         "laps": laps,
+        // Stretches with no data: the graphs and corners there aren't real.
+        "recording_gaps": aim_xrk::checks::recording_gaps(&session).iter().map(|&(from, to)| json!({
+            "lap": session.laps.iter().find(|l| from >= l.start_ms && from < l.end_ms).map(|l| l.number),
+            "seconds": round((to - from) as f64 / 1000.0, 1),
+        })).collect::<Vec<_>>(),
         "patterns": notes,
         "kart_setup": setup,
         "channels": channels,
