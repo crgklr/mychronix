@@ -72,60 +72,12 @@ pub struct SessionMeta {
     pub listed: String,
 }
 
-/// A listed file's date and time ("10/10/2026 14:39:36").
-fn listed(entry: &DirEntry) -> String {
-    format!("{} {}", entry.date.trim(), entry.time.trim()).trim().to_string()
-}
+pub use aim_link::saved::listed_twice;
+use aim_link::saved::{listed, target_for};
 
-/// `a_0001.xrz`, then `a_0001-2.xrz`, `a_0001-3.xrz`…: where a recording
-/// named `name` may be saved in `dir`.
-fn candidates(dir: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
-    let p = Path::new(name);
-    let (stem, ext) = (p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), p.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default());
-    let dir = dir.to_path_buf();
-    (1..).map(move |k| dir.join(if k == 1 { name.to_string() } else { format!("{stem}-{k}.{ext}") }))
-}
-
-/// `a_0001.xrz` for `a_0001.hrz` and back. A MyChron 6 can list a session
-/// under both names, byte for byte the same, and the two would share their
-/// details and setup sheet here (`a_0001.meta.json`, `a_0001.setup.json`),
-/// so they're one recording.
-fn twin(path: &Path) -> Option<PathBuf> {
-    let other = match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "xrz" => "hrz",
-        "hrz" => "xrz",
-        _ => return None,
-    };
-    Some(path.with_extension(other))
-}
-
-/// The local copy of `entry`, if it's been downloaded into `dir` (under its
-/// own name or its twin's): the same size, and (when the download noted it)
-/// the same listed date and time.
+/// The local copy of `entry`, if it's been downloaded into `dir` (see `aim_link::saved`).
 pub fn downloaded(dir: &Path, entry: &DirEntry) -> Option<PathBuf> {
-    let names = std::iter::once(PathBuf::from(&entry.name)).chain(twin(Path::new(&entry.name)));
-    names.into_iter().find_map(|name| {
-        candidates(dir, &name.to_string_lossy()).take_while(|p| p.exists()).find(|p| {
-            let same_size = std::fs::metadata(p).is_ok_and(|m| m.len() == entry.size);
-            let same_time = SessionMeta::load(p).map(|m| m.listed).filter(|l| !l.is_empty()).is_none_or(|l| l == listed(entry));
-            same_size && same_time
-        })
-    })
-}
-
-/// Whether `entry` is the `.hrz` twin of an `.xrz` the MyChron also lists,
-/// the same size: one recording, downloaded once.
-pub fn listed_twice(files: &[DirEntry], entry: &DirEntry) -> bool {
-    let name = Path::new(&entry.name);
-    name.extension().is_some_and(|e| e.eq_ignore_ascii_case("hrz"))
-        && twin(name).is_some_and(|t| files.iter().any(|f| Path::new(&f.name) == t && f.size == entry.size))
-}
-
-/// Where a new download of `entry` goes: its own name, or the next free
-/// numbered one when that (or its twin, whose details it would share) is
-/// taken. Nothing already downloaded is replaced.
-fn target_for(dir: &Path, entry: &DirEntry) -> PathBuf {
-    candidates(dir, &entry.name).find(|p| !p.exists() && !twin(p).is_some_and(|t| t.exists())).expect("an unused name")
+    aim_link::saved::downloaded(dir, entry, |p| SessionMeta::load(p).map(|m| m.listed))
 }
 
 /// When `entry` started, as `profiles::stamp` writes it (local time): from
@@ -718,6 +670,13 @@ mod tests {
         use wifi::split_terse;
         assert_eq!(split_terse("AiM-MYC6-345678:72"), ["AiM-MYC6-345678", "72"]);
         assert_eq!(split_terse(r"Cafe\: Guest:802-11-wireless:yes"), ["Cafe: Guest", "802-11-wireless", "yes"]);
+    }
+
+    #[test]
+    fn reads_the_details_mychronix_cli_writes() {
+        let cli = r#"{ "driver": "", "kart": "", "championship": "", "track": "", "listed": "10/31/2026 12:58:46" }"#;
+        let meta: SessionMeta = serde_json::from_str(cli).unwrap();
+        assert_eq!(meta.listed, "10/31/2026 12:58:46");
     }
 
     #[test]

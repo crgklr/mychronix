@@ -12,3 +12,4 @@ aim-xrk.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 aim-link.workspace = true
+serde_json.workspace = true

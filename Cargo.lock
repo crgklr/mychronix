@@ -2792,6 +2792,7 @@ dependencies = [
  "anyhow",
  "clap",
  "log",
+ "serde_json",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ pub mod datakey;
 pub mod client;
 pub mod discovery;
 pub mod frame;
+pub mod saved;
 pub mod usb;
 
 pub use client::{DirEntry, Logger, MAX_FILE_BYTES, SESSIONS_DIR, TRACKS_DIR, is_safe_file_name};

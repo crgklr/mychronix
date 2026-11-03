@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use aim_link::{AP_ADDRESS, Link};
+use aim_link::{AP_ADDRESS, Link, saved};
 use aim_xrk::{Session, format_lap_time};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -271,38 +271,56 @@ fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
 
     let mut logger = connect()?;
     let listing = logger.list(aim_link::SESSIONS_DIR).context("listing sessions")?;
-    let sessions: Vec<_> = listing.iter().filter(|e| e.is_session()).collect();
-    // Each session has a small `.xri` companion holding its summary; keep it alongside.
-    let mut wanted: Vec<_> = listing.iter().filter(|e| e.is_session() || e.name.to_ascii_lowercase().ends_with(".xri")).collect();
-    wanted.sort_by(|a, b| a.name.cmp(&b.name));
+    // An .hrz listed beside its .xrz is the same recording: fetched once.
+    let mut sessions: Vec<_> = listing.iter().filter(|e| e.is_session() && !saved::listed_twice(&listing, e)).collect();
+    sessions.sort_by(|a, b| a.name.cmp(&b.name));
     println!("Logger {id}: {} sessions; saving to {}", sessions.len(), dir.display());
     let (mut saved, mut skipped) = (0, 0);
-    for entry in wanted {
+    for entry in sessions {
         // The name comes from the logger: never let it point outside this folder.
         if !aim_link::is_safe_file_name(&entry.name) {
             eprintln!("Skipping a file with an unusable name: {:?}", entry.name);
             continue;
         }
-        let target = dir.join(&entry.name);
-        if already_saved(&target, entry.size) {
+        if saved::downloaded(&dir, entry, saved_listed).is_some() {
             skipped += 1;
             continue;
         }
+        // A different recording under a name already used here (after a format) goes beside it.
+        let target = saved::target_for(&dir, entry);
         let path = format!("{}/{}", aim_link::SESSIONS_DIR, entry.name);
         let data = logger.read_file(&path, progress_bar(&entry.name)).with_context(|| format!("reading {path}"))?;
         eprintln!();
-        // Write to a temporary name first so an interrupted download never looks complete.
-        let partial = target.with_extension("part");
-        std::fs::write(&partial, &data)?;
-        std::fs::rename(&partial, &target)?;
+        write_whole(&target, &data)?;
+        // Its summary (.xri) beside it, and when the logger listed it, as the app notes them.
+        let xri = Path::new(&entry.name).with_extension("xri");
+        if listing.iter().any(|e| Path::new(&e.name) == xri) {
+            let bytes = logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}).with_context(|| format!("reading {}", xri.display()))?;
+            write_whole(&target.with_extension("xri"), &bytes)?;
+        }
+        let meta = serde_json::json!({ "driver": "", "kart": "", "championship": "", "track": "", "listed": saved::listed(entry) });
+        write_whole(&target.with_extension("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
+        if target.file_name() != Some(std::ffi::OsStr::new(&entry.name)) {
+            println!("{} is a different recording from the one saved under that name; saved as {}", entry.name, target.display());
+        }
         saved += 1;
     }
-    println!("Saved {saved} new files, {skipped} already here.");
+    println!("Saved {saved} new sessions, {skipped} already here.");
     Ok(())
 }
 
-fn already_saved(path: &Path, size: u64) -> bool {
-    std::fs::metadata(path).map(|m| m.len() == size).unwrap_or(false)
+/// The listed date and time noted beside a saved session (its `.meta.json`), if any.
+fn saved_listed(session: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(session.with_extension("meta.json")).ok()?;
+    serde_json::from_str::<serde_json::Value>(&text).ok()?.get("listed")?.as_str().map(String::from)
+}
+
+/// Writes to a temporary name first, so an interrupted download never looks complete.
+fn write_whole(target: &Path, data: &[u8]) -> anyhow::Result<()> {
+    let partial = target.with_extension("part");
+    std::fs::write(&partial, data).with_context(|| format!("writing {}", partial.display()))?;
+    std::fs::rename(&partial, target).with_context(|| format!("saving {}", target.display()))?;
+    Ok(())
 }
 
 fn dirs_home() -> anyhow::Result<PathBuf> {
