@@ -112,7 +112,7 @@ impl App {
                     let s = &lib.sessions[i].summary;
                     std::cmp::Reverse((s.date, s.start_time.clone(), s.number))
                 });
-                let extras = self.row_extras(&lib, &shown, &ui.ctx().clone());
+                let extras = self.row_extras(&lib, &profiles, &shown, &ui.ctx().clone());
                 shown_rows = shown.clone();
 
                 egui::ScrollArea::vertical().id_salt("sessions_list").auto_shrink([false, false]).show(ui, |ui| {
@@ -191,15 +191,16 @@ pub(super) struct RowExtras {
 impl App {
     /// Sparkline laps and badges for each of `rows` (library indices); digests
     /// not yet known are asked for in the background.
-    pub(super) fn row_extras(&mut self, lib: &Library, rows: &[usize], ctx: &egui::Context) -> std::collections::HashMap<usize, RowExtras> {
+    pub(super) fn row_extras(&mut self, lib: &Library, profiles: &crate::profiles::Profiles, rows: &[usize], ctx: &egui::Context) -> std::collections::HashMap<usize, RowExtras> {
         self.want_digests(rows.iter().map(|&i| lib.sessions[i].path.clone()), ctx);
         let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
         let ignored = self.sensors.ignored.get_or_insert_with(crate::sensor_check::Ignored::load);
-        // Personal best: the best lap at a track from this MyChron, among two or more sessions there.
+        // Personal best: the driver's best lap at a track, on any MyChron, among two or more sessions there.
+        let who = |s: &tracks::LocalSession| Some(sessions_filter_ui::session_driver(s, profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| s.logger.clone());
         let mut best_at: std::collections::HashMap<(String, String), (u64, usize)> = std::collections::HashMap::new();
         for s in &lib.sessions {
-            if let (Some(b), Some(t)) = (s.summary.best_lap_ms, s.summary.track.clone()) {
-                let e = best_at.entry((s.logger.clone(), t)).or_insert((u64::MAX, 0));
+            if let (Some(b), Some(t)) = (s.summary.best_lap_ms, s.track_name(&lib.tracks)) {
+                let e = best_at.entry((who(s), t)).or_insert((u64::MAX, 0));
                 e.0 = e.0.min(b);
                 e.1 += 1;
             }
@@ -216,9 +217,9 @@ impl App {
                         x.badges.push((format!("⚠ {}", issues.join(", ")), theme::FAVORITE, "A sensor didn't record properly; open the session for what to check".into()));
                     }
                 }
-                let pb = sum.best_lap_ms.zip(sum.track.clone()).is_some_and(|(b, t)| best_at.get(&(s.logger.clone(), t)).is_some_and(|&(m, n)| n > 1 && b == m));
+                let pb = sum.best_lap_ms.zip(s.track_name(&lib.tracks)).is_some_and(|(b, t)| best_at.get(&(who(s), t)).is_some_and(|&(m, n)| n > 1 && b == m));
                 if pb {
-                    x.badges.insert(0, ("PB".into(), theme::GOOD, "Personal best: the fastest lap from this MyChron at this track".into()));
+                    x.badges.insert(0, ("PB".into(), theme::GOOD, "Personal best: the driver's fastest lap at this track".into()));
                 }
                 if crate::events::is_warm_up(sum) {
                     x.badges.push(("Warm-up".into(), DIM, "The kart never left the stand".into()));
