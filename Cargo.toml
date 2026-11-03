@@ -12,8 +12,6 @@ repository = "https://github.com/crgklr/mychronix"
 [workspace.dependencies]
 aim-xrk = { path = "crates/aim-xrk" }
 aim-link = { path = "crates/aim-link" }
-aim-mychron = { path = "crates/aim-mychron" }
-aim-cfg = { path = "crates/aim-cfg" }
 aim-track = { path = "crates/aim-track" }
 anyhow = "1"
 thiserror = "2"

@@ -151,25 +151,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "aim-cfg"
-version = "0.1.17"
-dependencies = [
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "aim-link"
 version = "0.1.17"
 dependencies = [
  "log",
  "nusb",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "aim-mychron"
-version = "0.1.17"
-dependencies = [
  "thiserror 2.0.21",
 ]
 
