@@ -1105,48 +1105,33 @@ impl App {
                 .map(|id| garage_manage_ui::Confirm::RemoveKart { id, sure: false });
             return;
         }
-        let changed = if save && ok {
-            let id = edit.id.unwrap_or_else(|| profiles.next_kart_id());
-            // Its MyChron history stays as it was; the MyChron is changed below.
-            let before = profiles
-                .karts
-                .iter()
-                .find(|k| k.id == id)
-                .cloned()
-                .unwrap_or_default();
+        let changed = save && ok;
+        if changed {
             // A new baseline is what the kart runs from now on: its sessions so far keep the old one.
-            let newest_of_kart = lib
-                .sessions
-                .iter()
-                .filter(|s| s.kart == Some(id))
-                .filter_map(|s| s.start())
-                .max();
-            let mut kart = Kart {
-                id,
+            let newest_of_kart = edit.id.and_then(|id| {
+                lib.sessions
+                    .iter()
+                    .filter(|s| s.kart == Some(id))
+                    .filter_map(|s| s.start())
+                    .max()
+            });
+            let details = crate::profiles::KartDetails {
                 name: name.clone(),
                 engine: edit.engine.trim().to_string(),
                 driver: edit.driver,
                 clutch_rpm: edit.clutch_rpm.trim().to_string(),
-                ..before
             };
-            if adding {
-                kart.change_baseline(edit.baseline.carried(), newest_of_kart);
-            }
-            match profiles.karts.iter_mut().find(|k| k.id == id) {
-                Some(k) => *k = kart,
-                None => profiles.karts.push(kart),
-            }
-            // A MyChron is on one kart at a time; the ones it replaces keep their sessions so far.
             let newest = |l: &str| crate::profiles::moved_now(lib.newest_start(l));
-            if edit.logger.is_empty() {
-                profiles.unmount(id, &newest);
-            } else {
-                profiles.mount(&edit.logger, id, &newest);
-            }
-            true
-        } else {
-            false
-        };
+            let baseline = adding.then(|| edit.baseline.carried());
+            profiles.save_kart(
+                edit.id,
+                details,
+                baseline,
+                newest_of_kart,
+                &edit.logger,
+                &newest,
+            );
+        }
         if changed {
             log::info!(
                 "kart {}: {name}",

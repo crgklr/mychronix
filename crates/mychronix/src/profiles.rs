@@ -164,6 +164,15 @@ pub struct PastMyChron {
 /// downloaded yet stay with the kart it was on. (A download that names a kart
 /// moves it from its newest session here instead: the sessions downloaded
 /// then are that kart's.)
+/// What the kart dialog edits: its name, engine, driver and clutch RPM.
+#[derive(Debug, Clone, Default)]
+pub struct KartDetails {
+    pub name: String,
+    pub engine: String,
+    pub driver: Option<u32>,
+    pub clutch_rpm: String,
+}
+
 pub fn moved_now(newest: Option<Stamp>) -> Option<Stamp> {
     newest.max(Some(Stamp::now()))
 }
@@ -399,6 +408,51 @@ impl Profiles {
             name: name.into(),
             ..Default::default()
         });
+        id
+    }
+
+    /// Adds a kart (`id` None) or saves one with `details`, keeping what the
+    /// dialog doesn't change (its MyChron history, setups). A new kart starts
+    /// from `baseline`, its sessions so far (to `newest_of_kart`) keeping the
+    /// old one. Then the kart takes `logger` (a MyChron is on one kart at a
+    /// time; the ones it leaves keep their sessions so far, see `mount`), or
+    /// none. Returns its id.
+    pub fn save_kart(
+        &mut self,
+        id: Option<u32>,
+        details: KartDetails,
+        baseline: Option<crate::setup::Setup>,
+        newest_of_kart: Option<Stamp>,
+        logger: &str,
+        newest: &dyn Fn(&str) -> Option<Stamp>,
+    ) -> u32 {
+        let id = id.unwrap_or_else(|| self.next_kart_id());
+        let before = self
+            .karts
+            .iter()
+            .find(|k| k.id == id)
+            .cloned()
+            .unwrap_or_default();
+        let mut kart = Kart {
+            id,
+            name: details.name,
+            engine: details.engine,
+            driver: details.driver,
+            clutch_rpm: details.clutch_rpm,
+            ..before
+        };
+        if let Some(b) = baseline {
+            kart.change_baseline(b, newest_of_kart);
+        }
+        match self.karts.iter_mut().find(|k| k.id == id) {
+            Some(k) => *k = kart,
+            None => self.karts.push(kart),
+        }
+        if logger.is_empty() {
+            self.unmount(id, newest);
+        } else {
+            self.mount(logger, id, newest);
+        }
         id
     }
 
@@ -883,6 +937,45 @@ mod tests {
         assert_eq!(p.drivers.len(), 1);
         assert_eq!(p.karts.len(), 1);
         assert_eq!(p.for_logger("4444").driver, "Bo");
+    }
+
+    #[test]
+    fn saving_a_kart_keeps_its_history_and_moves_the_mychron() {
+        let mut p = two_drivers();
+        let none = |_: &str| None;
+        // A new kart for Ann takes her MyChron (5555) from her old one.
+        let ann = p.drivers[0].id;
+        let details = |name: &str| KartDetails {
+            name: name.into(),
+            engine: "KA100".into(),
+            driver: Some(ann),
+            clutch_rpm: String::new(),
+        };
+        let new = details("Ann's new kart");
+        let baseline = crate::setup::Setup {
+            drive_teeth: "10".into(),
+            driven_teeth: "80".into(),
+            ..Default::default()
+        };
+        let id = p.save_kart(None, new, Some(baseline.clone()), None, "5555", &none);
+        assert_eq!(id, 3);
+        let k = p.karts.iter().find(|k| k.id == 3).unwrap();
+        assert_eq!((k.logger.as_str(), &k.baseline), ("5555", &baseline));
+        assert_eq!(p.mounted_on("5555").map(|k| k.id), Some(3));
+        assert!(p.karts[0].logger.is_empty(), "the old kart gave it up");
+        // Renamed later with no MyChron: the name changes, the baseline and history stay.
+        let past = p.karts.iter().find(|k| k.id == 3).unwrap().past.len();
+        p.save_kart(Some(3), details("Ann's kart (2026)"), None, None, "", &none);
+        let k = p.karts.iter().find(|k| k.id == 3).unwrap();
+        assert_eq!(
+            (k.name.as_str(), &k.baseline),
+            ("Ann's kart (2026)", &baseline)
+        );
+        assert!(
+            k.logger.is_empty() && k.past.len() > past,
+            "the MyChron's time on it is kept"
+        );
+        assert_eq!(p.karts.len(), 3);
     }
 
     #[test]
