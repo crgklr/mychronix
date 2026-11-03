@@ -450,6 +450,7 @@ impl App {
         self.analysis.analysis_view = match name {
             "histogram" => AnalysisView::Histogram,
             "scatter" => AnalysisView::Scatter,
+            "map" => AnalysisView::Map,
             _ => self.analysis.analysis_view,
         };
     }

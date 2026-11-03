@@ -302,29 +302,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(k, s)| {
-                // The number sits off the line, on the outside of the corner.
-                let i = at(s.apex);
-                let (a, b) = (
-                    best_xy[i.saturating_sub(3)],
-                    best_xy[(i + 3).min(best_xy.len() - 1)],
-                );
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let len = (dx * dx + dy * dy).sqrt().max(1e-6);
-                let mid = best_xy[i];
-                let center = model.traces[model.best]
-                    .xy
-                    .iter()
-                    .fold((0.0, 0.0), |s, p| (s.0 + p.0, s.1 + p.1));
-                let n = best_xy.len() as f64;
-                let out = if (mid.0 - center.0 / n) * (-dy / len)
-                    + (mid.1 - center.1 / n) * (dx / len)
-                    > 0.0
-                {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let off = (mid.0 - dy / len * out, mid.1 + dx / len * out);
+                let (mid, off) = corner_label(best_xy, at(s.apex));
                 (
                     k,
                     to_lat_lon(lat0, lon0, mid),
@@ -334,27 +312,20 @@ impl App {
             })
             .collect();
         let clicked = Arc::new(Mutex::new(None));
-        // Without imagery, the track itself, worked out from where the laps went:
-        // as wide as the settings say the track is, else kart-track wide, or
-        // wider when AiM lists it as a race track (karts do run on car circuits).
-        let width = self.path.clone().and_then(|p| {
-            let lib = self.lib();
-            let t = &lib.tracks[lib.sessions.iter().find(|s| s.path == p)?.track?];
-            let set = crate::settings::get()
-                .track_widths
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(&t.name))
-                .map(|(_, &w)| w)
-                .filter(|w| (2.0..=40.0).contains(w));
-            Some(
-                set.unwrap_or(if t.track_kind == aim_track::TrackKind::RaceTrack {
-                    12.0
-                } else {
-                    8.0
-                }),
-            )
-        });
-        let width = width.unwrap_or(8.0);
+        // Without imagery, the track itself, worked out from where the laps went.
+        let width = self
+            .path
+            .clone()
+            .and_then(|p| {
+                let lib = self.lib();
+                let t = &lib.tracks[lib.sessions.iter().find(|s| s.path == p)?.track?];
+                Some(track_width(
+                    &crate::settings::get().track_widths,
+                    &t.name,
+                    t.track_kind,
+                ))
+            })
+            .unwrap_or(8.0);
         let track = (!self.map_view.satellite).then(|| {
             let (middle, closed) = track_shape(&model, width);
             (
@@ -1294,6 +1265,43 @@ fn toggle(ui: &mut Ui, on: bool) -> egui::Response {
     resp
 }
 
+/// Where a corner's number goes: the point on `line` at index `i`, and one
+/// a meter off it on the outside of the corner (away from the middle of the
+/// lap's shape).
+fn corner_label(line: &[(f64, f64)], i: usize) -> ((f64, f64), (f64, f64)) {
+    let (a, b) = (line[i.saturating_sub(3)], line[(i + 3).min(line.len() - 1)]);
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+    let mid = line[i];
+    let center = line.iter().fold((0.0, 0.0), |s, p| (s.0 + p.0, s.1 + p.1));
+    let n = line.len() as f64;
+    let out = if (mid.0 - center.0 / n) * (-dy / len) + (mid.1 - center.1 / n) * (dx / len) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    (mid, (mid.0 - dy / len * out, mid.1 + dx / len * out))
+}
+
+/// How wide to draw a track (m) without imagery: as wide as the settings say
+/// it is (2 to 40 m), else kart-track wide, or wider when AiM lists it as a
+/// race track (karts do run on car circuits).
+fn track_width(
+    set: &std::collections::BTreeMap<String, f64>,
+    name: &str,
+    kind: aim_track::TrackKind,
+) -> f64 {
+    set.iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, &w)| w)
+        .filter(|w| (2.0..=40.0).contains(w))
+        .unwrap_or(if kind == aim_track::TrackKind::RaceTrack {
+            12.0
+        } else {
+            8.0
+        })
+}
+
 /// The track to draw without imagery, `width` meters wide, from where the laps
 /// went: its middle (meters, like the traces) and whether it's a loop.
 ///
@@ -1407,4 +1415,39 @@ fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
         })
         .collect();
     (middle, closed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_corner_number_sits_outside_the_corner() {
+        // A circle of radius 50 m around the origin: outside is farther from it.
+        let line: Vec<(f64, f64)> = (0..100)
+            .map(|k| {
+                let a = k as f64 / 100.0 * std::f64::consts::TAU;
+                (50.0 * a.cos(), 50.0 * a.sin())
+            })
+            .collect();
+        for i in [10, 40, 75] {
+            let (mid, off) = corner_label(&line, i);
+            assert_eq!(mid, line[i]);
+            let r = |p: (f64, f64)| (p.0 * p.0 + p.1 * p.1).sqrt();
+            assert!((r(off) - 51.0).abs() < 0.01, "{} m out", r(off) - 50.0);
+        }
+    }
+
+    #[test]
+    fn a_track_is_as_wide_as_the_settings_say() {
+        use aim_track::TrackKind;
+        let set = std::collections::BTreeMap::from([
+            ("Club Ring".to_string(), 10.5),
+            ("Odd".to_string(), 90.0),
+        ]);
+        assert_eq!(track_width(&set, "club ring", TrackKind::KartTrack), 10.5);
+        // A width out of reason, or none set: kart-track wide, or race-track wide.
+        assert_eq!(track_width(&set, "Odd", TrackKind::KartTrack), 8.0);
+        assert_eq!(track_width(&set, "Elsewhere", TrackKind::RaceTrack), 12.0);
+    }
 }
