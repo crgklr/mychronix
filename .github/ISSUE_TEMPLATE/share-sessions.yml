@@ -1,0 +1,38 @@
+name: Share sessions
+description: Send sample sessions from your MyChron, so Mychronix can read it properly.
+title: "Sessions from a "
+labels: ["sessions"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you! Every MyChron and accessory records a little differently, and real sessions are the only way to support them.
+        **Issues are public**, and session files can hold driver and kart names and the track's GPS position: share only what you're happy to make public.
+  - type: input
+    id: mychron
+    attributes:
+      label: Which MyChron?
+      placeholder: "e.g. MyChron 5S, MyChron 6, MyChron 4"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version (if you know it)
+  - type: textarea
+    id: plugged
+    attributes:
+      label: What's plugged into it?
+      description: Sensors and expansions (water or exhaust temperature, lambda, steering, wheel speed, an expansion box, CAN devices…). "Nothing extra" is useful too.
+  - type: textarea
+    id: files
+    attributes:
+      label: The files
+      description: |
+        Drag a zip here. MyChron 5/6: the `.xrk` or `.xrz` (and its `.xri`), from RaceStudio 3 or `~/Mychronix/sessions`. MyChron 4: the `.drk` with its `.gpk`, `.rrk` and `.imd`, or the `.mc4` files Mychronix saves. A session with a few laps is plenty.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything that looks wrong in Mychronix with these?

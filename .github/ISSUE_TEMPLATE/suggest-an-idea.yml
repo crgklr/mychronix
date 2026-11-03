@@ -1,0 +1,11 @@
+name: Suggest an idea
+description: Something Mychronix should show, or do differently.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: What you'd want to see or do, and what question about your driving or your kart it would answer.
+    validations:
+      required: true

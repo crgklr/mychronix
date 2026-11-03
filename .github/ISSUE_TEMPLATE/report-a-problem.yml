@@ -1,0 +1,34 @@
+name: Report a problem
+description: Something didn't work, looked wrong, or gave a number you don't believe.
+labels: ["problem"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you got instead. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: mychron
+    attributes:
+      label: Which MyChron?
+      placeholder: "e.g. MyChron 5S over WiFi, MyChron 6 by USB, MyChron 4 with the data key"
+  - type: input
+    id: computer
+    attributes:
+      label: Your computer
+      placeholder: "e.g. Fedora 44, Ubuntu 24.04, macOS 15 on an M2"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mychronix version
+      description: The log's first line says it ("Mychronix 0.1.17 starting").
+  - type: textarea
+    id: log
+    attributes:
+      label: The log (if you can)
+      description: |
+        Attach `mychronix.log`: on Linux in `~/.cache/mychronix/`, on a Mac in `~/Library/Logs/Mychronix/`. It names the files Mychronix read and wrote, not what's in them.
