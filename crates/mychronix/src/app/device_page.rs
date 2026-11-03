@@ -109,7 +109,8 @@ impl App {
                     if newly {
                         self.device.busy = Some("Reading the session list…".into());
                         let serial = self.device.logger.as_ref().and_then(|b| b.logger_id);
-                        let _ = self.device.worker.as_ref().unwrap().tx.send(Command::List { serial });
+                        let dir = self.logger_dir();
+                        let _ = self.device.worker.as_ref().unwrap().tx.send(Command::List { serial, dir });
                     }
                 }
                 Event::Joined { ssid } => {
@@ -136,7 +137,9 @@ impl App {
                         self.reload_library(); // pick up the new custom tracks
                         self.device.message = Some((true, format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" })));
                     }
-                    self.device.selected = self.new_on_logger().into_iter().map(|e| e.name).collect();
+                    // New sessions are picked, except engine warm-ups (as RaceStudio does); All new picks those too.
+                    let warm_up = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).is_some_and(listed_warm_up);
+                    self.device.selected = self.new_on_logger().into_iter().filter(|e| !warm_up(&e.name)).map(|e| e.name).collect();
                     // Why each session counts as new or already downloaded.
                     let dir = self.logger_dir();
                     let sessions: Vec<_> = self.device.files.iter().filter(|e| e.is_session()).collect();
@@ -228,7 +231,8 @@ impl App {
                 }
                 self.device.files = files;
                 self.device.summaries = summaries;
-                self.device.selected = self.new_on_logger().into_iter().map(|e| e.name).collect();
+                let warm_up = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).is_some_and(listed_warm_up);
+                self.device.selected = self.new_on_logger().into_iter().filter(|e| !warm_up(&e.name)).map(|e| e.name).collect();
                 // Its custom tracks: the ones on this computer.
                 let custom = crate::paths::data("tracks/custom").and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten();
                 let names = custom.filter_map(|e| aim_track::read_tkk(e.path()).ok()).map(|t| (t.name, crate::device::TrackCopy::Here));
@@ -555,7 +559,8 @@ impl App {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let n = self.device.selected.len();
                     let label = if n == 0 { "Download".to_string() } else { format!("Download {n}") };
-                    if button(ui, Some(Icon::FolderOpen), &label, true).clicked() && n > 0 && self.device.busy.is_none() {
+                    // Quiet until something is picked: it does nothing then.
+                    if button(ui, Some(Icon::Download), &label, n > 0).clicked() && n > 0 && self.device.busy.is_none() {
                         let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
                         let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
                         // The track comes from the logger: one track pre-fills the field, several defer to each session.
@@ -622,6 +627,9 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if is_new {
                                 tag(ui, "New", TEXT);
+                                if sum.as_ref().is_some_and(listed_warm_up) {
+                                    tag(ui, "Warm-up", DIM);
+                                }
                             } else {
                                 ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
                             }
@@ -847,6 +855,12 @@ impl App {
 }
 
 const AP_ADDRESS_FAKE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 1);
+
+/// Whether a session on the logger was an engine warm-up, by its own
+/// summary's top speed (read for new sessions only; unknown counts as not).
+fn listed_warm_up(s: &aim_xrk::SessionSummary) -> bool {
+    s.max_speed.is_some() && crate::events::is_warm_up(s)
+}
 
 /// "2026-10-31 08:58:10" → "Oct 31, 2026 at 8:58 AM".
 fn start_words(start: &str) -> String {

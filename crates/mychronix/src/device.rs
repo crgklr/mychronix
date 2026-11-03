@@ -25,7 +25,8 @@ pub enum Command {
     Leave,
     /// Read the logger's session list (folder listing + summary file), and
     /// copy its new custom tracks, noting which MyChron (serial) they came from.
-    List { serial: Option<u32> },
+    /// `dir`: where this logger's sessions are saved, to tell which are new.
+    List { serial: Option<u32>, dir: Option<PathBuf> },
     /// Each file with the details to save beside it; `replace` puts a
     /// recording already saved here over its copy instead of beside it.
     Download { files: Vec<(DirEntry, SessionMeta)>, dir: PathBuf, replace: bool },
@@ -190,9 +191,9 @@ impl Worker {
                         leave();
                         send(Event::Left);
                     }
-                    Command::List { serial } => {
+                    Command::List { serial, dir } => {
                         let started = std::time::Instant::now();
-                        match list(serial) {
+                        match list(serial, dir.as_deref()) {
                             Ok((files, summaries, tracks)) => {
                                 log::info!("listed {} files, {} summaries, {} new custom tracks in {:?}", files.len(), summaries.len(), tracks.copied(), started.elapsed());
                                 for f in &files {
@@ -249,7 +250,7 @@ fn connect() -> Result<Link, String> {
     Link::connect().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))
 }
 
-fn list(serial: Option<u32>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), String> {
+fn list(serial: Option<u32>, dir: Option<&Path>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), String> {
     let mut logger = connect()?;
     let listing = logger.list(aim_link::SESSIONS_DIR).map_err(|e| format!("Couldn't list sessions: {e}"))?;
     let summaries = listing
@@ -258,6 +259,23 @@ fn list(serial: Option<u32>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyCh
         .and_then(|_| logger.read_file("1:/mem/summary1.csv", |_, _| {}).ok())
         .map(|csv| aim_xrk::parse_summary_csv(&String::from_utf8_lossy(&csv)))
         .unwrap_or_default();
+    // The summary file has no usable top speed, so each new session's own
+    // small summary (.xri) is read too: it says which were engine warm-ups.
+    let mut summaries = summaries;
+    for e in listing.iter().filter(|e| e.is_session() && !listed_twice(&listing, e) && !dir.is_some_and(|d| downloaded(d, e).is_some())).take(60) {
+        let xri = Path::new(&e.name).with_extension("xri");
+        if !listing.iter().any(|f| Path::new(&f.name) == xri) {
+            continue;
+        }
+        match logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}).map_err(|e| e.to_string()).and_then(|b| aim_xrk::parse_xri(&b).map_err(|e| e.to_string())) {
+            Ok(mut sum) => {
+                sum.file = Some(e.name.clone());
+                summaries.retain(|s| s.file.as_deref() != Some(e.name.as_str()));
+                summaries.push(sum);
+            }
+            Err(err) => log::debug!("couldn't read {} from the MyChron: {err}", xri.display()),
+        }
+    }
     let tracks = copy_custom_tracks(&mut logger, serial);
     copy_track_list(&mut logger);
     Ok((listing, summaries, tracks))
