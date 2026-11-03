@@ -32,10 +32,10 @@ impl App {
     /// what changed, and whether RPM and speed agree with the gearing.
     pub(super) fn setup_section(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let Some(i) = lib.sessions.iter().position(|s| s.path == path) else { return };
         let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
-        let resolved = setup::resolve(lib, baselines);
+        let resolved = setup::resolve(&lib, baselines);
         let r = &resolved[i];
         let source = match r.source {
             Source::Own => "Recorded for this session".to_string(),
@@ -79,7 +79,7 @@ impl App {
             self.setup_edit = Some(SetupEdit {
                 path,
                 setup: r.setup.clone(),
-                before: setup::before(lib, baselines, i),
+                before: setup::before(&lib, baselines, i),
                 has_own: r.source == Source::Own,
                 title: session_title(&lib.sessions[i]),
                 kart_next: None,
@@ -90,16 +90,16 @@ impl App {
     /// The setup in force for the open session.
     pub(super) fn current_setup(&mut self) -> Option<Setup> {
         let path = self.path.clone()?;
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let i = lib.sessions.iter().position(|s| s.path == path)?;
         let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
-        Some(setup::resolve(lib, baselines).swap_remove(i).setup)
+        Some(setup::resolve(&lib, baselines).swap_remove(i).setup)
     }
 
     /// The weather at the track when the session started, with its details on hover.
     pub(super) fn weather_line(&mut self, ui: &mut Ui) {
         let Some(path) = self.path.clone() else { return };
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let Some(w) = lib.sessions.iter().find(|s| s.path == path).and_then(|s| s.weather) else { return };
         ui.label(RichText::new(w.summary()).size(15.0).color(TEXT)).on_hover_text(format!(
             "Weather at the track when the session started (Open-Meteo): {:.0}{u}, {:.0}% humidity, {:.0} hPa air pressure, dew point {:.0}{u}.",
@@ -114,10 +114,10 @@ impl App {
     /// When RPM and speed don't fit the setup's gearing: why, for a warning beside the pill.
     pub(super) fn gearing_warning(&mut self) -> Option<String> {
         let path = self.path.clone()?;
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let i = lib.sessions.iter().position(|s| s.path == path)?;
         let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
-        let r = setup::resolve(lib, baselines).swap_remove(i);
+        let r = setup::resolve(&lib, baselines).swap_remove(i);
         match gearing_check(&r.setup, self.measured_ratio) {
             Some((false, text)) => Some(text),
             _ => None,
@@ -187,7 +187,7 @@ impl App {
         };
         match result {
             Some(Ok(sheet)) => {
-                if let Some(s) = self.library.as_mut().and_then(|l| l.sessions.iter_mut().find(|s| s.path == edit.path)) {
+                if let Some(s) = self.lib_mut().and_then(|l| l.sessions.iter_mut().find(|s| s.path == edit.path)) {
                     s.setup = sheet;
                 }
             }

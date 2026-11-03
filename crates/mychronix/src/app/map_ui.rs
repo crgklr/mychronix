@@ -220,7 +220,7 @@ impl App {
         // as wide as the settings say the track is, else kart-track wide, or
         // wider when AiM lists it as a race track (karts do run on car circuits).
         let width = self.path.clone().and_then(|p| {
-            let lib = self.library.get_or_insert_with(Library::load);
+            let lib = self.lib();
             let t = &lib.tracks[lib.sessions.iter().find(|s| s.path == p)?.track?];
             let set = crate::settings::get().track_widths.iter().find(|(name, _)| name.eq_ignore_ascii_case(&t.name)).map(|(_, &w)| w).filter(|w| (2.0..=40.0).contains(w));
             Some(set.unwrap_or(if t.track_kind == aim_track::TrackKind::RaceTrack { 12.0 } else { 8.0 }))

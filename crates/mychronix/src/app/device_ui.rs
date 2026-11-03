@@ -61,7 +61,7 @@ const SERIES: [Series; 4] = [
 
 impl App {
     fn known_mychrons(&mut self) -> Vec<Known> {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
         let mut ids: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();

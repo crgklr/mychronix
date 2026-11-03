@@ -51,7 +51,7 @@ impl App {
 
     /// The best lap of each downloaded session at the current session's track, fastest first.
     pub(super) fn add_best_laps_here(&mut self, current: Option<std::sync::Arc<Session>>) {
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p)).and_then(|s| s.track);
         if let Some(track) = here {
             let mut sessions: Vec<&tracks::LocalSession> =
@@ -77,7 +77,6 @@ impl App {
                 }
             }
         }
-        self.library = Some(lib);
     }
 
     pub(super) fn compare_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {

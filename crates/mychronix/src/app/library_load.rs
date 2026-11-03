@@ -15,6 +15,17 @@ pub(super) struct LibraryLoad {
 }
 
 impl App {
+    /// The library, loaded on the spot the first time a page needs it.
+    pub(super) fn lib(&mut self) -> std::sync::Arc<Library> {
+        self.library.get_or_insert_with(|| std::sync::Arc::new(Library::load())).clone()
+    }
+
+    /// The library to change in place (a session's new digest or setup sheet): copied
+    /// only if a page still holds the old one, which none does between frames.
+    pub(super) fn lib_mut(&mut self) -> Option<&mut Library> {
+        self.library.as_mut().map(std::sync::Arc::make_mut)
+    }
+
     /// The tracks or sessions on disk changed: load them again in the background.
     pub(super) fn reload_library(&mut self) {
         self.library_load.wanted += 1;
@@ -29,7 +40,7 @@ impl App {
                 Ok(lib) => {
                     load.shown = *n;
                     load.running = None;
-                    self.library = Some(lib);
+                    self.library = Some(std::sync::Arc::new(lib));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => load.running = None,

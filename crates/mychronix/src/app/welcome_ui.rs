@@ -12,7 +12,7 @@ impl App {
     /// Whether to welcome: nothing in the library or the Garage, and no
     /// MyChron or data key here right now (those get the Garage's own card).
     pub(super) fn first_run(&mut self) -> bool {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let empty_lib = lib.sessions.is_empty();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
         empty_lib && profiles.drivers.is_empty() && profiles.garage_karts().next().is_none() && self.device.logger.is_none() && !self.key.present
@@ -34,8 +34,8 @@ impl App {
             return;
         }
         log::info!("import: starting with {paths:?}");
-        let lib = self.library.get_or_insert_with(Library::load);
-        self.import_rx = Some(crate::import::spawn(paths, lib, ctx.clone()));
+        let lib = self.lib();
+        self.import_rx = Some(crate::import::spawn(paths, &lib, ctx.clone()));
         self.import_progress = Some((0, 0));
         self.import_report = None;
     }

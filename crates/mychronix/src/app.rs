@@ -239,7 +239,9 @@ pub struct App {
     session_filter: sessions_filter_ui::SessionFilter,
     session_search: String,
 
-    library: Option<Library>,
+    /// Tracks and sessions, shared: a page holds a clone of the `Arc` while it
+    /// draws (`App::lib`), so it's never taken out of `App` and put back.
+    library: Option<std::sync::Arc<Library>>,
     map_tiles: Option<walkers::HttpTiles>,
     sat_tiles: Option<walkers::HttpTiles>,
     /// The Device page: the MyChron found, its sessions, downloading (see `device_page`).
@@ -303,7 +305,7 @@ impl App {
     fn fill_names(&mut self, session: &mut Session, path: &std::path::Path) {
         // The kart its MyChron was on when it was recorded (for a file opened
         // from elsewhere: the one its MyChron is on, or was last on).
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
         let kart: Option<crate::profiles::Kart> = match lib.sessions.iter().find(|s| s.path == path) {
             Some(s) => s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id)).cloned(),
@@ -313,10 +315,10 @@ impl App {
         // Without GPS, speed from RPM and the session's gearing and tires
         // (before units are converted, so it's converted with the rest).
         if session.channel("GPS Speed").is_none() {
-            let lib = self.library.get_or_insert_with(Library::load);
+            let lib = self.lib();
             if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
                 let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
-                let resolved = crate::setup::resolve(lib, baselines);
+                let resolved = crate::setup::resolve(&lib, baselines);
                 let engine = kart.as_ref().map(|k| k.engine.clone()).unwrap_or_default();
                 let clutch = kart.as_ref().and_then(|k| crate::setup::number(&k.clutch_rpm));
                 if let Some(ch) = resolved.get(i).and_then(|r| crate::setup::speed_from_rpm(session, &r.setup, &engine, clutch)) {
@@ -373,10 +375,10 @@ impl App {
 
     /// The setup in force for a logger after its newest session.
     fn latest_setup(&mut self, logger: &str) -> crate::setup::Setup {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
         let kart = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).mounted_on(logger).map(|k| k.id);
-        crate::setup::latest(lib, baselines, logger, kart)
+        crate::setup::latest(&lib, baselines, logger, kart)
     }
 
     pub fn show_distance(&mut self) {
@@ -455,9 +457,8 @@ impl App {
     /// `path` as it was.
     fn import_rs2(&mut self, path: PathBuf) -> PathBuf {
         let root = crate::paths::sessions_dir().unwrap_or_default();
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let added = crate::import::add_rs2_file(&path, &root, &lib);
-        self.library = Some(lib);
         match added {
             Ok(Some(copy)) => {
                 self.reload_library();
@@ -652,7 +653,7 @@ impl eframe::App for App {
         // MYCHRONIX_SENSOR_CHECK=<logger id> checks that logger's downloaded sessions
         // as if just downloaded (development only).
         if self.frames == 3 && let Some(id) = crate::hooks::get().sensor_check.clone() {
-            let paths: Vec<PathBuf> = self.library.get_or_insert_with(Library::load).sessions.iter().filter(|s| s.logger == id).map(|s| s.path.clone()).collect();
+            let paths: Vec<PathBuf> = self.lib().sessions.iter().filter(|s| s.logger == id).map(|s| s.path.clone()).collect();
             self.check_downloaded(paths, &id, &ui.ctx().clone());
         }
         self.key_poll(&ui.ctx().clone());

@@ -17,8 +17,8 @@ impl App {
         if self.frames >= 3 && self.import_rx.is_none() && !IMPORT_ONCE.is_completed() {
             IMPORT_ONCE.call_once(|| {});
             if let Some(p) = crate::hooks::get().import.clone() {
-                let lib = self.library.get_or_insert_with(Library::load);
-                self.import_rx = Some(crate::import::spawn(vec![p], lib, ui.ctx().clone()));
+                let lib = self.lib();
+                self.import_rx = Some(crate::import::spawn(vec![p], &lib, ui.ctx().clone()));
                 self.import_progress = Some((0, 0));
             }
         }

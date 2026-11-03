@@ -35,21 +35,20 @@ pub(super) struct TrackPageState {
 
 impl App {
     pub(super) fn tracks_page(&mut self, ui: &mut Ui) {
-        let mut lib = self.library.take().unwrap_or_else(Library::load);
-        // Full names, cities and outlines arrive from a background reader.
+        // Full names, cities and outlines arrive from a background reader, into the library itself.
         if self.track_page.details.is_none() {
-            self.track_page.details = Some(tracks::load_details(lib.pending_details(), ui.ctx().clone()));
+            self.track_page.details = Some(tracks::load_details(self.lib().pending_details(), ui.ctx().clone()));
         }
-        if let Some(rx) = &self.track_page.details {
-            let mut got = false;
-            while let Ok((i, d)) = rx.try_recv() {
-                lib.apply_details(i, d);
-                got = true;
+        let arrived: Vec<_> = self.track_page.details.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        if !arrived.is_empty() {
+            if let Some(lib) = self.library.as_mut().map(std::sync::Arc::make_mut) {
+                for (i, d) in arrived {
+                    lib.apply_details(i, d);
+                }
             }
-            if got {
-                ui.ctx().request_repaint();
-            }
+            ui.ctx().request_repaint();
         }
+        let lib = self.lib();
         if self.track_page.sel.is_none() && !lib.tracks.is_empty() {
             // MYCHRONIX_TRACK=<name> preselects a track (for screenshots).
             match crate::hooks::get().map.as_deref() {
@@ -88,7 +87,6 @@ impl App {
                     ui.label(RichText::new("AiM's track database downloads automatically when Mychronix is online, and tracks learned on your MyChron are copied when you connect it.").color(SECONDARY));
                 });
             }
-            self.library = Some(lib);
             return;
         }
 
@@ -119,7 +117,6 @@ impl App {
                 }
             });
         });
-        self.library = Some(lib);
     }
 
     fn select_track(&mut self, lib: &Library, i: usize) {

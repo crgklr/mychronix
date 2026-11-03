@@ -108,8 +108,8 @@ impl App {
     /// Every known MyChron's model ("MyChron 4"), by ID: from its WiFi name,
     /// else its session summaries, else their digests.
     pub(super) fn mychron_models(&mut self) -> BTreeMap<String, String> {
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
-        let lib = self.library.get_or_insert_with(Library::load);
         let mut ids: Vec<String> = profiles.karts.iter().flat_map(|k| k.all_loggers().cloned()).chain(lib.sessions.iter().map(|s| s.logger.clone())).collect();
         ids.extend(self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()));
         ids.sort();
@@ -220,7 +220,7 @@ impl App {
         let Some(mut s) = self.garage.mychron_setup.take() else { return };
         let models = self.mychron_models();
         let model_of = |l: &str| models.get(l).cloned().unwrap_or_else(|| "MyChron".into());
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         let model = s.model.clone();
         let logger = s.logger.clone();
@@ -366,11 +366,9 @@ impl App {
                     self.notices.error(format!("Couldn't save: {e}"));
                 }
                 self.setup_baselines = None;
-                self.library = Some(lib);
                 return;
             }
         }
-        self.library = Some(lib);
         if !cancel && !closed && !finish {
             self.garage.mychron_setup = Some(s);
         }
@@ -380,7 +378,7 @@ impl App {
     pub(super) fn garage_confirm_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut c) = self.garage.confirm.take() else { return };
         let models = self.mychron_models();
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         let (mut keep, mut done) = (true, false);
         let closed = match &mut c {
@@ -503,10 +501,8 @@ impl App {
         };
         if done {
             self.apply_confirm(c, &lib);
-            self.library = Some(lib);
             return;
         }
-        self.library = Some(lib);
         if keep && !closed {
             self.garage.confirm = Some(c);
         }

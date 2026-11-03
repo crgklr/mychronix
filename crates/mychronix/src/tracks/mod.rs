@@ -196,7 +196,7 @@ impl LocalSession {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Library {
     pub tracks: Vec<Track>,
     pub sessions: Vec<LocalSession>,

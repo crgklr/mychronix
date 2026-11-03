@@ -60,7 +60,7 @@ impl App {
     /// Fetches the weather for library sessions `rows` that don't have it yet,
     /// and puts arrived weather into the library.
     pub(super) fn want_weather(&mut self, rows: &[usize], ctx: &egui::Context) {
-        let Some(lib) = self.library.as_mut() else { return };
+        let Some(lib) = self.library.as_mut().map(std::sync::Arc::make_mut) else { return };
         if let Some(rx) = &self.sensors.weather_rx {
             loop {
                 match rx.try_recv() {
@@ -105,7 +105,7 @@ impl App {
     /// reloads so the Sessions page, Garage and Events show them.
     pub(super) fn relap_poll(&mut self, ctx: &egui::Context) {
         if self.sensors.digest_rx.is_none() {
-            let pending = self.library.as_mut().map(|l| std::mem::take(&mut l.relap_pending)).unwrap_or_default();
+            let pending = self.lib_mut().map(|l| std::mem::take(&mut l.relap_pending)).unwrap_or_default();
             if !pending.is_empty() {
                 log::info!("looking at {} sessions the logger may not have timed", pending.len());
                 self.want_digests(pending.into_iter(), ctx);

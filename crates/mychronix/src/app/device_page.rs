@@ -338,7 +338,7 @@ impl App {
     /// The Garage's "New MyChron detected" card, here too, for a connected
     /// MyChron (WiFi or data key) that isn't on a kart yet.
     fn unplaced_connected(&mut self, ui: &mut Ui) {
-        let lib = self.library.take().unwrap_or_else(crate::tracks::Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let connected: Vec<String> = self
             .device.logger
@@ -363,7 +363,6 @@ impl App {
                 (u, model)
             })
             .collect();
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         for (u, model) in cards {
             if self.unplaced_card(ui, &u, &model) {
@@ -661,12 +660,11 @@ impl App {
     /// already in use.
     fn download_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dlg) = self.device.dialog.take() else { return };
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let s = Suggestions::gather(&lib, &profiles);
-        self.library = Some(lib);
         let tires = self.tire_suggestions();
-        let lib = self.library.take().unwrap();
+        let lib = self.lib();
         let multiple = dlg.detected.len() > 1;
         let mut go = false;
         let mut cancel = false;
@@ -837,14 +835,13 @@ impl App {
             });
         });
         let open = !closed;
-        self.library = Some(lib);
         if go {
             let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
             // Remember these for next time (not the comment or session type, which change every time).
             // The MyChron is now on the kart named, so the kart's baseline applies to it.
-            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
             // A MyChron moving to another kart leaves its sessions so far with the old one.
-            let lib = self.library.get_or_insert_with(Library::load);
+            let lib = self.lib();
+            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
             profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
             if let Err(e) = profiles.save() {
                 self.notices.error(format!("Couldn't save the driver and kart: {e}"));

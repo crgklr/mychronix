@@ -189,10 +189,11 @@ impl App {
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let track = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
         let number = self.path.as_ref().and_then(|p| p.file_stem()).and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+        let lib = self.lib();
         let date = self
             .path
             .as_ref()
-            .and_then(|p| self.library.get_or_insert_with(Library::load).sessions.iter().find(|s| &s.path == p).and_then(|s| s.summary.date))
+            .and_then(|p| lib.sessions.iter().find(|s| &s.path == p).and_then(|s| s.summary.date))
             .map(short_day)
             .or_else(|| i.date.clone());
         let lap = match self.lap.and_then(|k| session.laps.get(k)) {
@@ -427,7 +428,7 @@ impl App {
         panel_tiles(ui, session);
         ui.add_space(16.0);
         self.setup_section(ui);
-        let weather = self.path.clone().and_then(|p| self.library.get_or_insert_with(Library::load).sessions.iter().find(|s| s.path == p).and_then(|s| s.weather));
+        let weather = self.path.clone().and_then(|p| self.lib().sessions.iter().find(|s| s.path == p).and_then(|s| s.weather));
         if weather.is_some() {
             section(ui, "WEATHER");
             self.weather_line(ui);
@@ -537,7 +538,7 @@ impl App {
     fn panel_sessions(&mut self, ui: &mut Ui) -> Option<PathBuf> {
         ui.label(RichText::new("ANOTHER SESSION").font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
         ui.add_space(8.0);
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p));
         let (track, logger, day) = (here.and_then(|s| s.track), here.map(|s| s.logger.clone()), here.and_then(|s| s.summary.date));
@@ -604,7 +605,6 @@ impl App {
                 self.page = Page::Sessions;
             }
         });
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         open
     }

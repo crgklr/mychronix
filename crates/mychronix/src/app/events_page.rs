@@ -38,7 +38,7 @@ struct DriverStats {
 
 impl App {
     pub(super) fn events_page(&mut self, ui: &mut Ui) {
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let mut defs = self.events_page.events.take().unwrap_or_else(Events::load);
         if let Some(rx) = &self.events_page.peak_egt_rx {
@@ -172,7 +172,6 @@ impl App {
             });
             match action {
                 Some(DetailAction::Open(path, lap)) => {
-                    self.library = Some(lib);
                     self.profiles = Some(profiles);
                     self.events_page.events = Some(defs);
                     self.load(path);
@@ -196,7 +195,6 @@ impl App {
             });
         }
         self.event_dialog(ui.ctx(), &lib, &profiles, &mut defs);
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         self.events_page.events = Some(defs);
     }

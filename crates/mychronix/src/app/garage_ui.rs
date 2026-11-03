@@ -238,7 +238,7 @@ impl App {
             self.welcome_page(ui);
             return;
         }
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(Profiles::load);
         let baselines = self.setup_baselines.take().unwrap_or_else(Baselines::load);
         let defs = self.events_page.events.take().unwrap_or_else(crate::events::Events::load);
@@ -364,7 +364,6 @@ impl App {
             self.pending_open = Some(p);
         }
         self.sensors.digests = Some(digests);
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         self.setup_baselines = Some(baselines);
         self.events_page.events = Some(defs);
@@ -547,6 +546,7 @@ impl App {
         // MyChrons known here: from sessions, karts and the one connected.
         let mut loggers: Vec<String> = self.library.as_ref().map(|l| l.sessions.iter().map(|s| s.logger.clone()).collect()).unwrap_or_default();
         loggers.extend(self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()));
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         loggers.extend(profiles.karts.iter().map(|k| k.logger.clone()));
         loggers.retain(|l| !l.is_empty());
@@ -684,7 +684,7 @@ impl App {
             // Its MyChron history stays as it was; the MyChron is changed below.
             let before = profiles.karts.iter().find(|k| k.id == id).cloned().unwrap_or_default();
             // A new baseline is what the kart runs from now on: its sessions so far keep the old one.
-            let newest_of_kart = self.library.get_or_insert_with(Library::load).sessions.iter().filter(|s| s.kart == Some(id)).map(|s| s.start()).max();
+            let newest_of_kart = lib.sessions.iter().filter(|s| s.kart == Some(id)).map(|s| s.start()).max();
             let mut kart = Kart {
                 id,
                 name: name.clone(),
@@ -701,7 +701,6 @@ impl App {
                 None => profiles.karts.push(kart),
             }
             // A MyChron is on one kart at a time; the ones it replaces keep their sessions so far.
-            let lib = self.library.get_or_insert_with(Library::load);
             let newest = |l: &str| crate::profiles::moved_now(lib.newest_start(l));
             if edit.logger.is_empty() {
                 profiles.unmount(id, &newest);
@@ -727,7 +726,7 @@ impl App {
 
     /// Analysis with nothing open: pick a session, race days newest first.
     pub(super) fn session_picker(&mut self, ui: &mut Ui) {
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let mut open = None;
         ui.horizontal(|ui| {
@@ -811,7 +810,6 @@ impl App {
                 k = end;
             }
         });
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         if let Some(p) = open {
             self.load(p);

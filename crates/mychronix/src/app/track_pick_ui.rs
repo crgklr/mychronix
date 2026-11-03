@@ -62,13 +62,13 @@ fn capitalized(s: &str) -> String {
 impl App {
     /// The session's track as the library sees it (see `LocalSession::track_name`).
     pub(super) fn session_track_name(&mut self, path: &std::path::Path) -> Option<String> {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let s = lib.sessions.iter().find(|s| s.path == path)?;
         s.track_name(&lib.tracks)
     }
 
     pub(super) fn open_track_pick(&mut self, path: PathBuf) {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let choice = lib.sessions.iter().find(|s| s.path == path).and_then(|s| match s.track {
             Some(t) => Some(Choice::Track(lib.tracks[t].guid.clone())),
             None => s.track_name(&lib.tracks).map(Choice::Name),
@@ -81,7 +81,7 @@ impl App {
             return;
         };
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let favorites = self.track_page.favorites.get_or_insert_with(crate::tracks::Favorites::load).clone();
         let Some(si) = lib.sessions.iter().position(|s| s.path == pick.path) else { return };
         let session = &lib.sessions[si];
@@ -134,7 +134,7 @@ impl App {
                 for &i in &list {
                     let t = &lib.tracks[i];
                     let on = pick.choice == Some(Choice::Track(t.guid.clone()));
-                    if look::option(ui, on, None, &t.name, &about(t, &source(t, lib, &profiles))) {
+                    if look::option(ui, on, None, &t.name, &about(t, &source(t, &lib, &profiles))) {
                         pick.choice = Some(Choice::Track(t.guid.clone()));
                     }
                 }

@@ -5,7 +5,7 @@ use super::*;
 
 impl App {
     pub(super) fn sessions_page(&mut self, ui: &mut Ui) {
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
         let mut shown_rows: Vec<usize> = Vec::new();
         let loggers: Vec<String> = {
@@ -60,7 +60,6 @@ impl App {
                 ui.label(RichText::new("No sessions yet").font(semibold(17.0)).color(TEXT));
                 ui.label(RichText::new("Download from your MyChron (Device page, or `mychronix device pull`) and they'll appear here.").color(SECONDARY));
             });
-            self.library = Some(lib);
             self.profiles = Some(profiles);
             return;
         }
@@ -170,7 +169,6 @@ impl App {
         if open.is_none() && self.frames == 5 && let Some(n) = crate::hooks::get().click_session {
             open = lib.sessions.iter().find(|s| s.summary.number == Some(n)).map(|s| s.path.clone());
         }
-        self.library = Some(lib);
         self.profiles = Some(profiles);
         self.want_weather(&shown_rows, &ui.ctx().clone());
         if let Some(path) = open {

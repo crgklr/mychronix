@@ -25,7 +25,7 @@ pub(super) struct DriverPick {
 impl App {
     /// The drivers with sessions in the library.
     pub(super) fn compare_driver_names(&mut self) -> Vec<String> {
-        let lib = self.library.get_or_insert_with(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let mut names: Vec<String> = lib.sessions.iter().map(|s| session_driver(s, &profiles)).filter(|n| !n.is_empty()).collect();
         names.sort();
@@ -55,7 +55,7 @@ impl App {
     /// Driver pickers and race day; rebuilds the compare list from them.
     pub(super) fn compare_drivers_bar(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let names = self.compare_driver_names();
-        let lib = self.library.take().unwrap_or_else(Library::load);
+        let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let track = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p)).and_then(|s| s.track);
         let p = &mut self.comparison.driver_pick;
@@ -123,7 +123,6 @@ impl App {
         } else {
             Vec::new()
         };
-        self.library = Some(lib);
         if rebuild {
             self.comparison.driver_pick.built = Some(key);
             self.comparison.laps.clear();
