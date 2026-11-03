@@ -86,20 +86,75 @@ fn candidates(dir: &Path, name: &str) -> impl Iterator<Item = PathBuf> {
     (1..).map(move |k| dir.join(if k == 1 { name.to_string() } else { format!("{stem}-{k}.{ext}") }))
 }
 
-/// The local copy of `entry`, if it's been downloaded into `dir`: the same
-/// size, and (when the download noted it) the same listed date and time.
+/// `a_0001.xrz` for `a_0001.hrz` and back. A MyChron 6 can list a session
+/// under both names, byte for byte the same, and the two would share their
+/// details and setup sheet here (`a_0001.meta.json`, `a_0001.setup.json`),
+/// so they're one recording.
+fn twin(path: &Path) -> Option<PathBuf> {
+    let other = match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "xrz" => "hrz",
+        "hrz" => "xrz",
+        _ => return None,
+    };
+    Some(path.with_extension(other))
+}
+
+/// The local copy of `entry`, if it's been downloaded into `dir` (under its
+/// own name or its twin's): the same size, and (when the download noted it)
+/// the same listed date and time.
 pub fn downloaded(dir: &Path, entry: &DirEntry) -> Option<PathBuf> {
-    candidates(dir, &entry.name).take_while(|p| p.exists()).find(|p| {
-        let same_size = std::fs::metadata(p).is_ok_and(|m| m.len() == entry.size);
-        let same_time = SessionMeta::load(p).map(|m| m.listed).filter(|l| !l.is_empty()).is_none_or(|l| l == listed(entry));
-        same_size && same_time
+    let names = std::iter::once(PathBuf::from(&entry.name)).chain(twin(Path::new(&entry.name)));
+    names.into_iter().find_map(|name| {
+        candidates(dir, &name.to_string_lossy()).take_while(|p| p.exists()).find(|p| {
+            let same_size = std::fs::metadata(p).is_ok_and(|m| m.len() == entry.size);
+            let same_time = SessionMeta::load(p).map(|m| m.listed).filter(|l| !l.is_empty()).is_none_or(|l| l == listed(entry));
+            same_size && same_time
+        })
     })
 }
 
+/// Whether `entry` is the `.hrz` twin of an `.xrz` the MyChron also lists,
+/// the same size: one recording, downloaded once.
+pub fn listed_twice(files: &[DirEntry], entry: &DirEntry) -> bool {
+    let name = Path::new(&entry.name);
+    name.extension().is_some_and(|e| e.eq_ignore_ascii_case("hrz"))
+        && twin(name).is_some_and(|t| files.iter().any(|f| Path::new(&f.name) == t && f.size == entry.size))
+}
+
 /// Where a new download of `entry` goes: its own name, or the next free
-/// numbered one when that's taken. Nothing already downloaded is replaced.
+/// numbered one when that (or its twin, whose details it would share) is
+/// taken. Nothing already downloaded is replaced.
 fn target_for(dir: &Path, entry: &DirEntry) -> PathBuf {
-    candidates(dir, &entry.name).find(|p| !p.exists()).expect("an unused name")
+    candidates(dir, &entry.name).find(|p| !p.exists() && !twin(p).is_some_and(|t| t.exists())).expect("an unused name")
+}
+
+/// When `entry` started, as `profiles::stamp` writes it (local time): from
+/// the MyChron's summary of it, else the time it listed the file with. That
+/// one is when the file was written, in UTC (a MyChron 6 listed 12:58:46 for
+/// a session that started at 8:55 EDT), so it's moved to `tz`.
+pub fn start_of(entry: &DirEntry, summary: Option<&SessionSummary>, tz: &jiff::tz::TimeZone) -> String {
+    if let Some(s) = summary.filter(|s| s.date.is_some()) {
+        return crate::profiles::stamp(s.date, s.start_time.as_deref());
+    }
+    jiff::civil::DateTime::strptime("%m/%d/%Y %H:%M:%S", listed(entry))
+        .and_then(|utc| utc.to_zoned(jiff::tz::TimeZone::UTC))
+        .map(|utc| utc.with_time_zone(tz.clone()).strftime("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_default()
+}
+
+/// Which of the sessions being downloaded (each with its start, see
+/// [`start_of`]) a setup entered with them is saved on, with that start:
+/// the earliest one not already here, and only when it started after
+/// `newest`, the newest session already here. A sheet carries forward, so
+/// one on an older session would change the setups of sessions already
+/// downloaded.
+pub fn setup_target(dir: &Path, files: &[(DirEntry, String)], newest: &str) -> Option<(PathBuf, String)> {
+    files
+        .iter()
+        .filter(|(e, _)| downloaded(dir, e).is_none())
+        .min_by(|a, b| (&a.1, &a.0.name).cmp(&(&b.1, &b.0.name)))
+        .filter(|(_, start)| !start.is_empty() && start.as_str() > newest)
+        .map(|(e, start)| (target_for(dir, e), start.clone()))
 }
 
 impl SessionMeta {
@@ -700,6 +755,49 @@ mod tests {
         assert_eq!(downloaded(&dir, &bo), Some(dir.join("a_0001-2.xrz")));
         assert_eq!(std::fs::read(dir.join("a_0001.xrz")).unwrap(), b"anns!");
         assert_eq!(aim_xrk::summary::session_number("a_0001-2.xrz"), Some(1));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Nov 2, 2026: a MyChron 6 listed September's sessions again as `.hrz`
+    /// beside the new ones. They were downloaded as new, and the setup typed
+    /// for the new sessions landed on `a_0001`, the first of the season.
+    #[test]
+    fn hrz_twins_are_already_downloaded_and_never_get_the_setup() {
+        let dir = std::env::temp_dir().join(format!("mychronix-twin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = |name: &str, size: u64, date: &str, time: &str| DirEntry { name: name.into(), size, date: date.into(), time: time.into() };
+        let old = entry("a_0001.xrz", 5, "09/19/2026", "13:15:26");
+        std::fs::write(dir.join("a_0001.xrz"), b"sept!").unwrap();
+        SessionMeta { listed: listed(&old), ..Default::default() }.save(&dir.join("a_0001.xrz")).unwrap();
+        let old_hrz = entry("a_0001.hrz", 5, "09/19/2026", "13:15:26");
+        let new = entry("a_0049.xrz", 9, "10/31/2026", "12:58:46");
+        let listing = [old.clone(), old_hrz.clone(), new.clone()];
+
+        assert_eq!(downloaded(&dir, &old_hrz), Some(dir.join("a_0001.xrz")));
+        assert!(!listed_twice(&listing, &old));
+        assert!(listed_twice(&listing, &old_hrz));
+        // Never saved over the .xrz's details.
+        assert_eq!(target_for(&dir, &entry("a_0001.hrz", 7, "11/01/2026", "09:00:00")), dir.join("a_0001-2.hrz"));
+
+        // Even picked along with the new session, the setup goes on the new one
+        // (listed in UTC, started 8:58 EDT).
+        let edt = jiff::tz::TimeZone::fixed(jiff::tz::offset(-4));
+        let picked: Vec<_> = [old_hrz, new].into_iter().map(|e| { let s = start_of(&e, None, &edt); (e, s) }).collect();
+        assert_eq!(setup_target(&dir, &picked, "2026-10-24 14:47:00"), Some((dir.join("a_0049.xrz"), "2026-10-31 08:58:46".into())));
+        // Nothing newer than what's here: no session gets it.
+        assert_eq!(setup_target(&dir, &picked, "2026-11-01 10:00:00"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_setup_goes_on_the_earliest_by_time_not_by_name() {
+        let dir = std::env::temp_dir().join(format!("mychronix-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // After a format the numbering starts again: a_0002 can be older than a_0001.
+        let a = DirEntry { name: "a_0001.xrz".into(), size: 3, date: "10/31/2026".into(), time: "11:05:00".into() };
+        let b = DirEntry { name: "a_0002.xrz".into(), size: 3, date: "10/31/2026".into(), time: "09:03:00".into() };
+        let picked: Vec<_> = [a, b].into_iter().map(|e| { let s = start_of(&e, None, &jiff::tz::TimeZone::UTC); (e, s) }).collect();
+        assert_eq!(setup_target(&dir, &picked, "").map(|(p, _)| p), Some(dir.join("a_0002.xrz")));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

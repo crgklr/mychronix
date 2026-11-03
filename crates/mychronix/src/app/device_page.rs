@@ -151,8 +151,13 @@ impl App {
                     // Replaced sessions' saved lap summaries were dropped: don't save old ones back.
                     self.sensors.digests = None;
                     self.sensors.digests_asked.clear();
-                    if let Some((path, setup)) = self.device.pending_setup.take() && let Err(e) = setup.save(&path) {
-                        self.error = Some(format!("Couldn't save the setup: {e}"));
+                    if let Some((path, setup)) = self.device.pending_setup.take() {
+                        // A session's own sheet is only changed from its Setup.
+                        if crate::setup::Setup::path_for(&path).exists() {
+                            self.error = Some("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.".into());
+                        } else if let Err(e) = setup.save(&path) {
+                            self.error = Some(format!("Couldn't save the setup: {e}"));
+                        }
                     }
                     self.device.busy = None;
                     self.device.progress = None;
@@ -409,10 +414,26 @@ impl App {
         let dir = self.logger_dir();
         self.device.files
             .iter()
-            .filter(|e| e.is_session())
+            .filter(|e| e.is_session() && !crate::device::listed_twice(&self.device.files, e))
             .filter(|e| !dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
             .cloned()
             .collect()
+    }
+
+    /// The session picked for download that a setup entered with them is
+    /// saved on, with its start (see `device::setup_target`); None when
+    /// none of them is newer than what's here.
+    fn download_setup_target(&self, lib: &Library) -> Option<(PathBuf, String)> {
+        let dir = self.logger_dir()?;
+        let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
+        let tz = jiff::tz::TimeZone::system();
+        let picked: Vec<(aim_link::DirEntry, String)> = self
+            .device.files
+            .iter()
+            .filter(|e| self.device.selected.contains(&e.name))
+            .map(|e| (e.clone(), crate::device::start_of(e, self.device.summaries.iter().find(|s| s.file.as_deref() == Some(e.name.as_str())), &tz)))
+            .collect();
+        crate::device::setup_target(&dir, &picked, &lib.newest_start(&id))
     }
 
     pub(super) fn device_status(&mut self, ui: &mut Ui) {
@@ -640,6 +661,11 @@ impl App {
             .filter(|e| self.device.selected.contains(&e.name) && dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
             .map(|e| aim_xrk::summary::session_number(&e.name).map(|k| format!("Session {k}")).unwrap_or(e.name.clone()))
             .collect();
+        // Where a changed setup is saved, shown with it so a wrong session is caught before downloading.
+        let setup_from = match self.download_setup_target(&lib) {
+            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", start_words(&start)),
+            None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
+        };
         let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
             use garage_manage_ui::look;
             let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
@@ -656,6 +682,7 @@ impl App {
                         look::note(ui, "Same as last time.", DIM);
                     } else {
                         look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                        look::note(ui, &setup_from, DIM);
                     }
                     return;
                 }
@@ -725,6 +752,7 @@ impl App {
                             look::note(ui, "Same as last time.", DIM);
                         } else {
                             look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                            look::note(ui, &setup_from, DIM);
                         }
                     });
                     ui.end_row();
@@ -777,11 +805,13 @@ impl App {
                     (e.clone(), meta)
                 })
                 .collect();
-            // A setup sheet goes on the earliest session only, and only when there's something new.
+            // A setup sheet goes on the earliest new session only, and only when there's something new.
             let changed = !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
-            let earliest = files.iter().map(|(e, _)| e.name.clone()).min();
-            self.device.pending_setup = match (changed, earliest, self.logger_dir()) {
-                (true, Some(name), Some(dir)) => Some((dir.join(name), dlg.setup.clone())),
+            let lib = self.library.take().unwrap_or_else(Library::load);
+            let target = self.download_setup_target(&lib);
+            self.library = Some(lib);
+            self.device.pending_setup = match (changed, target) {
+                (true, Some((path, _))) => Some((path, dlg.setup.clone())),
                 _ => None,
             };
             if crate::hooks::get().fake_device.is_some() {
@@ -803,6 +833,17 @@ impl App {
 }
 
 const AP_ADDRESS_FAKE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 1);
+
+/// "2026-10-31 08:58:10" → "Oct 31, 2026 at 8:58 AM".
+fn start_words(start: &str) -> String {
+    let (date, time) = start.split_once(' ').unwrap_or((start, ""));
+    let mut ymd = date.split('-').map(|p| p.parse::<u16>().ok());
+    let day = match (ymd.next().flatten(), ymd.next().flatten(), ymd.next().flatten()) {
+        (Some(year), Some(month), Some(day)) => crate::events::us_short(aim_xrk::summary::Date { year, month: month as u8, day: day as u8 }),
+        _ => return start.to_string(),
+    };
+    if time.is_empty() { day } else { format!("{day} at {}", crate::events::clock_time(time)) }
+}
 
 /// "AiM-MYC6-345678" → "MyChron 6".
 pub(super) fn model_from_ssid(ssid: &str) -> &'static str {
