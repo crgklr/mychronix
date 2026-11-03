@@ -428,87 +428,23 @@ impl App {
             ui.add_space(12.0);
         }
 
-        // Best lap per session, one line per driver.
-        let with_bests: Vec<(usize, &DriverStats)> = stats
-            .iter()
-            .enumerate()
-            .filter(|(_, d)| d.bests.len() >= 2)
-            .collect();
-        if !with_bests.is_empty() {
-            // Only sessions with a lap time, so warm-ups don't leave gaps.
-            let order: Vec<usize> = e
-                .sessions
-                .iter()
-                .copied()
-                .filter(|i| stats.iter().any(|d| d.bests.iter().any(|(x, _)| x == i)))
-                .collect();
-            let numbers: Vec<u32> = order
-                .iter()
-                .map(|&i| lib.sessions[i].summary.number.unwrap_or(0))
-                .collect();
-            graph_card(ui, 240.0, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Best lap by session")
-                            .font(medium(14.5))
-                            .color(TEXT),
-                    );
-                    ui.label(RichText::new("s").size(13.0).color(DIM));
-                });
-                Plot::new(("event_bests", e.key()))
-                    .height(ui.available_height())
-                    .show_background(false)
-                    .grid_color(GRID)
-                    .y_axis_min_width(46.0)
-                    .allow_zoom(false)
-                    .allow_drag(false)
-                    .allow_scroll(false)
-                    .x_axis_formatter(move |mark, _| {
-                        let i = mark.value.round() as i64;
-                        if (mark.value - i as f64).abs() < 1e-6
-                            && i >= 0
-                            && (i as usize) < numbers.len()
-                        {
-                            format!("S{}", numbers[i as usize])
-                        } else {
-                            String::new()
-                        }
-                    })
-                    .show_x(false)
-                    .show_y(false)
-                    .show(ui, |plot| {
-                        for (k, d) in &with_bests {
-                            let pts: Vec<[f64; 2]> = d
-                                .bests
-                                .iter()
-                                .filter_map(|(i, b)| {
-                                    order
-                                        .iter()
-                                        .position(|x| x == i)
-                                        .map(|x| [x as f64, *b as f64 / 1000.0])
-                                })
-                                .collect();
-                            let color = SERIES[*k % SERIES.len()];
-                            plot.line(
-                                Line::new(d.name.clone(), PlotPoints::from(pts.clone()))
-                                    .color(color)
-                                    .width(2.0),
-                            );
-                            plot.points(
-                                egui_plot::Points::new(
-                                    format!("{} laps", d.name),
-                                    PlotPoints::from(pts),
-                                )
-                                .color(color)
-                                .radius(4.0),
-                            );
-                        }
-                    });
-            });
-            ui.add_space(14.0);
-        }
+        best_laps_chart(ui, lib, e, &stats);
 
-        // Sessions by day, with setup changes flagged.
+        if let Some(a) = self.event_days(ui, lib, profiles, e) {
+            action = Some(a);
+        }
+        action
+    }
+
+    /// An event's sessions by day, setup changes flagged; a click opens one.
+    fn event_days(
+        &mut self,
+        ui: &mut Ui,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+        e: &Event,
+    ) -> Option<DetailAction> {
+        let mut action = None;
         let setups = crate::setup::resolve(
             lib,
             self.setup_baselines
@@ -742,6 +678,89 @@ enum DetailAction {
     /// Open a session, optionally on a lap number.
     Open(PathBuf, Option<u32>),
     Edit(EventDef),
+}
+
+/// Best lap per session through an event, one line per driver who has at
+/// least two.
+fn best_laps_chart(ui: &mut Ui, lib: &Library, e: &Event, stats: &[DriverStats]) {
+    let with_bests: Vec<(usize, &DriverStats)> = stats
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.bests.len() >= 2)
+        .collect();
+    if !with_bests.is_empty() {
+        // Only sessions with a lap time, so warm-ups don't leave gaps.
+        let order: Vec<usize> = e
+            .sessions
+            .iter()
+            .copied()
+            .filter(|i| stats.iter().any(|d| d.bests.iter().any(|(x, _)| x == i)))
+            .collect();
+        let numbers: Vec<u32> = order
+            .iter()
+            .map(|&i| lib.sessions[i].summary.number.unwrap_or(0))
+            .collect();
+        graph_card(ui, 240.0, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Best lap by session")
+                        .font(medium(14.5))
+                        .color(TEXT),
+                );
+                ui.label(RichText::new("s").size(13.0).color(DIM));
+            });
+            Plot::new(("event_bests", e.key()))
+                .height(ui.available_height())
+                .show_background(false)
+                .grid_color(GRID)
+                .y_axis_min_width(46.0)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .allow_scroll(false)
+                .x_axis_formatter(move |mark, _| {
+                    let i = mark.value.round() as i64;
+                    if (mark.value - i as f64).abs() < 1e-6
+                        && i >= 0
+                        && (i as usize) < numbers.len()
+                    {
+                        format!("S{}", numbers[i as usize])
+                    } else {
+                        String::new()
+                    }
+                })
+                .show_x(false)
+                .show_y(false)
+                .show(ui, |plot| {
+                    for (k, d) in &with_bests {
+                        let pts: Vec<[f64; 2]> = d
+                            .bests
+                            .iter()
+                            .filter_map(|(i, b)| {
+                                order
+                                    .iter()
+                                    .position(|x| x == i)
+                                    .map(|x| [x as f64, *b as f64 / 1000.0])
+                            })
+                            .collect();
+                        let color = SERIES[*k % SERIES.len()];
+                        plot.line(
+                            Line::new(d.name.clone(), PlotPoints::from(pts.clone()))
+                                .color(color)
+                                .width(2.0),
+                        );
+                        plot.points(
+                            egui_plot::Points::new(
+                                format!("{} laps", d.name),
+                                PlotPoints::from(pts),
+                            )
+                            .color(color)
+                            .radius(4.0),
+                        );
+                    }
+                });
+        });
+        ui.add_space(14.0);
+    }
 }
 
 /// The session's driver, as everywhere else (`session_driver`: entered at
