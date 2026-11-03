@@ -456,6 +456,20 @@ impl Profiles {
         id
     }
 
+    /// Adds `driver` (`new`, given the next id) or saves it over the one with
+    /// its id. Returns its id.
+    pub fn save_driver(&mut self, mut driver: Driver, new: bool) -> u32 {
+        if new {
+            driver.id = self.drivers.iter().map(|x| x.id).max().unwrap_or(0) + 1;
+        }
+        let id = driver.id;
+        match self.drivers.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = driver,
+            None => self.drivers.push(driver),
+        }
+        id
+    }
+
     pub fn next_kart_id(&self) -> u32 {
         self.karts.iter().map(|k| k.id).max().unwrap_or(0) + 1
     }
@@ -937,6 +951,30 @@ mod tests {
         assert_eq!(p.drivers.len(), 1);
         assert_eq!(p.karts.len(), 1);
         assert_eq!(p.for_logger("4444").driver, "Bo");
+    }
+
+    #[test]
+    fn saving_a_driver_adds_or_replaces() {
+        let mut p = two_drivers();
+        let id = p.save_driver(
+            Driver {
+                name: "Cy".into(),
+                ..Default::default()
+            },
+            true,
+        );
+        assert_eq!(
+            (id, p.drivers.len()),
+            (p.drivers.iter().map(|d| d.id).max().unwrap(), 3)
+        );
+        let mut cy = p.drivers.iter().find(|d| d.id == id).unwrap().clone();
+        cy.class = "Cadet".into();
+        assert_eq!(p.save_driver(cy, false), id);
+        assert_eq!(p.drivers.len(), 3);
+        assert_eq!(
+            p.drivers.iter().find(|d| d.id == id).unwrap().class,
+            "Cadet"
+        );
     }
 
     #[test]

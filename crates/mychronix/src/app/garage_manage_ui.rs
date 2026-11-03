@@ -151,7 +151,7 @@ impl App {
     /// else its session summaries, else their digests.
     pub(super) fn mychron_models(&mut self) -> BTreeMap<String, String> {
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         let mut ids: Vec<String> = profiles
             .karts
             .iter()
@@ -344,9 +344,10 @@ impl App {
         if connected.as_deref() == Some(u.logger.as_str()) {
             self.garage.snoozed_while_on.insert(u.logger.clone());
         }
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
-        profiles.snoozed.insert(u.logger.clone(), u.sessions);
-        self.profiles_changed();
+        self.edit_profiles(|p| {
+            p.snoozed.insert(u.logger.clone(), u.sessions);
+            true
+        });
     }
 
     /// Setting up a MyChron: whose it is, which kart, and (if that kart has
@@ -358,7 +359,7 @@ impl App {
         let models = self.mychron_models();
         let model_of = |l: &str| models.get(l).cloned().unwrap_or_else(|| "MyChron".into());
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         let model = s.model.clone();
         let logger = s.logger.clone();
         let (mut cancel, mut finish) = (false, false);
@@ -582,40 +583,46 @@ impl App {
             }
         });
         if finish {
-            let driver = match &s.driver {
-                Choice::Existing(id) => Some(*id),
-                Choice::New(n) => Some(profiles.driver_named(n)),
-                Choice::None => None,
-            };
-            let kart = driver.and_then(|driver| {
-                let mut new_kart = |name: &str| {
-                    let id = profiles.next_kart_id();
-                    profiles.karts.push(Kart {
-                        id,
-                        name: name.trim().into(),
-                        driver: Some(driver),
-                        ..Default::default()
-                    });
-                    id
+            let mut kart = None;
+            self.edit_profiles(|profiles| {
+                let driver = match &s.driver {
+                    Choice::Existing(id) => Some(*id),
+                    Choice::New(n) => Some(profiles.driver_named(n)),
+                    Choice::None => None,
                 };
-                match (&s.kart, s.step) {
-                    (Choice::Existing(_), Step::Replace) if !s.replace => {
-                        Some(new_kart(&s.new_kart_name))
+                kart = driver.and_then(|driver| {
+                    let mut new_kart = |name: &str| {
+                        let id = profiles.next_kart_id();
+                        profiles.karts.push(Kart {
+                            id,
+                            name: name.trim().into(),
+                            driver: Some(driver),
+                            ..Default::default()
+                        });
+                        id
+                    };
+                    match (&s.kart, s.step) {
+                        (Choice::Existing(_), Step::Replace) if !s.replace => {
+                            Some(new_kart(&s.new_kart_name))
+                        }
+                        (Choice::Existing(id), _) => Some(*id),
+                        (Choice::New(n), _) => Some(new_kart(n)),
+                        (Choice::None, _) => None,
                     }
-                    (Choice::Existing(id), _) => Some(*id),
-                    (Choice::New(n), _) => Some(new_kart(n)),
-                    (Choice::None, _) => None,
+                });
+                if let Some(kart) = kart {
+                    // The MyChron it replaces keeps its sessions so far; this one's
+                    // sessions without a kart become this kart's.
+                    profiles.mount(&s.logger, kart, &|l: &str| {
+                        crate::profiles::moved_now(lib.newest_start(l))
+                    });
                 }
+                // Saved (and its sessions worked out again) when a kart got it or a
+                // driver was added.
+                kart.is_some() || matches!(s.driver, Choice::New(_))
             });
             if let Some(kart) = kart {
-                // The MyChron it replaces keeps its sessions so far; this one's
-                // sessions without a kart become this kart's.
-                profiles.mount(&s.logger, kart, &|l: &str| {
-                    crate::profiles::moved_now(lib.newest_start(l))
-                });
                 log::info!("MyChron {} set up on kart {kart}", s.logger);
-                // Its sessions are this kart's now: worked out again.
-                self.profiles_changed();
                 return;
             }
         }
@@ -631,7 +638,7 @@ impl App {
         };
         let models = self.mychron_models();
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         let (mut keep, mut done) = (true, false);
         let closed = match &mut c {
             Confirm::DeleteDriver {
@@ -939,7 +946,8 @@ impl App {
     }
 
     fn apply_confirm(&mut self, c: Confirm, lib: &Library) {
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
+        let newest = |l: &str| crate::profiles::moved_now(lib.newest_start(l));
         match c {
             Confirm::DeleteDriver { id, .. } => {
                 let name = profiles
@@ -959,7 +967,6 @@ impl App {
                     .path
                     .as_ref()
                     .is_some_and(|p| theirs.iter().any(|s| &s.path == p));
-                profiles.delete_driver(id);
                 if !files.is_empty()
                     && let Err(e) = trash::delete_all(&files)
                 {
@@ -983,18 +990,30 @@ impl App {
                     theirs.len(),
                     files.len()
                 );
+                // Saved once the files are gone, so the library reloads without them.
+                self.edit_profiles(|p| {
+                    p.delete_driver(id);
+                    true
+                });
                 if open_is_theirs {
                     self.act(Action::Close);
                     self.page = Page::Garage;
                 }
                 self.garage.page = 0;
             }
-            Confirm::RemoveKart { id, .. } => profiles.remove_kart(id),
-            Confirm::RemoveMyChron { logger, .. } => profiles.remove_logger(&logger, &|l: &str| {
-                crate::profiles::moved_now(lib.newest_start(l))
-            }),
+            Confirm::RemoveKart { id, .. } => {
+                self.edit_profiles(|p| {
+                    p.remove_kart(id);
+                    true
+                });
+            }
+            Confirm::RemoveMyChron { logger, .. } => {
+                self.edit_profiles(|p| {
+                    p.remove_logger(&logger, &newest);
+                    true
+                });
+            }
         }
-        self.profiles_changed();
     }
 }
 

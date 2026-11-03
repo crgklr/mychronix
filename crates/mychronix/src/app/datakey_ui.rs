@@ -267,11 +267,7 @@ impl App {
                         let line = match (&self.key.busy, &self.key.listing, self.key.present) {
                             (Some(b), _, _) => b.clone(),
                             (None, Some((serial, total, new)), true) => {
-                                let who = self
-                                    .profiles
-                                    .get_or_insert_with(crate::profiles::Profiles::load)
-                                    .for_logger(serial)
-                                    .driver;
+                                let who = profiles(&mut self.profiles).for_logger(serial).driver;
                                 let whose = if who.is_empty() {
                                     format!("MyChron {serial}")
                                 } else {

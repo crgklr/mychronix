@@ -39,10 +39,7 @@ struct DriverStats {
 impl App {
     pub(super) fn events_page(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let mut defs = self.events_page.events.take().unwrap_or_else(Events::load);
         if let Some(rx) = &self.events_page.peak_egt_rx {
             while let Ok((path, v)) = rx.try_recv() {

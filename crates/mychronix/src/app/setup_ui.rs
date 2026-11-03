@@ -258,13 +258,12 @@ impl App {
                     && !(edit.setup.same_setup(&edit.before)
                         && edit.setup.notes.trim().is_empty()))
                 .then(|| edit.setup.clone());
-                let profiles = self
-                    .profiles
-                    .get_or_insert_with(crate::profiles::Profiles::load);
-                if let Some(k) = profiles.karts.iter_mut().find(|k| k.id == id) {
-                    k.next_setup = next;
-                }
-                self.profiles_changed();
+                self.edit_profiles(|p| {
+                    if let Some(k) = p.karts.iter_mut().find(|k| k.id == id) {
+                        k.next_setup = next;
+                    }
+                    true
+                });
             } else if open && !cancel {
                 self.setup_edit = Some(edit);
             }

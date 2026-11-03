@@ -98,10 +98,7 @@ const SERIES: [Series; 4] = [
 impl App {
     fn known_mychrons(&mut self) -> Vec<Known> {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let digests = self
             .sensors
             .digests
@@ -471,9 +468,7 @@ impl App {
             ),
             _ => (self.key.listing.as_ref()?.0.clone(), "MyChron 4"),
         };
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         profiles
             .mounted_on(&id)
             .is_none()
@@ -771,9 +766,7 @@ impl App {
                     .map(|i| i.to_string()),
                 _ => self.key.listing.as_ref().map(|l| l.0.clone()),
             };
-            let profiles = self
-                .profiles
-                .get_or_insert_with(crate::profiles::Profiles::load);
+            let profiles = profiles(&mut self.profiles);
             id.is_some_and(|i| !profiles.knows_logger(&i))
         };
         ui.add_space(STEP_H / 2.0 - 120.0);

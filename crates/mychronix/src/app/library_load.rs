@@ -30,7 +30,31 @@ impl App {
 
     /// The drivers, karts or MyChrons changed: saved, and what's worked out from
     /// them (each session's kart, the setups it starts from) worked out again.
-    pub(super) fn profiles_changed(&mut self) {
+    /// The drivers and karts (loaded the first time). Read-only: they change
+    /// through `edit_profiles`, which saves them.
+    pub(super) fn profiles(&mut self) -> &crate::profiles::Profiles {
+        self.profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+    }
+
+    /// Changes the drivers and karts with `change`, which says whether it
+    /// changed anything; if it did, they're saved and the library reloaded
+    /// (see `profiles_changed`). Returns what `change` said.
+    pub(super) fn edit_profiles(
+        &mut self,
+        change: impl FnOnce(&mut crate::profiles::Profiles) -> bool,
+    ) -> bool {
+        let changed = change(
+            self.profiles
+                .get_or_insert_with(crate::profiles::Profiles::load),
+        );
+        if changed {
+            self.profiles_changed();
+        }
+        changed
+    }
+
+    fn profiles_changed(&mut self) {
         if let Some(p) = &self.profiles
             && let Err(e) = p.save()
         {

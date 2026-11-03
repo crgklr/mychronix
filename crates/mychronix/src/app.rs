@@ -75,6 +75,13 @@ enum Page {
     Settings,
 }
 
+/// The drivers and karts, loaded the first time. Read-only: they change
+/// through `App::edit_profiles`, which saves them. (A function of the field,
+/// not a method, so it borrows only the profiles.)
+fn profiles(p: &mut Option<crate::profiles::Profiles>) -> &crate::profiles::Profiles {
+    p.get_or_insert_with(crate::profiles::Profiles::load)
+}
+
 /// A change to the open session a page asks for (`App::act`), done after the
 /// frame's pages and dialogs have drawn.
 enum Action {
@@ -351,9 +358,7 @@ impl App {
         // The kart its MyChron was on when it was recorded (for a file opened
         // from elsewhere: the one its MyChron is on, or was last on).
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         let kart: Option<crate::profiles::Kart> = match lib.sessions.iter().find(|s| s.path == path)
         {
             Some(s) => s
@@ -434,9 +439,7 @@ impl App {
         let baselines = self
             .setup_baselines
             .get_or_insert_with(crate::setup::Baselines::load);
-        let kart = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
+        let kart = profiles(&mut self.profiles)
             .mounted_on(logger)
             .map(|k| k.id);
         crate::setup::latest(&lib, baselines, logger, kart)

@@ -354,10 +354,7 @@ impl App {
             return;
         }
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let baselines = self.setup_baselines.take().unwrap_or_else(Baselines::load);
         let defs = self
             .events_page
@@ -595,7 +592,7 @@ impl App {
         let Some(mut edit) = self.garage.driver_edit.take() else {
             return;
         };
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         let existing = edit.driver.id != 0;
         let name = edit.driver.name.trim().to_string();
         let taken = profiles
@@ -793,28 +790,20 @@ impl App {
             });
             return;
         }
-        let changed = if (save || open_kart.is_some()) && ok {
+        if (save || open_kart.is_some()) && ok {
             // Going to a kart saves the driver first.
-            if !existing {
-                d.id = profiles.drivers.iter().map(|x| x.id).max().unwrap_or(0) + 1;
-                if let Some(k) = open_kart.as_mut() {
-                    k.driver = Some(d.id);
-                }
+            let mut id = d.id;
+            self.edit_profiles(|p| {
+                id = p.save_driver(d, !existing);
+                true
+            });
+            if let Some(k) = open_kart.as_mut().filter(|_| !existing) {
+                k.driver = Some(id);
             }
-            match profiles.drivers.iter_mut().find(|x| x.id == d.id) {
-                Some(x) => *x = d,
-                None => profiles.drivers.push(d),
-            }
-            true
-        } else {
-            false
-        };
-        if changed {
             log::info!(
                 "driver {}: {name}",
                 if existing { "saved" } else { "added" }
             );
-            self.profiles_changed();
             self.garage.kart_edit = open_kart;
         } else if open && !cancel {
             self.garage.driver_edit = Some(edit);
@@ -843,7 +832,7 @@ impl App {
                 .map(|i| i.to_string()),
         );
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         loggers.extend(profiles.karts.iter().map(|k| k.logger.clone()));
         loggers.retain(|l| !l.is_empty());
         loggers.sort();
@@ -1123,22 +1112,22 @@ impl App {
             };
             let newest = |l: &str| crate::profiles::moved_now(lib.newest_start(l));
             let baseline = adding.then(|| edit.baseline.carried());
-            profiles.save_kart(
-                edit.id,
-                details,
-                baseline,
-                newest_of_kart,
-                &edit.logger,
-                &newest,
-            );
-        }
-        if changed {
+            // Baselines and each session's kart come from the karts.
+            self.edit_profiles(|p| {
+                p.save_kart(
+                    edit.id,
+                    details,
+                    baseline,
+                    newest_of_kart,
+                    &edit.logger,
+                    &newest,
+                );
+                true
+            });
             log::info!(
                 "kart {}: {name}",
                 if edit.id.is_some() { "saved" } else { "added" }
             );
-            // Baselines and each session's kart come from the karts.
-            self.profiles_changed();
         } else if open && !cancel {
             self.garage.kart_edit = Some(edit);
         }
@@ -1147,10 +1136,7 @@ impl App {
     /// Analysis with nothing open: pick a session, race days newest first.
     pub(super) fn session_picker(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let mut open = None;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {

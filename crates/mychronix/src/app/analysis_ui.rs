@@ -1043,10 +1043,7 @@ impl App {
         );
         ui.add_space(8.0);
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let here = self
             .path
             .as_ref()
@@ -1658,8 +1655,7 @@ impl App {
             return;
         };
         let drivers: Vec<String> = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
+            .profiles()
             .drivers
             .iter()
             .map(|d| d.name.clone())
@@ -1718,17 +1714,13 @@ impl App {
         });
         if save {
             let name = name.trim().to_string();
-            let profiles = self
-                .profiles
-                .get_or_insert_with(crate::profiles::Profiles::load);
-            if !profiles
-                .drivers
-                .iter()
-                .any(|d| d.name.eq_ignore_ascii_case(&name))
-            {
-                profiles.driver_named(&name);
-                self.profiles_changed();
-            }
+            self.edit_profiles(|p| {
+                let new = !p.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(&name));
+                if new {
+                    p.driver_named(&name);
+                }
+                new
+            });
             let mut meta = crate::device::SessionMeta::load(&path).unwrap_or_default();
             meta.driver = name;
             match meta.save(&path) {

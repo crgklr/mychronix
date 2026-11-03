@@ -6,10 +6,7 @@ use super::*;
 impl App {
     pub(super) fn sessions_page(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let mut shown_rows: Vec<usize> = Vec::new();
         let loggers: Vec<String> = {
             let mut l: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();

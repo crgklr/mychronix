@@ -115,10 +115,7 @@ impl App {
         let Some(mut pick) = self.track_pick.take() else {
             return;
         };
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let lib = self.lib();
         let favorites = self
             .track_page
@@ -349,10 +346,7 @@ impl App {
         if self.track_pick.is_some() {
             return;
         }
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let Some(lib) = self.library.as_ref() else {
             return;
         };

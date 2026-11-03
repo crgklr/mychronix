@@ -29,10 +29,7 @@ impl App {
     /// The drivers with sessions in the library.
     pub(super) fn compare_driver_names(&mut self) -> Vec<String> {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let mut names: Vec<String> = lib
             .sessions
             .iter()
@@ -72,10 +69,7 @@ impl App {
     pub(super) fn compare_drivers_bar(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let names = self.compare_driver_names();
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let track = self
             .path
             .as_ref()

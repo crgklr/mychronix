@@ -289,14 +289,12 @@ impl App {
         ) {
             let model = model_from_ssid(ssid);
             if model.starts_with("MyChron") {
-                let profiles = self
-                    .profiles
-                    .get_or_insert_with(crate::profiles::Profiles::load);
-                let entry = profiles.loggers.entry(id.to_string()).or_default();
-                if entry.model != model {
+                self.edit_profiles(|p| {
+                    let entry = p.loggers.entry(id.to_string()).or_default();
+                    let new = entry.model != model;
                     entry.model = model.to_string();
-                    self.profiles_changed();
-                }
+                    new
+                });
             }
         }
         if newly {
@@ -394,17 +392,13 @@ impl App {
                 self.notices.error(format!("Couldn't save the setup: {e}"));
             } else if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
                 // The kart's next setup is now that session's.
-                let profiles = self
-                    .profiles
-                    .get_or_insert_with(crate::profiles::Profiles::load);
-                if let Some(k) = profiles
-                    .karts
-                    .iter_mut()
-                    .find(|k| k.logger == id.to_string() && k.next_setup.is_some())
-                {
-                    k.next_setup = None;
-                    self.profiles_changed();
-                }
+                self.edit_profiles(|p| {
+                    p.karts
+                        .iter_mut()
+                        .find(|k| k.logger == id.to_string() && k.next_setup.is_some())
+                        .map(|k| k.next_setup = None)
+                        .is_some()
+                });
             }
         }
         self.device.busy = None;
@@ -461,10 +455,7 @@ impl App {
                 .and_then(|b| b.logger_id)
                 .map(|i| i.to_string())
                 .unwrap_or_default();
-            let p = self
-                .profiles
-                .get_or_insert_with(crate::profiles::Profiles::load)
-                .for_logger(&id);
+            let p = profiles(&mut self.profiles).for_logger(&id);
             self.device.dialog = Some(DownloadDialog {
                 meta: crate::device::SessionMeta {
                     driver: p.driver,
@@ -483,8 +474,7 @@ impl App {
                     vec!["Club Circuit".into()]
                 },
                 setup: self
-                    .profiles
-                    .get_or_insert_with(crate::profiles::Profiles::load)
+                    .profiles()
                     .karts
                     .iter()
                     .find(|k| k.logger == id)
@@ -527,10 +517,7 @@ impl App {
     /// MyChron (WiFi or data key) that isn't on a kart yet.
     fn unplaced_connected(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let connected: Vec<String> = self
             .device
             .logger
@@ -687,10 +674,7 @@ impl App {
     }
 
     pub(super) fn device_status(&mut self, ui: &mut Ui) {
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         card(ui, |ui| {
             match &self.device.logger {
                 Some(b) => {
@@ -866,8 +850,7 @@ impl App {
             .unwrap_or_default();
         let setup_now = self.latest_setup(&logger_id);
         let next_setup = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
+            .profiles()
             .karts
             .iter()
             .find(|k| k.logger == logger_id)
@@ -909,10 +892,7 @@ impl App {
                             .and_then(|b| b.logger_id)
                             .map(|i| i.to_string())
                             .unwrap_or_default();
-                        let p = self
-                            .profiles
-                            .get_or_insert_with(crate::profiles::Profiles::load)
-                            .for_logger(&id);
+                        let p = profiles(&mut self.profiles).for_logger(&id);
                         // The track comes from the logger: one track pre-fills the field, several defer to each session.
                         let mut detected: Vec<String> = self
                             .device
@@ -1073,10 +1053,7 @@ impl App {
             return;
         };
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let s = Suggestions::gather(&lib, &profiles);
         let tires = self.tire_suggestions();
         let lib = self.lib();
@@ -1331,18 +1308,17 @@ impl App {
         // The MyChron is now on the kart named, so the kart's baseline applies to it.
         // A MyChron moving to another kart leaves its sessions so far with the old one.
         let lib = self.lib();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load);
-        profiles.note_download(
-            &id,
-            &dlg.meta.driver,
-            &dlg.meta.kart,
-            &dlg.meta.championship,
-            (!multiple).then_some(dlg.meta.track.as_str()),
-            &|l: &str| lib.newest_start(l),
-        );
-        self.profiles_changed();
+        self.edit_profiles(|p| {
+            p.note_download(
+                &id,
+                &dlg.meta.driver,
+                &dlg.meta.kart,
+                &dlg.meta.championship,
+                (!multiple).then_some(dlg.meta.track.as_str()),
+                &|l: &str| lib.newest_start(l),
+            );
+            true
+        });
         // Each file gets the dialog's details; with several tracks, its own track from the logger.
         let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
             .device

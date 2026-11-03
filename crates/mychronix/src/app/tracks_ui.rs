@@ -864,10 +864,7 @@ impl App {
     fn track_sessions(&mut self, ui: &mut Ui, lib: &Library, i: usize) {
         let t = &lib.tracks[i];
         let mut open = None;
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load)
-            .clone();
+        let profiles = profiles(&mut self.profiles).clone();
         let who: Vec<(usize, String)> = t
             .sessions
             .iter()

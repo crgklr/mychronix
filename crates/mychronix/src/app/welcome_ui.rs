@@ -16,9 +16,7 @@ impl App {
     pub(super) fn first_run(&mut self) -> bool {
         let lib = self.lib();
         let empty_lib = lib.sessions.is_empty();
-        let profiles = self
-            .profiles
-            .get_or_insert_with(crate::profiles::Profiles::load);
+        let profiles = profiles(&mut self.profiles);
         empty_lib
             && profiles.drivers.is_empty()
             && profiles.garage_karts().next().is_none()
