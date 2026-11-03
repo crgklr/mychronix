@@ -270,9 +270,17 @@ pub struct Library {
 
 impl Library {
     pub fn load() -> Self {
-        let started = std::time::Instant::now();
         let ours = crate::paths::data("tracks").unwrap_or_default();
         let sessions = crate::paths::sessions_dir().unwrap_or_default();
+        Self::load_from(&ours, &sessions, &crate::profiles::Profiles::load())
+    }
+
+    /// The library from your tracks in `ours` and the sessions in `sessions`
+    /// (a folder per MyChron), each session on the kart its MyChron was on
+    /// per `profiles`.
+    pub fn load_from(ours: &Path, sessions: &Path, profiles: &crate::profiles::Profiles) -> Self {
+        let started = std::time::Instant::now();
+        let (ours, sessions) = (ours.to_path_buf(), sessions.to_path_buf());
         let mut lib = Library::default();
         // Each track's index by guid, to match sessions and to skip a track
         // already read from another source.
@@ -288,7 +296,7 @@ impl Library {
         for t in &mut lib.tracks {
             t.index();
         }
-        lib.assign_karts(&crate::profiles::Profiles::load());
+        lib.assign_karts(profiles);
         log::info!(
             "library: {} tracks, {} sessions, {} sources, in {:?}",
             lib.tracks.len(),
@@ -584,4 +592,118 @@ fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aim_xrk::summary::{Date, to_xri};
+
+    /// A library folder with one MyChron's sessions, as downloads leave them.
+    fn library(name: &str) -> (PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("mychronix-lib-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("sessions").join("12345678");
+        std::fs::create_dir_all(&dir).unwrap();
+        let session = |n: u32, day: u8, time: &str| SessionSummary {
+            file: Some(format!("a_{n:04}.xrz")),
+            number: Some(n),
+            date: Some(Date {
+                year: 2026,
+                month: 10,
+                day,
+            }),
+            start_time: Some(time.into()),
+            track: Some("Club Ring".into()),
+            laps: Some(12),
+            best_lap_ms: Some(31_250 + n as u64),
+            max_speed: Some(60.0),
+            ..Default::default()
+        };
+        for (n, day, time) in [(1, 3, "10:00:00"), (2, 3, "14:00:00"), (3, 10, "11:00:00")] {
+            std::fs::write(
+                dir.join(format!("a_{n:04}.xri")),
+                to_xri(&session(n, day, time)),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join(format!("a_{n:04}.xrz")),
+                b"not read by the library",
+            )
+            .unwrap();
+        }
+        // A twin the MyChron listed again: one recording, not a second session.
+        std::fs::write(dir.join("a_0001.hrz"), b"not read by the library").unwrap();
+        (root.join("tracks"), root.join("sessions"))
+    }
+
+    #[test]
+    fn loads_sessions_with_their_details_kart_and_setup() {
+        let (tracks, sessions) = library("load");
+        let dir = sessions.join("12345678");
+        crate::device::SessionMeta {
+            driver: "Alex".into(),
+            track: "Club Ring".into(),
+            ..Default::default()
+        }
+        .save(&dir.join("a_0003.xrz"))
+        .unwrap();
+        crate::setup::Setup {
+            driven_teeth: "78".into(),
+            ..Default::default()
+        }
+        .save(&dir.join("a_0002.xrz"))
+        .unwrap();
+        // The MyChron is on kart 1, Sam's.
+        let mut profiles = crate::profiles::Profiles::default();
+        profiles.drivers.push(crate::profiles::Driver {
+            id: 1,
+            name: "Sam".into(),
+            ..Default::default()
+        });
+        profiles.karts.push(crate::profiles::Kart {
+            id: 1,
+            name: "Blue".into(),
+            driver: Some(1),
+            ..Default::default()
+        });
+        profiles.mount("12345678", 1, &|_: &str| String::new());
+
+        let lib = Library::load_from(&tracks, &sessions, &profiles);
+        assert_eq!(
+            lib.sessions.len(),
+            3,
+            "the .hrz twin isn't a session of its own"
+        );
+        let by = |n: u32| {
+            lib.sessions
+                .iter()
+                .find(|s| s.summary.number == Some(n))
+                .unwrap()
+        };
+        assert_eq!(by(1).logger, "12345678");
+        assert_eq!(by(1).summary.best_lap_ms, Some(31_251));
+        assert_eq!(
+            by(2).setup.as_ref().map(|s| s.driven_teeth.as_str()),
+            Some("78")
+        );
+        assert!(lib.sessions.iter().all(|s| s.kart == Some(1)));
+        // Named at download wins; else the kart's driver.
+        assert_eq!(by(3).driver(&profiles), "Alex");
+        assert_eq!(by(1).driver(&profiles), "Sam");
+        assert_eq!(by(3).start(), "2026-10-10 11:00:00");
+        let _ = std::fs::remove_dir_all(sessions.parent().unwrap());
+    }
+
+    #[test]
+    fn an_empty_or_missing_library_loads_empty() {
+        let none = std::env::temp_dir().join(format!("mychronix-lib-none-{}", std::process::id()));
+        let lib = Library::load_from(
+            &none.join("tracks"),
+            &none.join("sessions"),
+            &crate::profiles::Profiles::default(),
+        );
+        assert!(lib.sessions.is_empty());
+    }
 }
