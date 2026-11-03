@@ -51,6 +51,29 @@ impl Suggestions {
 
 /// A text field that offers matching `suggestions` below it while focused.
 /// Picking one fills the field; typing anything else is fine too.
+/// A field that picks one of `options` (shown as `empty` when none is
+/// picked), sized like `suggest_field`. With `add`, a last item for adding a
+/// new one: true when it's clicked.
+pub(super) fn pick_field(ui: &mut Ui, id: &str, value: &mut String, options: &[String], empty: &str, add: Option<&str>, width: f32) -> bool {
+    let mut adding = false;
+    let shown = if value.trim().is_empty() { RichText::new(empty).color(DIM) } else { RichText::new(value.as_str()).color(TEXT) };
+    ui.spacing_mut().interact_size.y = 44.0;
+    egui::ComboBox::from_id_salt(id).width(width - 8.0).height(320.0).selected_text(shown.font(regular(16.5))).show_ui(ui, |ui| {
+        for o in options {
+            if ui.selectable_label(value.eq_ignore_ascii_case(o), RichText::new(o).font(regular(15.0))).clicked() {
+                *value = o.clone();
+            }
+        }
+        if let Some(label) = add {
+            if !options.is_empty() {
+                ui.separator();
+            }
+            adding = ui.selectable_label(false, RichText::new(label).font(regular(15.0)).color(SECONDARY)).clicked();
+        }
+    });
+    adding
+}
+
 pub(super) fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggestions: &[String], width: f32) -> egui::Response {
     let response = ui.add(
         egui::TextEdit::singleline(value)

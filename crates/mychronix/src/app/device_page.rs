@@ -308,6 +308,7 @@ impl App {
                 setup_open: false,
                 replace: true,
                 setup_target: None,
+                adding_driver: false,
             });
         }
         // MYCHRONIX_ADD_MYCHRON=wifi|key opens the "Add a MyChron" window at its steps (for testing).
@@ -582,6 +583,7 @@ impl App {
                             setup_open: false,
                             replace: true,
                             setup_target: None,
+                            adding_driver: false,
                         });
                     }
                     if chip(ui, "None", false).clicked() {
@@ -685,7 +687,11 @@ impl App {
             Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", start_words(start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
         };
-        let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
+        // The Garage's drivers and karts, and what this MyChron is on now.
+        let drivers: Vec<String> = profiles.drivers.iter().map(|d| d.name.clone()).collect();
+        let karts: Vec<String> = profiles.garage_karts().map(|k| k.name.clone()).collect();
+        let current = profiles.for_logger(&self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default());
+                let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
             use garage_manage_ui::look;
             let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
             look::header(ui, Icon::Download, SECONDARY, None, &title, "Who drove, in which kart, and where. These are remembered for next time.");
@@ -709,11 +715,40 @@ impl App {
                     return;
                 }
                 egui::Grid::new("download_meta").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {
+                    // Driver and kart come from the Garage, so a typo can't make a new
+                    // driver or kart, or move a MyChron; a new driver is added on purpose.
                     look::label(ui, "Driver");
-                    suggest_field(ui, "dl_driver", &mut dlg.meta.driver, "Driver name", &s.drivers, field_w);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        if dlg.adding_driver || drivers.is_empty() {
+                            suggest_field(ui, "dl_driver", &mut dlg.meta.driver, "New driver's name", &[], field_w);
+                            if !drivers.is_empty() && ui.add(egui::Label::new(RichText::new("Pick from the Garage instead").size(12.5).color(SECONDARY)).sense(Sense::click())).clicked() {
+                                dlg.adding_driver = false;
+                                dlg.meta.driver = current.driver.clone();
+                            }
+                            if !dlg.meta.driver.trim().is_empty() && !drivers.iter().any(|d| d.eq_ignore_ascii_case(dlg.meta.driver.trim())) {
+                                look::note(ui, &format!("{} is added to the Garage.", dlg.meta.driver.trim()), DIM);
+                            }
+                        } else if pick_field(ui, "dl_driver", &mut dlg.meta.driver, &drivers, "Pick a driver", Some("Add a driver…"), field_w) {
+                            dlg.adding_driver = true;
+                            dlg.meta.driver.clear();
+                        }
+                    });
                     ui.end_row();
                     look::label(ui, "Kart");
-                    suggest_field(ui, "dl_kart", &mut dlg.meta.kart, "Kart or class", &s.karts, field_w);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        if karts.is_empty() {
+                            look::note(ui, "No karts in the Garage yet. Add one there, and its MyChron's sessions become its.", DIM);
+                        } else {
+                            pick_field(ui, "dl_kart", &mut dlg.meta.kart, &karts, "No kart", None, field_w);
+                            let picked = dlg.meta.kart.trim();
+                            if !picked.is_empty() && !picked.eq_ignore_ascii_case(&current.kart) {
+                                let from = if current.kart.is_empty() { String::new() } else { format!(" from {}", current.kart) };
+                                look::note(ui, &format!("This MyChron moves to {picked}{from}: these sessions and later ones are its."), theme::FAVORITE);
+                            }
+                        }
+                    });
                     ui.end_row();
                     look::label(ui, "Championship");
                     suggest_field(ui, "dl_champ", &mut dlg.meta.championship, "e.g. 2026 Club Championship", &s.championships, field_w);
