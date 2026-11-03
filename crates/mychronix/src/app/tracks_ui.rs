@@ -220,58 +220,33 @@ impl App {
         let matches = |t: &tracks::Track| in_view(t) && (!searching || t.search.contains(&needle));
         let by_name = |a: &usize, b: &usize| lib.tracks[*a].sort_key.cmp(&lib.tracks[*b].sort_key);
 
-        // Rows: the All tab groups by country under collapsible headers; the
-        // other tabs are short, flat lists.
-        #[derive(Clone)]
-        enum Row {
-            Header(String, String, usize, bool),
-            Track(usize),
-        }
         const HEADER_H: f32 = 44.0;
         const TRACK_H: f32 = 76.0;
-        let mut rows: Vec<Row> = Vec::new();
-        let mut system_header = None;
         let system = crate::countries::system_country();
-        if self.track_page.view == TrackView::All {
-            // Open the system country first (MYCHRONIX_TRACKS_COLLAPSED=1 skips that, for screenshots).
-            if !self.track_page.list_ready
-                && !crate::hooks::get().tracks_collapsed
-                && let Some(code) = &system
-            {
-                self.track_page.groups_open.insert(code.clone());
-            }
-            let mut by_country: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
-            for (i, t) in lib.tracks.iter().enumerate() {
-                if matches(t) {
-                    by_country.entry(t.country.clone()).or_default().push(i);
-                }
-            }
-            let mut groups: Vec<(String, String, Vec<usize>)> = by_country
-                .into_iter()
-                .map(|(code, mut v)| {
-                    v.sort_by(by_name);
-                    let l = crate::countries::label(&code);
-                    (code, l, v)
-                })
-                .collect();
-            groups.sort_by(|a, b| a.1.cmp(&b.1));
-            for (code, label, members) in groups {
-                let open = searching || self.track_page.groups_open.contains(&code);
-                if system.as_deref() == Some(code.as_str()) {
-                    system_header = Some(rows.len());
-                }
-                rows.push(Row::Header(code.clone(), label, members.len(), open));
-                if open {
-                    rows.extend(members.into_iter().map(Row::Track));
-                }
-            }
-        } else {
-            let mut v: Vec<usize> = (0..lib.tracks.len())
-                .filter(|&i| matches(&lib.tracks[i]))
-                .collect();
-            v.sort_by(by_name);
-            rows.extend(v.into_iter().map(Row::Track));
+        let grouped = self.track_page.view == TrackView::All;
+        // Open the system country first (MYCHRONIX_TRACKS_COLLAPSED=1 skips that, for screenshots).
+        if grouped
+            && !self.track_page.list_ready
+            && !crate::hooks::get().tracks_collapsed
+            && let Some(code) = &system
+        {
+            self.track_page.groups_open.insert(code.clone());
         }
+        let shown: Vec<(usize, &str)> = lib
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| matches(t))
+            .map(|(i, t)| (i, t.country.as_str()))
+            .collect();
+        let (rows, system_header) = list_rows(
+            shown,
+            by_name,
+            grouped,
+            &self.track_page.groups_open,
+            searching,
+            system.as_deref(),
+        );
 
         // Variable-height rows, drawn only where visible.
         let heights: Vec<f32> = rows
@@ -1710,5 +1685,96 @@ impl App {
                 });
             });
         ui.add_space(14.0);
+    }
+}
+
+/// A row of the track list.
+#[derive(Clone, Debug, PartialEq)]
+enum Row {
+    /// A country: its code, its name, how many tracks, whether it's open.
+    Header(String, String, usize, bool),
+    /// A track (index into the library's tracks).
+    Track(usize),
+}
+
+/// The track list's rows from the tracks shown (index, country code): grouped
+/// by country under headers, open ones (all of them while searching) with their
+/// tracks, sorted by name; or a flat list. Also the system country's header row.
+fn list_rows(
+    shown: Vec<(usize, &str)>,
+    by_name: impl Fn(&usize, &usize) -> std::cmp::Ordering,
+    grouped: bool,
+    open: &std::collections::HashSet<String>,
+    searching: bool,
+    system: Option<&str>,
+) -> (Vec<Row>, Option<usize>) {
+    let mut rows = Vec::new();
+    let mut system_header = None;
+    if grouped {
+        let mut by_country: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
+        for (i, country) in shown {
+            by_country.entry(country.to_string()).or_default().push(i);
+        }
+        let mut groups: Vec<(String, String, Vec<usize>)> = by_country
+            .into_iter()
+            .map(|(code, mut v)| {
+                v.sort_by(&by_name);
+                let l = crate::countries::label(&code);
+                (code, l, v)
+            })
+            .collect();
+        groups.sort_by(|a, b| a.1.cmp(&b.1));
+        for (code, label, members) in groups {
+            let is_open = searching || open.contains(&code);
+            if system == Some(code.as_str()) {
+                system_header = Some(rows.len());
+            }
+            rows.push(Row::Header(code.clone(), label, members.len(), is_open));
+            if is_open {
+                rows.extend(members.into_iter().map(Row::Track));
+            }
+        }
+    } else {
+        let mut v: Vec<usize> = shown.into_iter().map(|(i, _)| i).collect();
+        v.sort_by(by_name);
+        rows.extend(v.into_iter().map(Row::Track));
+    }
+    (rows, system_header)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_track_list_groups_by_country_and_opens_what_it_should() {
+        // Tracks 0..4 by name order 3, 1, 0, 2.
+        let order = [2, 1, 3, 0];
+        let by_name = |a: &usize, b: &usize| order[*a].cmp(&order[*b]);
+        let shown = || vec![(0, "IT"), (1, "US"), (2, "IT"), (3, "US")];
+        let open = std::collections::HashSet::from(["US".to_string()]);
+        let (rows, system) = list_rows(shown(), by_name, true, &open, false, Some("US"));
+        let it = crate::countries::label("IT");
+        let us = crate::countries::label("US");
+        assert!(it < us, "{it} {us}");
+        assert_eq!(
+            rows,
+            [
+                Row::Header("IT".into(), it.clone(), 2, false),
+                Row::Header("US".into(), us.clone(), 2, true),
+                Row::Track(3),
+                Row::Track(1),
+            ]
+        );
+        assert_eq!(system, Some(1));
+        // Searching opens every country; other tabs are one list by name.
+        let (rows, _) = list_rows(shown(), by_name, true, &open, true, None);
+        assert_eq!(rows.len(), 6);
+        let (rows, system) = list_rows(shown(), by_name, false, &open, false, Some("US"));
+        assert_eq!(
+            rows,
+            [Row::Track(3), Row::Track(1), Row::Track(0), Row::Track(2)]
+        );
+        assert_eq!(system, None);
     }
 }
