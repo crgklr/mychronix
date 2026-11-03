@@ -450,12 +450,15 @@ impl App {
         }
     }
 
-    /// A RaceStudio 2 session opened from outside the library is copied into
-    /// it with its companion files (see `import_rs2_files`). Returns the copy
-    /// to open, or `path` as it was.
+    /// A RaceStudio 2 session opened from outside the library is added to it
+    /// (see `import::add_rs2_file`). Returns the library's copy to open, or
+    /// `path` as it was.
     fn import_rs2(&mut self, path: PathBuf) -> PathBuf {
         let root = crate::paths::sessions_dir().unwrap_or_default();
-        match import_rs2_files(&path, &root) {
+        let lib = self.library.take().unwrap_or_else(Library::load);
+        let added = crate::import::add_rs2_file(&path, &root, &lib);
+        self.library = Some(lib);
+        match added {
             Ok(Some(copy)) => {
                 self.reload_library();
                 copy
@@ -467,34 +470,6 @@ impl App {
             }
         }
     }
-}
-
-/// Copies a RaceStudio 2 session (`.drk`, `.imd` or `.mc4`) from outside
-/// `root` into `root/<logger serial>/`, with the files RaceStudio 2 keeps
-/// beside it: `.imd` (the raw download), `.gpk` and `.rrk` (GPS positions).
-/// Files already there are kept. None when it isn't one or is already inside.
-fn import_rs2_files(path: &std::path::Path, root: &std::path::Path) -> std::io::Result<Option<PathBuf>> {
-    let rs2 = path.extension().is_some_and(|e| ["drk", "imd", "mc4"].iter().any(|x| e.eq_ignore_ascii_case(x)));
-    if !rs2 || path.starts_with(root) {
-        return Ok(None);
-    }
-    let Ok(session) = crate::jobs::open_session(path) else { return Ok(None) };
-    let folder = root.join(session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "racestudio2".into()));
-    let (Some(dir), Some(stem), Some(name)) = (path.parent(), path.file_stem(), path.file_name()) else { return Ok(None) };
-    let dir = if dir.as_os_str().is_empty() { std::path::Path::new(".") } else { dir };
-    std::fs::create_dir_all(&folder)?;
-    let mut copied = 0;
-    for entry in std::fs::read_dir(dir)? {
-        let p = entry?.path();
-        let companion = p.file_stem() == Some(stem) && p.extension().is_some_and(|e| ["drk", "imd", "gpk", "rrk", "mc4"].iter().any(|x| e.eq_ignore_ascii_case(x)));
-        let to = folder.join(p.file_name().unwrap_or_default());
-        if companion && !to.exists() {
-            std::fs::copy(&p, &to)?;
-            copied += 1;
-        }
-    }
-    log::info!("added {} to the library ({copied} files copied)", path.display());
-    Ok(Some(folder.join(name)))
 }
 
 /// A file "dropped" by MYCHRONIX_DROP (for testing).
@@ -726,23 +701,29 @@ mod tests {
     }
 
     #[test]
-    fn importing_a_racestudio_session_brings_its_companions() {
+    fn opening_a_racestudio_session_adds_it_once_with_its_companions() {
+        use crate::import::add_rs2_file;
         let base = std::env::temp_dir().join(format!("mychronix-import-{}", std::process::id()));
         let (outside, root) = (base.join("RaceStudio2"), base.join("sessions"));
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("run 7.mc4"), mc4()).unwrap();
-        std::fs::write(outside.join("run 7.GPK"), b"gps").unwrap();
+        std::fs::write(outside.join("run 7.gpk"), b"gps").unwrap();
         std::fs::write(outside.join("run 7.rrk"), b"raw").unwrap();
         std::fs::write(outside.join("run 8.rrk"), b"another run").unwrap();
-        let copy = import_rs2_files(&outside.join("run 7.mc4"), &root).unwrap().unwrap();
+        let mut lib = Library::default();
+        let copy = add_rs2_file(&outside.join("run 7.mc4"), &root, &lib).unwrap().unwrap();
         assert_eq!(copy, root.join("4242").join("run 7.mc4"));
         let mut got: Vec<String> = std::fs::read_dir(root.join("4242")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         got.sort();
-        assert_eq!(got, ["run 7.GPK", "run 7.mc4", "run 7.rrk"]);
-        // Already in the library: opened where it is.
-        assert_eq!(import_rs2_files(&copy, &root).unwrap(), None);
-        // Not a RaceStudio 2 file.
-        assert_eq!(import_rs2_files(&outside.join("run 8.rrk"), &root).unwrap(), None);
+        assert_eq!(got, ["run 7.gpk", "run 7.mc4", "run 7.rrk"]);
+        // Opened again once it's in the library: the library's copy, nothing copied twice.
+        let summary = aim_xrk::mc4::summary(&copy).unwrap();
+        lib.sessions.push(crate::tracks::LocalSession { path: copy.clone(), logger: "4242".into(), summary, track: None, meta: None, setup: None, weather: None, kart: None });
+        assert_eq!(add_rs2_file(&outside.join("run 7.mc4"), &root, &lib).unwrap(), Some(copy.clone()));
+        assert_eq!(std::fs::read_dir(root.join("4242")).unwrap().count(), 3);
+        // Already inside the library, or not a session: left as it is.
+        assert_eq!(add_rs2_file(&copy, &root, &lib).unwrap(), None);
+        assert_eq!(add_rs2_file(&outside.join("run 8.rrk"), &root, &lib).unwrap(), None);
         std::fs::remove_dir_all(&base).unwrap();
     }
 }

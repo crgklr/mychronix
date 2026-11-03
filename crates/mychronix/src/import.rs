@@ -124,7 +124,7 @@ pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egu
             // A file that trips up a reader counts as unreadable; the import carries on.
             let outcome = crate::jobs::guard(&f.display().to_string(), || import_one(f, &root, &mut known)).unwrap_or_else(|| Err("couldn't be read".into()));
             match outcome {
-                Ok(Some(logger)) => {
+                Ok(Some((logger, _))) => {
                     report.added += 1;
                     if !report.loggers.contains(&logger) {
                         report.loggers.push(logger);
@@ -159,8 +159,8 @@ fn free_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     }
 }
 
-/// Imports one session. Some(logger) when added, None when already there.
-fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Option<String>, String> {
+/// Imports one session. Some((logger, where it was saved)) when added, None when already there.
+fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Option<(String, PathBuf)>, String> {
     let session = crate::jobs::open_session(path)?;
     let logger = session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "imported".into());
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "session".into());
@@ -184,6 +184,7 @@ fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Opti
         };
         write_new(&target, &xrz)?;
         write_new(&target.with_extension("xri"), &aim_xrk::summary::to_xri(&summary))?;
+        Ok(Some((logger, target)))
     } else {
         let summary = if e == "drk" { aim_xrk::drk::summary(path) } else { aim_xrk::mc4::summary(path) }.map_err(|e| e.to_string())?;
         if key(&logger, &summary).is_some_and(|k| seen(known, k)) {
@@ -201,8 +202,34 @@ fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Opti
                 write_new(&dir.join(format!("{new_stem}.{}", ext(&p))), &std::fs::read(&p).map_err(|e| e.to_string())?)?;
             }
         }
+        Ok(Some((logger, target)))
     }
-    Ok(Some(logger))
+}
+
+/// A RaceStudio 2 session (`.drk`, `.imd` or `.mc4`) opened or dropped from
+/// outside the library, added to it as a folder import would add it (with
+/// the files RaceStudio 2 keeps beside it): where it is in the library now,
+/// the new copy or the one already there. None when it isn't one, or is
+/// already inside the library.
+pub fn add_rs2_file(path: &Path, root: &Path, lib: &crate::tracks::Library) -> Result<Option<PathBuf>, String> {
+    if !RS2.contains(&ext(path).as_str()) || path.starts_with(root) {
+        return Ok(None);
+    }
+    let mut known: HashSet<Key> = lib.sessions.iter().filter_map(|s| key(&s.logger, &s.summary)).collect();
+    match import_one(path, root, &mut known)? {
+        Some((logger, copy)) => {
+            log::info!("added {} to the library as {} (MyChron {logger})", path.display(), copy.display());
+            Ok(Some(copy))
+        }
+        // Already there: open the library's copy.
+        None => {
+            let session = crate::jobs::open_session(path)?;
+            let logger = session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "imported".into());
+            let summary = if ext(path) == "drk" { aim_xrk::drk::summary(path) } else { aim_xrk::mc4::summary(path) }.map_err(|e| e.to_string())?;
+            let k = key(&logger, &summary);
+            Ok(lib.sessions.iter().find(|s| k.as_ref().is_some_and(|k| key(&s.logger, &s.summary).is_some_and(|m| m.0 == k.0 && m.1 == k.1 && (m.2 - k.2).abs() <= 2))).map(|s| s.path.clone()))
+        }
+    }
 }
 
 /// Writes a file that mustn't exist yet, by way of a temporary name.
