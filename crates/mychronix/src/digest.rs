@@ -51,7 +51,7 @@ impl Digest {
             laps_from_gps: session.info.laps_from_gps.is_some(),
             untimed: session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session),
             lap_count: session.laps.len() as u32,
-            best: session.best_lap(crate::app::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
+            best: session.best_lap(aim_xrk::laps::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
         }
     }
 

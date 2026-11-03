@@ -519,7 +519,7 @@ enum DetailAction {
 /// The session's driver, as everywhere else (`session_driver`: entered at
 /// download, else the driver of the kart its MyChron was on then).
 fn driver_for(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
-    Some(super::sessions_filter_ui::session_driver(s, profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("MyChron {}", s.logger))
+    Some(s.driver(profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("MyChron {}", s.logger))
 }
 
 fn driver_stats(

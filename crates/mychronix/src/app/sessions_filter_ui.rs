@@ -33,23 +33,6 @@ pub(super) struct SessionFilter {
     calendar: Option<(u8, Day)>,
 }
 
-/// A session's driver: the one entered for it, else its kart's (the kart
-/// its MyChron was on when it was recorded); "" when neither.
-pub(crate) fn session_driver(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
-    let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
-    s.meta
-        .as_ref()
-        .map(|m| m.driver.trim().to_string())
-        .filter(|d| !d.is_empty())
-        .or_else(|| kart.and_then(|k| profiles.driver_name(k.driver)).map(str::to_string))
-        .unwrap_or_default()
-}
-
-/// A session's track name (see `LocalSession::track_name`).
-pub(crate) fn session_track(lib: &Library, i: usize) -> Option<String> {
-    lib.sessions[i].track_name(&lib.tracks)
-}
-
 fn naive(d: Date) -> Option<Day> {
     Day::new(d.year as i16, d.month as i8, d.day as i8).ok()
 }
@@ -71,7 +54,7 @@ impl SessionFilter {
 
     pub(super) fn keeps(&self, lib: &Library, i: usize, profiles: &crate::profiles::Profiles, newest: Option<Day>) -> bool {
         let s = &lib.sessions[i];
-        let driver = session_driver(s, profiles);
+        let driver = s.driver(profiles);
         let driver = if driver.is_empty() { NO_DRIVER.to_string() } else { driver };
         let (from, to) = self.bounds(newest);
         let day = s.summary.date.and_then(naive);
@@ -374,7 +357,7 @@ impl App {
         // Drivers.
         let mut drivers: Vec<(String, usize)> = Vec::new();
         for s in &lib.sessions {
-            let d = session_driver(s, profiles);
+            let d = s.driver(profiles);
             let d = if d.is_empty() { NO_DRIVER.to_string() } else { d };
             match drivers.iter_mut().find(|x| x.0 == d) {
                 Some(x) => x.1 += 1,

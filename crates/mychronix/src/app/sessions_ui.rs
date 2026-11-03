@@ -14,7 +14,7 @@ impl App {
             l.dedup();
             l
         };
-        let driver_of = |i: usize| sessions_filter_ui::session_driver(&lib.sessions[i], &profiles);
+        let driver_of = |i: usize| lib.sessions[i].driver(&profiles);
         // The newest session's day, for "Last race day".
         let newest = lib.sessions.iter().filter_map(|s| s.summary.date).max().and_then(|d| jiff::civil::Date::new(d.year as i16, d.month as i8, d.day as i8).ok());
 
@@ -124,7 +124,7 @@ impl App {
                         }
                         let day = &shown[k..end];
                         // The tracks raced that day, as assigned (else as recorded).
-                        let mut tracks: Vec<String> = day.iter().filter_map(|&i| sessions_filter_ui::session_track(&lib, i)).collect();
+                        let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track_name(&lib.tracks)).collect();
                         tracks.sort();
                         tracks.dedup();
                         let best = day.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
@@ -192,7 +192,7 @@ impl App {
         let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
         let ignored = self.sensors.ignored.get_or_insert_with(crate::sensor_check::Ignored::load);
         // Personal best: the driver's best lap at a track, on any MyChron, among two or more sessions there.
-        let who = |s: &tracks::LocalSession| Some(sessions_filter_ui::session_driver(s, profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| s.logger.clone());
+        let who = |s: &tracks::LocalSession| Some(s.driver(profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| s.logger.clone());
         let mut best_at: std::collections::HashMap<(String, String), (u64, usize)> = std::collections::HashMap::new();
         for s in &lib.sessions {
             if let (Some(b), Some(t)) = (s.summary.best_lap_ms, s.track_name(&lib.tracks)) {
@@ -326,9 +326,7 @@ pub(super) fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &st
 }
 
 /// Channels Mychronix works out rather than the logger measuring them.
-pub(crate) fn is_calculated(name: &str) -> bool {
-    name == crate::setup::SPEED_FROM_RPM
-}
+pub(crate) use crate::setup::is_calculated;
 
 /// The yellow note under a chart that uses a calculated channel.
 pub(super) fn calculated_note(ui: &mut Ui) {

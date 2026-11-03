@@ -175,6 +175,19 @@ pub struct LocalSession {
 }
 
 impl LocalSession {
+    /// Who drove it: the driver entered for it, else the driver of the kart
+    /// its MyChron was on when it was recorded; "" when neither. The one rule
+    /// Sessions, Events, the Garage, PB and the assistant all go by.
+    pub fn driver(&self, profiles: &crate::profiles::Profiles) -> String {
+        let kart = self.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
+        self.meta
+            .as_ref()
+            .map(|m| m.driver.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .or_else(|| kart.and_then(|k| profiles.driver_name(k.driver)).map(str::to_string))
+            .unwrap_or_default()
+    }
+
     /// Where it was recorded, as its MyChron placed it (the start/finish of
     /// the track it recorded on); None when it recorded no track.
     pub fn place(&self) -> Option<LatLon> {

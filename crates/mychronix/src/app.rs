@@ -37,8 +37,6 @@ use graphs_ui::*;
 use sessions_ui::*;
 use widgets::*;
 // Used outside the pages too (the assistant server, reports).
-pub(crate) use format::slow_laps;
-pub(crate) use sessions_ui::is_calculated;
 mod splits_ui;
 mod tracks_ui;
 mod device_page;
@@ -47,7 +45,6 @@ mod window_ui;
 mod notices;
 mod look;
 
-pub(crate) use sessions_filter_ui::{session_driver, session_track};
 pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
 
 use compare_ui::gain_color;
@@ -312,19 +309,10 @@ impl App {
             None => session.info.logger_id.and_then(|id| profiles.kart_on(&id.to_string())).cloned(),
         };
         let kart_driver = kart.as_ref().and_then(|k| profiles.driver_name(k.driver)).map(str::to_string);
-        // Without GPS, speed from RPM and the session's gearing and tires
-        // (before units are converted, so it's converted with the rest).
-        if session.channel("GPS Speed").is_none() {
-            let lib = self.lib();
-            if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
-                let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
-                let resolved = crate::setup::resolve(&lib, baselines);
-                let engine = kart.as_ref().map(|k| k.engine.clone()).unwrap_or_default();
-                let clutch = kart.as_ref().and_then(|k| crate::setup::number(&k.clutch_rpm));
-                if let Some(ch) = resolved.get(i).and_then(|r| crate::setup::speed_from_rpm(session, &r.setup, &engine, clutch)) {
-                    session.channels.push(ch);
-                }
-            }
+        // Without GPS, speed from RPM and the session's gearing and tires.
+        if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
+            let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
+            crate::setup::add_speed_from_rpm(session, &lib, baselines, i, kart.as_ref());
         }
         seconds_not_ms(session);
         let blank = |v: &Option<String>| v.as_deref().unwrap_or("").is_empty();

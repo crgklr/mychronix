@@ -66,7 +66,7 @@ use look::Kind;
 /// The sessions a driver drove: named for them at download, else on their kart then
 /// (`session_driver`), so a sibling's sessions on a shared kart aren't theirs.
 fn driver_sessions<'a>(lib: &'a Library, profiles: &Profiles, name: &str) -> Vec<&'a tracks::LocalSession> {
-    lib.sessions.iter().filter(|s| !name.is_empty() && super::sessions_filter_ui::session_driver(s, profiles).eq_ignore_ascii_case(name)).collect()
+    lib.sessions.iter().filter(|s| !name.is_empty() && s.driver(profiles).eq_ignore_ascii_case(name)).collect()
 }
 
 fn session_files(path: &std::path::Path) -> Vec<PathBuf> {

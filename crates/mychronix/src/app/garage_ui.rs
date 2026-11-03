@@ -49,7 +49,7 @@ fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
     // with no home is set up from its own card.
     // (driver id, name, their karts in the Garage, their sessions)
     type Group<'a> = (Option<u32>, String, Vec<&'a Kart>, Vec<usize>);
-    let driver_of: Vec<String> = lib.sessions.iter().map(|s| super::sessions_filter_ui::session_driver(s, profiles)).collect();
+    let driver_of: Vec<String> = lib.sessions.iter().map(|s| s.driver(profiles)).collect();
     let groups: Vec<Group> = profiles
         .drivers
         .iter()

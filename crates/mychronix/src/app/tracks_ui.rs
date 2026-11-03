@@ -611,7 +611,7 @@ impl App {
         // Sessions recorded here, everyone's or one driver's.
         let mut open = None;
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let who: Vec<(usize, String)> = t.sessions.iter().map(|&si| (si, super::sessions_filter_ui::session_driver(&lib.sessions[si], &profiles))).collect();
+        let who: Vec<(usize, String)> = t.sessions.iter().map(|&si| (si, lib.sessions[si].driver(&profiles))).collect();
         let mut drivers: Vec<&str> = who.iter().map(|(_, d)| d.as_str()).filter(|d| !d.is_empty()).collect();
         drivers.sort_unstable();
         drivers.dedup();

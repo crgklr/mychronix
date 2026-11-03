@@ -2,7 +2,6 @@
 //! open session's track, over all race days or one both drove.
 
 use super::*;
-use super::sessions_filter_ui::session_driver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum CompareMode {
@@ -27,7 +26,7 @@ impl App {
     pub(super) fn compare_driver_names(&mut self) -> Vec<String> {
         let lib = self.lib();
         let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let mut names: Vec<String> = lib.sessions.iter().map(|s| session_driver(s, &profiles)).filter(|n| !n.is_empty()).collect();
+        let mut names: Vec<String> = lib.sessions.iter().map(|s| s.driver(&profiles)).filter(|n| !n.is_empty()).collect();
         names.sort();
         names.dedup();
         names
@@ -68,7 +67,7 @@ impl App {
         }
         // Race days at this track where both drove.
         let days_of = |who: &str| -> Vec<aim_xrk::summary::Date> {
-            let mut d: Vec<_> = lib.sessions.iter().filter(|s| s.track == track && session_driver(s, &profiles) == who).filter_map(|s| s.summary.date).collect();
+            let mut d: Vec<_> = lib.sessions.iter().filter(|s| s.track == track && s.driver(&profiles) == who).filter_map(|s| s.summary.date).collect();
             d.sort();
             d.dedup();
             d
@@ -113,7 +112,7 @@ impl App {
                 .filter_map(|who| {
                     lib.sessions
                         .iter()
-                        .filter(|s| track.is_some() && s.track == track && session_driver(s, &profiles) == *who)
+                        .filter(|s| track.is_some() && s.track == track && s.driver(&profiles) == *who)
                         .filter(|s| day.is_none() || s.summary.date == day)
                         .filter(|s| s.summary.best_lap_ms.is_some())
                         .min_by_key(|s| s.summary.best_lap_ms)

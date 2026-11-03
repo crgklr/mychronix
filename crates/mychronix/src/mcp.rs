@@ -210,15 +210,9 @@ fn date_text(d: Option<aim_xrk::summary::Date>) -> Option<String> {
 fn open(lib: &Library, profiles: &crate::profiles::Profiles, i: usize) -> Result<aim_xrk::Session, String> {
     let s = &lib.sessions[i];
     let mut session = crate::jobs::open_session(&s.path).map_err(|e| format!("Couldn't open that session: {e}"))?;
-    if session.channel("GPS Speed").is_none() {
-        let resolved = crate::setup::resolve(lib, &crate::setup::Baselines::load());
-        let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
-        let engine = kart.map(|k| k.engine.clone()).unwrap_or_default();
-        let clutch = kart.and_then(|k| crate::setup::number(&k.clutch_rpm));
-        if let Some(ch) = resolved.get(i).and_then(|r| crate::setup::speed_from_rpm(&session, &r.setup, &engine, clutch)) {
-            session.channels.push(ch);
-        }
-    }
+    // Speed from RPM without GPS, as Analysis adds it.
+    let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
+    crate::setup::add_speed_from_rpm(&mut session, lib, &crate::setup::Baselines::load(), i, kart);
     Ok(session)
 }
 
@@ -226,7 +220,7 @@ fn open(lib: &Library, profiles: &crate::profiles::Profiles, i: usize) -> Result
 fn pick_lap(session: &aim_xrk::Session, number: Option<i64>) -> Result<aim_xrk::Lap, String> {
     match number {
         Some(n) => session.laps.iter().find(|l| l.number as i64 == n).copied().ok_or_else(|| format!("No lap {n}; this session has laps 1 to {}", session.laps.len())),
-        None => session.best_lap(crate::app::MIN_LAP_MS).copied().ok_or_else(|| "This session has no complete timed lap".to_string()),
+        None => session.best_lap(aim_xrk::laps::MIN_LAP_MS).copied().ok_or_else(|| "This session has no complete timed lap".to_string()),
     }
 }
 
@@ -250,8 +244,8 @@ fn list_sessions(lib: &Library, profiles: &crate::profiles::Profiles, args: &Val
     let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(40) as usize;
     let mut rows: Vec<(String, Value)> = Vec::new();
     for (i, s) in lib.sessions.iter().enumerate() {
-        let d = crate::app::session_driver(s, profiles);
-        let t = crate::app::session_track(lib, i).unwrap_or_default();
+        let d = s.driver(profiles);
+        let t = lib.sessions[i].track_name(&lib.tracks).unwrap_or_default();
         let date = date_text(s.summary.date).unwrap_or_default();
         if driver.as_ref().is_some_and(|w| !d.to_lowercase().contains(w))
             || track.as_ref().is_some_and(|w| !t.to_lowercase().contains(w))
@@ -288,8 +282,8 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
     let i = find_session(lib, args.get("session").and_then(Value::as_str).unwrap_or(""))?;
     let s = &lib.sessions[i];
     let session = open(lib, profiles, i)?;
-    let slow = crate::app::slow_laps(&session);
-    let best = session.best_lap(crate::app::MIN_LAP_MS).copied();
+    let slow = aim_xrk::laps::racing(&session).into_iter().map(|r| !r).collect::<Vec<_>>();
+    let best = session.best_lap(aim_xrk::laps::MIN_LAP_MS).copied();
     let peak = |name: &str, lap: &aim_xrk::Lap| {
         let c = crate::report::channel(&session, name)?;
         let (lo, hi) = (c.times_ms.partition_point(|&t| t < lap.start_ms), c.times_ms.partition_point(|&t| t <= lap.end_ms));
@@ -332,9 +326,9 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
         "session": session_id(lib, i),
         "date": date_text(s.summary.date),
         "start": s.summary.start_time.as_deref().map(crate::dates::clock_time),
-        "driver": crate::app::session_driver(s, profiles),
+        "driver": s.driver(profiles),
         "kart": kart_name(s, profiles),
-        "track": crate::app::session_track(lib, i),
+        "track": lib.sessions[i].track_name(&lib.tracks),
         "logger": logger_model(s, profiles).or_else(|| session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string)),
         "gps": session.gps.as_ref().is_some_and(|g| g.len() > 10),
         "speed_calculated_from_rpm": session.channel("GPS Speed").is_none() && session.channel(crate::setup::SPEED_FROM_RPM).is_some(),
@@ -357,8 +351,8 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
 fn corners_of(lib: &Library, profiles: &crate::profiles::Profiles, i: usize, lap: Option<i64>) -> Result<(aim_xrk::Session, CornerModel, usize), String> {
     let session = open(lib, profiles, i)?;
     let gaps = aim_xrk::checks::recording_gaps(&session);
-    let best = session.reference_lap(crate::app::MIN_LAP_MS, &gaps).copied().ok_or("This session has no complete timed lap")?;
-    let counts: Vec<bool> = crate::app::slow_laps(&session).into_iter().zip(&session.laps).map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps)).collect();
+    let best = session.reference_lap(aim_xrk::laps::MIN_LAP_MS, &gaps).copied().ok_or("This session has no complete timed lap")?;
+    let counts: Vec<bool> = aim_xrk::laps::racing(&session).into_iter().map(|r| !r).collect::<Vec<_>>().into_iter().zip(&session.laps).map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps)).collect();
     let model = CornerModel::build(&session, &best, &counts).ok_or("Corners need GPS (this session has none, or no corner to brake for)")?;
     let lap = pick_lap(&session, lap)?;
     let index = session.laps.iter().position(|l| *l == lap).unwrap_or(0);
@@ -480,7 +474,7 @@ fn get_channel(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
         "lap": lap.number,
         "channel": channel.name,
         "units": channel.units,
-        "calculated_from_rpm": crate::app::is_calculated(&channel.name),
+        "calculated_from_rpm": crate::setup::is_calculated(&channel.name),
         "points_are": if profile.is_some() { format!("[distance from the start of the lap ({}), value]", crate::units::distance_unit()) } else { "[seconds into the lap, value]".to_string() },
         "points": points,
     }))
@@ -493,7 +487,7 @@ fn race_days(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) 
     type Day = (String, String, String);
     let mut days: std::collections::BTreeMap<Day, (usize, u32, Option<u64>)> = Default::default();
     for (i, s) in lib.sessions.iter().enumerate() {
-        let (Some(date), d, t) = (date_text(s.summary.date), crate::app::session_driver(s, profiles), crate::app::session_track(lib, i).unwrap_or_default()) else { continue };
+        let (Some(date), d, t) = (date_text(s.summary.date), s.driver(profiles), lib.sessions[i].track_name(&lib.tracks).unwrap_or_default()) else { continue };
         if driver.as_ref().is_some_and(|w| !d.to_lowercase().contains(w)) || track.as_ref().is_some_and(|w| !t.to_lowercase().contains(w)) {
             continue;
         }

@@ -38,7 +38,7 @@ fn source(t: &Track, lib: &Library, profiles: &crate::profiles::Profiles) -> Str
         return "AiM's track list".into();
     }
     let driver = t.from_mychron.as_ref().and_then(|serial| {
-        lib.sessions.iter().filter(|s| &s.logger == serial).max_by_key(|s| s.start()).map(|s| super::sessions_filter_ui::session_driver(s, profiles)).filter(|d| !d.is_empty())
+        lib.sessions.iter().filter(|s| &s.logger == serial).max_by_key(|s| s.start()).map(|s| s.driver(profiles)).filter(|d| !d.is_empty())
     });
     match driver {
         Some(d) => format!("{d}'s MyChron"),

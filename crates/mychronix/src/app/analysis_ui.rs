@@ -570,7 +570,7 @@ impl App {
             if on || resp.hovered() {
                 ui.painter().rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), if on { SURFACE_ACTIVE } else { SURFACE_HOVER });
             }
-            let who = session_driver(s, &profiles);
+            let who = s.driver(&profiles);
             let mut job = egui::text::LayoutJob::default();
             // "Session 12", or the file's name when it has no number.
             let name = s.summary.number.map(|n| format!("Session {n}")).unwrap_or_else(|| s.path.file_stem().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default());

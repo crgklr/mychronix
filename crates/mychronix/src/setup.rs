@@ -248,6 +248,25 @@ pub fn typical_clutch_rpm(engine: &str) -> f64 {
     if four_stroke { 2200.0 } else { 3500.0 }
 }
 
+/// Whether a channel was worked out by Mychronix (speed from RPM), not recorded.
+pub fn is_calculated(name: &str) -> bool {
+    name == SPEED_FROM_RPM
+}
+
+/// Adds speed worked out from RPM to library session `i` when it has no GPS
+/// speed: from its setup (gearing, rear tire) and its kart's engine and
+/// clutch. Before units are converted, so it's converted with the rest.
+pub fn add_speed_from_rpm(session: &mut aim_xrk::Session, lib: &Library, baselines: &Baselines, i: usize, kart: Option<&crate::profiles::Kart>) {
+    if session.channel("GPS Speed").is_some() {
+        return;
+    }
+    let engine = kart.map(|k| k.engine.clone()).unwrap_or_default();
+    let clutch = kart.and_then(|k| number(&k.clutch_rpm));
+    if let Some(ch) = resolve(lib, baselines).get(i).and_then(|r| speed_from_rpm(session, &r.setup, &engine, clutch)) {
+        session.channels.push(ch);
+    }
+}
+
 /// Whether the engine has a gearbox, so one gearing can't turn RPM into speed.
 pub fn is_shifter(engine: &str) -> bool {
     let e = engine.to_lowercase();
