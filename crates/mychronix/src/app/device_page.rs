@@ -339,7 +339,7 @@ impl App {
     /// MyChron (WiFi or data key) that isn't on a kart yet.
     fn unplaced_connected(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let connected: Vec<String> = self
             .device.logger
             .as_ref()
@@ -363,7 +363,6 @@ impl App {
                 (u, model)
             })
             .collect();
-        self.profiles = Some(profiles);
         for (u, model) in cards {
             if self.unplaced_card(ui, &u, &model) {
                 self.snooze(&u);

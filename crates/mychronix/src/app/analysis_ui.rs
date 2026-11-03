@@ -539,7 +539,7 @@ impl App {
         ui.label(RichText::new("ANOTHER SESSION").font(semibold(11.5)).color(DIM).extra_letter_spacing(0.8));
         ui.add_space(8.0);
         let lib = self.lib();
-        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let here = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p));
         let (track, logger, day) = (here.and_then(|s| s.track), here.map(|s| s.logger.clone()), here.and_then(|s| s.summary.date));
         let mut rows: Vec<usize> = (0..lib.sessions.len())
@@ -605,7 +605,6 @@ impl App {
                 self.page = Page::Sessions;
             }
         });
-        self.profiles = Some(profiles);
         open
     }
 }

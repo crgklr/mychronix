@@ -239,7 +239,7 @@ impl App {
             return;
         }
         let lib = self.lib();
-        let profiles = self.profiles.take().unwrap_or_else(Profiles::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let baselines = self.setup_baselines.take().unwrap_or_else(Baselines::load);
         let defs = self.events_page.events.take().unwrap_or_else(crate::events::Events::load);
         let drivers = driver_rows(&lib, &profiles);
@@ -364,7 +364,6 @@ impl App {
             self.pending_open = Some(p);
         }
         self.sensors.digests = Some(digests);
-        self.profiles = Some(profiles);
         self.setup_baselines = Some(baselines);
         self.events_page.events = Some(defs);
         for u in &snoozed {
@@ -727,7 +726,7 @@ impl App {
     /// Analysis with nothing open: pick a session, race days newest first.
     pub(super) fn session_picker(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let mut open = None;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -810,7 +809,6 @@ impl App {
                 k = end;
             }
         });
-        self.profiles = Some(profiles);
         if let Some(p) = open {
             self.load(p);
         }

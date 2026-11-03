@@ -39,7 +39,7 @@ struct DriverStats {
 impl App {
     pub(super) fn events_page(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.take().unwrap_or_else(crate::profiles::Profiles::load);
+        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
         let mut defs = self.events_page.events.take().unwrap_or_else(Events::load);
         if let Some(rx) = &self.events_page.peak_egt_rx {
             while let Ok((path, v)) = rx.try_recv() {
@@ -172,7 +172,6 @@ impl App {
             });
             match action {
                 Some(DetailAction::Open(path, lap)) => {
-                    self.profiles = Some(profiles);
                     self.events_page.events = Some(defs);
                     self.load(path);
                     if let (Some(n), Some(s)) = (lap, &self.session) && let Some(i) = s.laps.iter().position(|l| l.number as u32 == n) {
@@ -195,7 +194,6 @@ impl App {
             });
         }
         self.event_dialog(ui.ctx(), &lib, &profiles, &mut defs);
-        self.profiles = Some(profiles);
         self.events_page.events = Some(defs);
     }
 
