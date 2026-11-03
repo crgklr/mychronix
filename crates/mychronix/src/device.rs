@@ -40,7 +40,8 @@ pub enum Event {
     /// The logger's sessions, plus how many custom tracks were copied from it into the library.
     Listed { files: Vec<DirEntry>, summaries: Vec<SessionSummary>, tracks: MyChronTracks },
     Progress { index: usize, count: usize, file: String, done: u64, total: u64 },
-    Downloaded { saved: usize },
+    /// Where each session was saved (a reused name is saved beside the old one).
+    Downloaded { saved: Vec<PathBuf> },
     Error(String),
 }
 
@@ -209,7 +210,7 @@ impl Worker {
                         log::info!("downloading {} sessions to {}{}", files.len(), dir.display(), if replace { ", replacing copies already here" } else { "" });
                         match download(&files, &dir, replace, &send) {
                             Ok(saved) => {
-                                log::info!("downloaded {saved} sessions");
+                                log::info!("downloaded {} sessions", saved.len());
                                 send(Event::Downloaded { saved })
                             }
                             Err(e) => {
@@ -372,11 +373,11 @@ fn copy_track_list(logger: &mut Link) {
 /// canceled download never looks complete. With `replace`, a recording
 /// already saved here goes over its copy, keeping that copy's track link
 /// when the track is the same (its setup and weather stay beside it).
-fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: &impl Fn(Event)) -> Result<usize, String> {
+fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: &impl Fn(Event)) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let mut logger = connect()?;
     let count = files.len();
-    let mut saved = 0;
+    let mut saved = Vec::new();
     for (index, (entry, meta)) in files.iter().enumerate() {
         // The name comes from the logger: never let it point outside this folder.
         if !aim_link::is_safe_file_name(&entry.name) {
@@ -410,7 +411,7 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: 
             // Same file, new details: its laps are worked out again.
             crate::digest::Digests::forget(std::slice::from_ref(&target));
         }
-        saved += 1;
+        saved.push(target);
     }
     Ok(saved)
 }

@@ -89,6 +89,9 @@ struct DownloadDialog {
     /// Sessions picked that are already on this computer: replace those
     /// copies (true), or keep them and save these beside them.
     replace: bool,
+    /// The session a changed setup is saved on, with its start, worked out
+    /// once when the window first draws (see `download_setup_target`).
+    setup_target: Option<Option<(PathBuf, String)>>,
 }
 
 /// Tabs on the Analysis page.

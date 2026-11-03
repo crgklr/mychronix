@@ -31,6 +31,8 @@ pub(super) struct DeviceState {
     pub(super) busy: Option<String>,
     pub(super) progress: Option<(usize, usize, String, u64, u64)>,
     pub(super) message: Option<(bool, String)>,
+    /// A setup typed in the download window whose download failed: the next one starts from it.
+    pub(super) unsaved_setup: Option<crate::setup::Setup>,
     pub(super) last_scan: f64,
     /// A scan is with the worker: don't queue another (one takes several seconds).
     pub(super) scanning: bool,
@@ -151,6 +153,7 @@ impl App {
                     // Replaced sessions' saved lap summaries were dropped: don't save old ones back.
                     self.sensors.digests = None;
                     self.sensors.digests_asked.clear();
+                    self.device.unsaved_setup = None;
                     if let Some((path, setup)) = self.device.pending_setup.take() {
                         // A session's own sheet is only changed from its Setup.
                         if crate::setup::Setup::path_for(&path).exists() {
@@ -161,11 +164,10 @@ impl App {
                     }
                     self.device.busy = None;
                     self.device.progress = None;
-                    self.device.message = Some((true, format!("Downloaded {saved} session{}. They're on the Sessions page.", if saved == 1 { "" } else { "s" })));
-                    // Check the new sessions' sensors in the background.
-                    if let (Some(dir), Some(id)) = (self.logger_dir(), self.device.logger.as_ref().and_then(|b| b.logger_id)) {
-                        let paths = self.device.selected.iter().map(|n| dir.join(n)).filter(|p| p.exists()).collect();
-                        self.check_downloaded(paths, &id.to_string(), &ctx);
+                    self.device.message = Some((true, format!("Downloaded {}. They're on the Sessions page.", plural(saved.len(), "session"))));
+                    // Check the new sessions' sensors in the background: the files as saved.
+                    if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
+                        self.check_downloaded(saved, &id.to_string(), &ctx);
                     }
                     self.reload_library(); // reload sessions and tracks
                     self.device.selected.clear();
@@ -182,6 +184,10 @@ impl App {
                     }
                 }
                 Event::Error(msg) => {
+                    // A setup typed for a download that failed is offered again next time.
+                    if let Some((_, setup)) = self.device.pending_setup.take() {
+                        self.device.unsaved_setup = Some(setup);
+                    }
                     self.device.busy = None;
                     self.device.progress = None;
                     self.device.message = Some((false, msg));
@@ -297,6 +303,7 @@ impl App {
                 setup_before: self.latest_setup(&id),
                 setup_open: false,
                 replace: true,
+                setup_target: None,
             });
         }
         // MYCHRONIX_ADD_MYCHRON=wifi|key opens the "Add a MyChron" window at its steps (for testing).
@@ -565,10 +572,11 @@ impl App {
                                 ..Default::default()
                             },
                             detected,
-                            setup: setup_now.clone(),
+                            setup: self.device.unsaved_setup.clone().unwrap_or_else(|| setup_now.clone()),
                             setup_before: setup_now.clone(),
                             setup_open: false,
                             replace: true,
+                            setup_target: None,
                         });
                     }
                     if chip(ui, "None", false).clicked() {
@@ -664,8 +672,9 @@ impl App {
             .map(|e| aim_xrk::summary::session_number(&e.name).map(|k| format!("Session {k}")).unwrap_or(e.name.clone()))
             .collect();
         // Where a changed setup is saved, shown with it so a wrong session is caught before downloading.
-        let setup_from = match self.download_setup_target(&lib) {
-            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", start_words(&start)),
+        let target = dlg.setup_target.get_or_insert_with(|| self.download_setup_target(&lib)).clone();
+        let setup_from = match &target {
+            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", start_words(start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
         };
         let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
@@ -684,6 +693,9 @@ impl App {
                         look::note(ui, "Same as last time.", DIM);
                     } else {
                         look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                    }
+                    // Changes and notes are both saved on one session: say which.
+                    if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
                         look::note(ui, &setup_from, DIM);
                     }
                     return;
@@ -754,6 +766,9 @@ impl App {
                             look::note(ui, "Same as last time.", DIM);
                         } else {
                             look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                        }
+                        // Changes and notes are both saved on one session: say which.
+                        if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
                             look::note(ui, &setup_from, DIM);
                         }
                     });
@@ -809,9 +824,6 @@ impl App {
                 .collect();
             // A setup sheet goes on the earliest new session only, and only when there's something new.
             let changed = !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
-            let lib = self.library.take().unwrap_or_else(Library::load);
-            let target = self.download_setup_target(&lib);
-            self.library = Some(lib);
             self.device.pending_setup = match (changed, target) {
                 (true, Some((path, _))) => Some((path, dlg.setup.clone())),
                 _ => None,
