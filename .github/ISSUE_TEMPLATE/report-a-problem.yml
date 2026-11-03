@@ -25,7 +25,7 @@ body:
     id: version
     attributes:
       label: Mychronix version
-      description: The log's first line says it ("Mychronix 0.1.18 starting").
+      description: The log's first line says it ("Mychronix 0.1.19 starting").
   - type: textarea
     id: log
     attributes:
