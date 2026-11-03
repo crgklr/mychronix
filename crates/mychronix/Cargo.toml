@@ -22,6 +22,7 @@ egui_extras.workspace = true
 jiff = "0.2"
 flate2 = "1"
 walkers.workspace = true
+thiserror.workspace = true
 aim-track.workspace = true
 serde.workspace = true
 serde_json.workspace = true

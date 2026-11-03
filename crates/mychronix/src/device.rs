@@ -279,8 +279,8 @@ impl Worker {
                                 })
                             }
                             Err(e) => {
-                                log::error!("listing failed: {e}");
-                                send(Event::Error(e))
+                                log::error!("listing failed: {}", e.detailed());
+                                send(Event::Error(e.to_string()))
                             }
                         }
                     }
@@ -305,8 +305,8 @@ impl Worker {
                                 send(Event::Downloaded { saved })
                             }
                             Err(e) => {
-                                log::error!("download failed: {e}");
-                                send(Event::Error(e))
+                                log::error!("download failed: {}", e.detailed());
+                                send(Event::Error(e.to_string()))
                             }
                         }
                     }
@@ -344,18 +344,64 @@ fn usb_logger() -> Option<Beacon> {
     }
 }
 
-fn connect() -> Result<Link, String> {
-    Link::connect().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))
+/// What went wrong reading from a MyChron or saving what it sent. Each says
+/// in plain words what happened and what to try; the technical cause stays
+/// attached (`source`) for the log.
+#[derive(Debug, thiserror::Error)]
+pub enum DeviceError {
+    #[error(
+        "Couldn't reach the MyChron. Check it's on, and that this computer is on its WiFi or plugged in by USB."
+    )]
+    Connect(#[source] aim_link::Error),
+    #[error("The MyChron stopped answering while listing its sessions. Try again.")]
+    List(#[source] aim_link::Error),
+    #[error(
+        "Downloading {file} stopped partway (the connection dropped). Try again; what was saved so far is kept."
+    )]
+    Download {
+        file: String,
+        #[source]
+        source: aim_link::Error,
+    },
+    #[error("Couldn't save to {}. Check there's space on this computer.", path.display())]
+    Save {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("The MyChron listed a file with an unusable name ({0:?}), so it wasn't downloaded.")]
+    UnsafeName(String),
+}
+
+impl DeviceError {
+    /// The message, and the technical cause after it, for the log.
+    pub fn detailed(&self) -> String {
+        match std::error::Error::source(self) {
+            Some(cause) => format!("{self} ({cause})"),
+            None => self.to_string(),
+        }
+    }
+}
+
+fn save_err(path: &Path) -> impl FnOnce(std::io::Error) -> DeviceError + '_ {
+    move |source| DeviceError::Save {
+        path: path.to_path_buf(),
+        source,
+    }
+}
+
+fn connect() -> Result<Link, DeviceError> {
+    Link::connect().map_err(DeviceError::Connect)
 }
 
 fn list(
     serial: Option<u32>,
     dir: Option<&Path>,
-) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), String> {
+) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), DeviceError> {
     let mut logger = connect()?;
     let listing = logger
         .list(aim_link::SESSIONS_DIR)
-        .map_err(|e| format!("Couldn't list sessions: {e}"))?;
+        .map_err(DeviceError::List)?;
     let summaries = listing
         .iter()
         .find(|e| e.name.eq_ignore_ascii_case("summary1.csv"))
@@ -545,18 +591,15 @@ fn download(
     dir: &Path,
     replace: bool,
     send: &impl Fn(Event),
-) -> Result<Vec<PathBuf>, String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
+) -> Result<Vec<PathBuf>, DeviceError> {
+    std::fs::create_dir_all(dir).map_err(save_err(dir))?;
     let mut logger = connect()?;
     let count = files.len();
     let mut saved = Vec::new();
     for (index, (entry, meta)) in files.iter().enumerate() {
         // The name comes from the logger: never let it point outside this folder.
         if !aim_link::is_safe_file_name(&entry.name) {
-            return Err(format!(
-                "The MyChron listed a file with an unusable name ({:?}), so it wasn't downloaded.",
-                entry.name
-            ));
+            return Err(DeviceError::UnsafeName(entry.name.clone()));
         }
         let path = format!("{}/{}", aim_link::SESSIONS_DIR, entry.name);
         let data = logger
@@ -569,11 +612,13 @@ fn download(
                     total,
                 })
             })
-            .map_err(|e| format!("Downloading {} failed: {e}", entry.name))?;
+            .map_err(|source| DeviceError::Download {
+                file: entry.name.clone(),
+                source,
+            })?;
         let existing = replace.then(|| downloaded(dir, entry)).flatten();
         let target = existing.clone().unwrap_or_else(|| target_for(dir, entry));
-        crate::storage::write_atomic(&target, &data)
-            .map_err(|e| format!("Couldn't save {}: {e}", target.display()))?;
+        crate::storage::write_atomic(&target, &data).map_err(save_err(&target))?;
         log::info!("saved {} ({} bytes)", target.display(), data.len());
         // The small summary beside it, used by the Sessions and Tracks pages
         // (without it, Mychronix works the summary out from the session).
@@ -597,7 +642,7 @@ fn download(
         if let Some(old) = existing.as_ref().and_then(|p| SessionMeta::load(p)) {
             meta = meta.over(old);
         }
-        meta.save(&target).map_err(|e| e.to_string())?;
+        meta.save(&target).map_err(save_err(&target))?;
         if existing.is_some() {
             // Same file, new details: its laps are worked out again.
             crate::digest::Digests::forget(std::slice::from_ref(&target));
@@ -1100,5 +1145,22 @@ mod tests {
             Some(dir.join("a_0002.xrz"))
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn device_errors_say_what_to_try_and_keep_the_cause() {
+        let e = DeviceError::Download {
+            file: "a_0012.xrz".into(),
+            source: aim_link::Error::Checksum {
+                expected: 1,
+                actual: 2,
+            },
+        };
+        assert!(
+            e.to_string()
+                .starts_with("Downloading a_0012.xrz stopped partway")
+        );
+        assert!(!e.to_string().contains("checksum"));
+        assert!(e.detailed().contains("checksum mismatch"));
     }
 }
