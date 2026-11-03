@@ -394,6 +394,57 @@ fn resolve_with(own: &[Option<Setup>], loggers: &[String], stamps: &[String], or
     out
 }
 
+/// The setup a session would have without its own sheet: what came before it.
+pub fn before(lib: &Library, baselines: &Baselines, i: usize) -> Setup {
+    let mut own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
+    own[i] = None;
+    resolve_with(&own, &keys(lib), &stamps(lib), &chronological(lib), baselines)[i].setup.carried()
+}
+
+/// What each session's setup carries over within: its kart (whichever
+/// MyChron it had then), or for a session on no kart, its MyChron.
+fn keys(lib: &Library) -> Vec<String> {
+    lib.sessions.iter().map(|s| s.kart.map(kart_key).unwrap_or_else(|| s.logger.clone())).collect()
+}
+
+/// The setup in force on `kart` (the kart the MyChron downloading now is
+/// on), else for `logger`, after its newest session: for the next download.
+pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u32>) -> Setup {
+    let resolved = resolve(lib, baselines);
+    let key = kart.map(kart_key).unwrap_or_else(|| logger.to_string());
+    let keys = keys(lib);
+    let newest = chronological(lib).into_iter().rev().find(|&i| keys[i] == key);
+    // A baseline changed since the newest session is what runs now.
+    let now = baselines.past.get(&key).map_or(0, Vec::len);
+    match newest {
+        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => Some(resolved[i].setup.carried()),
+        _ => baselines.loggers.get(&key).map(|b| b.carried()),
+    }
+    .unwrap_or_default()
+}
+
+/// Median engine RPM per km/h above 30 km/h (clutch locked), from RPM and GPS speed.
+pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
+    let rpm = session.channels.iter().find(|c| c.name == "RPM")?;
+    let gps = session.gps.as_ref()?;
+    let mut r: Vec<f64> = gps
+        .times_ms
+        .iter()
+        .zip(&gps.speed_kmh)
+        .filter(|(_, v)| **v > 30.0)
+        .filter_map(|(&t, &v)| {
+            let i = rpm.times_ms.partition_point(|&x| x < t).min(rpm.values.len().checked_sub(1)?);
+            Some(rpm.values[i] / v)
+        })
+        .filter(|x| x.is_finite() && *x > 0.0)
+        .collect();
+    if r.len() < 100 {
+        return None;
+    }
+    r.sort_by(|a, b| a.total_cmp(b));
+    Some(r[r.len() / 2])
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -476,55 +527,4 @@ mod tests {
         assert_eq!(tire_diameter_in("MG Yellow"), None);
         assert_eq!(number("~250 lb"), Some(250.0));
     }
-}
-
-/// The setup a session would have without its own sheet: what came before it.
-pub fn before(lib: &Library, baselines: &Baselines, i: usize) -> Setup {
-    let mut own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
-    own[i] = None;
-    resolve_with(&own, &keys(lib), &stamps(lib), &chronological(lib), baselines)[i].setup.carried()
-}
-
-/// What each session's setup carries over within: its kart (whichever
-/// MyChron it had then), or for a session on no kart, its MyChron.
-fn keys(lib: &Library) -> Vec<String> {
-    lib.sessions.iter().map(|s| s.kart.map(kart_key).unwrap_or_else(|| s.logger.clone())).collect()
-}
-
-/// The setup in force on `kart` (the kart the MyChron downloading now is
-/// on), else for `logger`, after its newest session: for the next download.
-pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u32>) -> Setup {
-    let resolved = resolve(lib, baselines);
-    let key = kart.map(kart_key).unwrap_or_else(|| logger.to_string());
-    let keys = keys(lib);
-    let newest = chronological(lib).into_iter().rev().find(|&i| keys[i] == key);
-    // A baseline changed since the newest session is what runs now.
-    let now = baselines.past.get(&key).map_or(0, Vec::len);
-    match newest {
-        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => Some(resolved[i].setup.carried()),
-        _ => baselines.loggers.get(&key).map(|b| b.carried()),
-    }
-    .unwrap_or_default()
-}
-
-/// Median engine RPM per km/h above 30 km/h (clutch locked), from RPM and GPS speed.
-pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
-    let rpm = session.channels.iter().find(|c| c.name == "RPM")?;
-    let gps = session.gps.as_ref()?;
-    let mut r: Vec<f64> = gps
-        .times_ms
-        .iter()
-        .zip(&gps.speed_kmh)
-        .filter(|(_, v)| **v > 30.0)
-        .filter_map(|(&t, &v)| {
-            let i = rpm.times_ms.partition_point(|&x| x < t).min(rpm.values.len().checked_sub(1)?);
-            Some(rpm.values[i] / v)
-        })
-        .filter(|x| x.is_finite() && *x > 0.0)
-        .collect();
-    if r.len() < 100 {
-        return None;
-    }
-    r.sort_by(|a, b| a.total_cmp(b));
-    Some(r[r.len() / 2])
 }

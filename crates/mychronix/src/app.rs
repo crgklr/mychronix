@@ -719,7 +719,7 @@ mod tests {
         h[0x78..0x7C].copy_from_slice(&4242u32.to_le_bytes());
         h[0x7C..0x7E].copy_from_slice(&106u16.to_le_bytes());
         h[0x9A..0xA1].copy_from_slice(&[0x00, 0x30, 0x10, 0x19, 0x05, 0x09, 0x26]);
-        let mut lap = vec![0xFFu8; 64];
+        let mut lap = [0xFFu8; 64];
         lap[4..8].copy_from_slice(&100u32.to_le_bytes());
         let words: Vec<u16> = (0..22).map(|k| 5000 + k).collect();
         let data: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();

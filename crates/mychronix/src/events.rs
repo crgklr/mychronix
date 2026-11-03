@@ -260,6 +260,46 @@ pub fn iso(d: Date) -> String {
     format!("{:04}-{:02}-{:02}", d.year, d.month, d.day)
 }
 
+/// Peak exhaust temperature of each session, read from the session files in
+/// the background (the logger's summary doesn't record it) and cached in
+/// `peak-egt.json` in the cache folder.
+pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Option<f64>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    crate::jobs::spawn("peak-egt", move || {
+        let cache_path = crate::paths::cache_dir().map(|d| d.join("peak-egt.json"));
+        let mut cache: std::collections::BTreeMap<String, Option<f64>> = crate::storage::load_or_default(cache_path.clone());
+        let mut changed = false;
+        for path in paths {
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let key = format!("{}|{size}", path.display());
+            let value = match cache.get(&key) {
+                Some(v) => *v,
+                None => {
+                    let v = crate::jobs::open_session(&path).ok().and_then(|s| {
+                        s.channels
+                            .iter()
+                            .find(|c| c.name.eq_ignore_ascii_case("Exhaust Temp") || c.name.eq_ignore_ascii_case("EGT"))
+                            .and_then(|c| c.values.iter().copied().filter(|v| v.is_finite()).reduce(f64::max))
+                    });
+                    cache.insert(key, v);
+                    changed = true;
+                    v
+                }
+            };
+            if tx.send((path, value)).is_err() {
+                break;
+            }
+            ctx.request_repaint();
+        }
+        if let (true, Some(p)) = (changed, cache_path)
+            && let Err(e) = crate::storage::save(&p, &cache)
+        {
+            log::warn!("couldn't save {}: {e}", p.display());
+        }
+    });
+    rx
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,44 +350,4 @@ mod tests {
         let champ = EventDef { championship: "2026 Club".into(), ..def };
         assert!(!champ.claims(d(2026, 10, 17), "OVRP Full", "Other"));
     }
-}
-
-/// Peak exhaust temperature of each session, read from the session files in
-/// the background (the logger's summary doesn't record it) and cached in
-/// `peak-egt.json` in the cache folder.
-pub fn spawn_peak_egt(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Option<f64>)> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    crate::jobs::spawn("peak-egt", move || {
-        let cache_path = crate::paths::cache_dir().map(|d| d.join("peak-egt.json"));
-        let mut cache: std::collections::BTreeMap<String, Option<f64>> = crate::storage::load_or_default(cache_path.clone());
-        let mut changed = false;
-        for path in paths {
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            let key = format!("{}|{size}", path.display());
-            let value = match cache.get(&key) {
-                Some(v) => *v,
-                None => {
-                    let v = crate::jobs::open_session(&path).ok().and_then(|s| {
-                        s.channels
-                            .iter()
-                            .find(|c| c.name.eq_ignore_ascii_case("Exhaust Temp") || c.name.eq_ignore_ascii_case("EGT"))
-                            .and_then(|c| c.values.iter().copied().filter(|v| v.is_finite()).reduce(f64::max))
-                    });
-                    cache.insert(key, v);
-                    changed = true;
-                    v
-                }
-            };
-            if tx.send((path, value)).is_err() {
-                break;
-            }
-            ctx.request_repaint();
-        }
-        if let (true, Some(p)) = (changed, cache_path)
-            && let Err(e) = crate::storage::save(&p, &cache)
-        {
-            log::warn!("couldn't save {}: {e}", p.display());
-        }
-    });
-    rx
 }

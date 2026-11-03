@@ -9,7 +9,7 @@ fn main() {
     println!("time_offset {} ms · gps bytes {} ({} records) · gnfi bytes {} ({} x32)", raw.time_offset, raw.gps_data.len(), raw.gps_data.len() / 56, raw.gnfi_data.len(), raw.gnfi_data.len() / 32);
     let le32 = |b: &[u8], o: usize| i32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
     // GPS: logger tc, iTOW (ms), fTOW (ns).
-    let recs: Vec<(i64, f64)> = raw.gps_data.chunks_exact(56).map(|r| (le32(r, 0) as i64, le32(r, 4) as u32 as f64 + le32(r, 8) as f64 / 1e6)).collect();
+    let recs: Vec<(i64, f64)> = raw.gps_data.as_chunks::<56>().0.iter().map(|r| (le32(r, 0) as i64, le32(r, 4) as u32 as f64 + le32(r, 8) as f64 / 1e6)).collect();
     for r in recs.iter().take(5) {
         println!("  gps  logger {:>10}  itow {:>14.3}  diff {:>14.3}", r.0, r.1, r.0 as f64 - r.1);
     }
@@ -41,7 +41,7 @@ fn main() {
         std::fs::write(out, w).unwrap();
     }
     // GNFI: 32-byte records; print the first few as 32-bit words.
-    for r in raw.gnfi_data.chunks_exact(32).take(6) {
+    for r in raw.gnfi_data.as_chunks::<32>().0.iter().take(6) {
         let w: Vec<String> = (0..8).map(|k| format!("{:>11}", le32(r, k * 4))).collect();
         println!("  gnfi {}", w.join(" "));
     }

@@ -225,7 +225,7 @@ mod tests {
         for f in ["a.xrk", "a.drk", "a.rrk", "b.drk", "b.imd", "c.mc4", "sub/d.XRZ", "sub/.hidden/e.xrk", "notes.txt"] {
             std::fs::write(d.join(f), b"x").unwrap();
         }
-        let names: Vec<String> = collect(&[d.clone()], &d.join("library")).iter().map(|p| p.strip_prefix(&d).unwrap().display().to_string()).collect();
+        let names: Vec<String> = collect(std::slice::from_ref(&d), &d.join("library")).iter().map(|p| p.strip_prefix(&d).unwrap().display().to_string()).collect();
         assert_eq!(names, ["a.xrk", "b.drk", "c.mc4", "sub/d.XRZ"]);
         let _ = std::fs::remove_dir_all(&d);
     }
