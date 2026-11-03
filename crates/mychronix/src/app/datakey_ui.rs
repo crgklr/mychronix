@@ -38,6 +38,25 @@ fn saved_starts(dir: &std::path::Path) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The MyChron most of the key's runs came from, which the panel names
+/// (a key can carry runs from several; each is saved under its own).
+fn main_serial(runs: &[RunInfo]) -> String {
+    let mut count: Vec<(u32, usize)> = Vec::new();
+    for r in runs {
+        match count.iter_mut().find(|(s, _)| *s == r.serial) {
+            Some((_, n)) => *n += 1,
+            None => count.push((r.serial, 1)),
+        }
+    }
+    // The first listed wins a tie.
+    count.iter().fold(None::<(u32, usize)>, |best, &(s, n)| match best {
+        Some((_, m)) if m >= n => best,
+        _ => Some((s, n)),
+    })
+    .map(|(s, _)| s.to_string())
+    .unwrap_or_else(|| "mychron4".into())
+}
+
 fn sessions_dir(serial: &str) -> PathBuf {
     crate::paths::sessions_dir().unwrap_or_default().join(serial)
 }
@@ -111,9 +130,17 @@ impl App {
             let ev = (|| -> Result<KeyEvent, aim_link::datakey::KeyError> {
                 let mut key = DataKey::open()?;
                 let runs = key.runs()?;
-                let serial = runs.first().map(|r| r.serial.to_string()).unwrap_or_else(|| "mychron4".into());
-                let have = saved_starts(&sessions_dir(&serial));
-                let new: Vec<RunInfo> = runs.iter().filter(|r| r.start().is_some_and(|s| !have.contains(&s))).cloned().collect();
+                let serial = main_serial(&runs);
+                // Each run is compared with what's saved for its own MyChron: one key can carry several.
+                let mut have: std::collections::HashMap<u32, Vec<(String, String)>> = std::collections::HashMap::new();
+                let new: Vec<RunInfo> = runs
+                    .iter()
+                    .filter(|r| {
+                        let saved = have.entry(r.serial).or_insert_with(|| saved_starts(&sessions_dir(&r.serial.to_string())));
+                        r.start().is_some_and(|s| !saved.contains(&s))
+                    })
+                    .cloned()
+                    .collect();
                 Ok(KeyEvent::Listed { serial, total: runs.len(), new })
             })()
             .unwrap_or_else(|e| KeyEvent::Failed(e.to_string()));
@@ -134,12 +161,13 @@ impl App {
         self.key.progress = Some((0, new.len()));
         let ctx = ctx.clone();
         crate::jobs::spawn("data-key-download", move || {
-            let dir = sessions_dir(&serial);
             let result = (|| -> Result<Vec<PathBuf>, String> {
-                std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
                 let mut key = DataKey::open().map_err(|e| e.to_string())?;
                 let mut saved = Vec::new();
                 for (k, r) in new.iter().enumerate() {
+                    // Under the MyChron that recorded it.
+                    let dir = sessions_dir(&r.serial.to_string());
+                    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
                     let run = key.download(r, |_, _| {}).map_err(|e| e.to_string())?;
                     let path = dir.join(r.file_name());
                     crate::storage::write_atomic(&path, &run.to_file()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
@@ -208,5 +236,21 @@ impl App {
         if download {
             self.key_download(&ctx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(serial: u32) -> RunInfo {
+        RunInfo { index: 0, number: 0, serial, model: 106, laps_addr: 0, data_addr: 0, data_len: 0, best_lap_cs: None, header: Vec::new() }
+    }
+
+    #[test]
+    fn the_key_is_named_for_the_mychron_most_runs_came_from() {
+        assert_eq!(main_serial(&[run(7), run(9), run(9)]), "9");
+        assert_eq!(main_serial(&[run(7), run(9)]), "7");
+        assert_eq!(main_serial(&[]), "mychron4");
     }
 }

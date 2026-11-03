@@ -126,20 +126,24 @@ fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
             }
         }
         DataKeyCommand::Pull { to } => {
-            let serial = runs.first().map(|r| r.serial.to_string()).unwrap_or_else(|| "mychron4".into());
-            let dir = to.unwrap_or_else(|| sessions_root().join(&serial));
-            std::fs::create_dir_all(&dir)?;
-            // Runs already here (from RaceStudio 2's .drk files or an earlier pull), by start time.
-            let have: Vec<(Option<String>, Option<String>)> = std::fs::read_dir(&dir)?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "drk" || x == "mc4"))
-                .filter_map(|p| Session::open(&p).ok())
-                .map(|s| (s.info.date, s.info.time))
-                .collect();
+            // Each run under the MyChron that recorded it (one key can carry several), unless --to names one folder.
+            let mut have: std::collections::HashMap<PathBuf, Vec<RunStart>> = std::collections::HashMap::new();
             let mut saved = 0;
             for r in &runs {
                 let Some((date, time)) = r.start() else { continue };
-                if have.iter().any(|(d, t)| d.as_deref() == Some(&date) && t.as_deref() == Some(&time)) {
+                let dir = to.clone().unwrap_or_else(|| sessions_root().join(r.serial.to_string()));
+                if !have.contains_key(&dir) {
+                    std::fs::create_dir_all(&dir)?;
+                    // Runs already here (from RaceStudio 2's .drk files or an earlier pull), by start time.
+                    let here = std::fs::read_dir(&dir)?
+                        .filter_map(|e| e.ok().map(|e| e.path()))
+                        .filter(|p| p.extension().is_some_and(|x| x == "drk" || x == "mc4"))
+                        .filter_map(|p| Session::open(&p).ok())
+                        .map(|s| (s.info.date, s.info.time))
+                        .collect();
+                    have.insert(dir.clone(), here);
+                }
+                if have[&dir].iter().any(|(d, t)| d.as_deref() == Some(&date) && t.as_deref() == Some(&time)) {
                     continue;
                 }
                 let run = key.download(r, |_, _| {})?;
@@ -153,6 +157,9 @@ fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// A saved run's start: (date, time) as the session reads it.
+type RunStart = (Option<String>, Option<String>);
 
 fn info(file: &PathBuf, list_channels: bool) -> anyhow::Result<()> {
     let session = Session::open(file).with_context(|| format!("reading {}", file.display()))?;
