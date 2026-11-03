@@ -480,6 +480,8 @@ impl Profiles {
 
     pub fn save(&self) -> std::io::Result<()> {
         let Some(path) = Self::path() else { return Ok(()) };
+        // The day's first save keeps yesterday's drivers and karts aside.
+        crate::storage::back_up_daily(&path, 7);
         crate::storage::save(&path, self)
     }
 

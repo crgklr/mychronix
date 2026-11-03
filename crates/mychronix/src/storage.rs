@@ -4,7 +4,10 @@
 //! crash mid-save never leaves half a file. A file that can't be read back
 //! (damaged, or from a newer version) is moved aside as
 //! `<name>.damaged-<time>.json` rather than quietly treated as empty, where
-//! the next save would overwrite it; the app shows a message about it.
+//! the next save would overwrite it; the app shows a message about it. A
+//! file that exists but can't be read at all (permissions, a disk error) is
+//! never saved over. Saves reach the disk before they replace the old file,
+//! so a power cut at the track can't leave an empty one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -12,6 +15,9 @@ use std::sync::Mutex;
 use serde::{Serialize, de::DeserializeOwned};
 
 static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Files that exist but couldn't be read: saving over them would lose what's in them.
+static UNREADABLE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Messages about damaged files, for the app to show once.
 pub fn take_warnings() -> Vec<String> {
@@ -32,7 +38,10 @@ pub fn load<T: DeserializeOwned>(path: &Path) -> Option<T> {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
-            warn(format!("Couldn't read {}: {e}", path.display()));
+            warn(format!("Couldn't read {}: {e}. Mychronix won't save over it until it can be read.", path.display()));
+            if let Ok(mut u) = UNREADABLE.lock() {
+                u.push(path.to_path_buf());
+            }
             return None;
         }
     };
@@ -59,8 +68,10 @@ pub fn load_or_default<T: DeserializeOwned + Default>(path: Option<PathBuf>) -> 
 /// Writes `value` as JSON: to a temporary file, then renamed into place.
 pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     log::debug!("saving {}", path.display());
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+    if UNREADABLE.lock().is_ok_and(|u| u.iter().any(|p| p == path)) && path.exists() {
+        let e = std::io::Error::other(format!("{} couldn't be read, so it wasn't saved over", file_label(path)));
+        log::warn!("{e}");
+        return Err(e);
     }
     let text = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
     write_atomic(path, text.as_bytes())
@@ -69,14 +80,62 @@ pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
 /// Writes `data` to `<path>.part`, then renames it into place, so a crash or
 /// an interrupted write never leaves a partial file under the real name.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+    let result = (|| {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".part");
+        let tmp = PathBuf::from(tmp);
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(data)?;
+            // On the disk before it replaces the old file.
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)?;
+        // And the rename itself (best effort: not every system can sync a folder).
+        if let Some(dir) = path.parent()
+            && let Ok(d) = std::fs::File::open(dir)
+        {
+            let _ = d.sync_all();
+        }
+        Ok(())
+    })();
+    if let Err(e) = &result {
+        log::warn!("couldn't save {}: {e}", path.display());
     }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".part");
-    let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(&tmp, path)
+    result
+}
+
+/// Keeps a copy of `path` from each day it was saved, in `backups/` beside
+/// it, the newest `keep` days only: for the files that hold what you typed
+/// in (drivers, karts), so a bad save can be undone.
+pub fn back_up_daily(path: &Path, keep: usize) {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().map(|s| s.to_string_lossy().into_owned())) else { return };
+    if !path.exists() {
+        return;
+    }
+    let backups = dir.join("backups");
+    let today = crate::events::today();
+    let name = format!("{stem}-{:04}-{:02}-{:02}.json", today.year, today.month, today.day);
+    if backups.join(&name).exists() {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&backups).and_then(|_| std::fs::copy(path, backups.join(&name))) {
+        log::warn!("couldn't back up {}: {e}", path.display());
+        return;
+    }
+    // Dates sort as text: drop all but the newest.
+    let prefix = format!("{stem}-");
+    let mut old: Vec<PathBuf> = std::fs::read_dir(&backups)
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix))).collect())
+        .unwrap_or_default();
+    old.sort();
+    for p in old.iter().rev().skip(keep) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 fn damaged_name(path: &Path) -> PathBuf {
@@ -116,7 +175,48 @@ mod tests {
         assert!(!path.exists());
         let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains("damaged")).collect();
         assert_eq!(kept.len(), 1);
-        assert_eq!(take_warnings().len(), 1);
+        // Warnings are shared by tests running alongside: count this file's.
+        assert_eq!(take_warnings().iter().filter(|w| w.contains("things")).count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cant_be_read_is_never_saved_over() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mychronix-unreadable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("profiles.json");
+        save(&path, &Thing { n: 3 }).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&path).is_ok() {
+            // Running as root: permissions don't stop reads, nothing to test.
+            return std::fs::remove_dir_all(&dir).unwrap();
+        }
+        assert_eq!(load::<Thing>(&path), None);
+        assert!(save(&path, &Thing { n: 9 }).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(load::<Thing>(&path), Some(Thing { n: 3 }));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn daily_backups_keep_the_newest() {
+        let dir = std::env::temp_dir().join(format!("mychronix-backups-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("profiles.json");
+        back_up_daily(&path, 2); // nothing to back up yet
+        assert!(!dir.join("backups").exists());
+        save(&path, &Thing { n: 1 }).unwrap();
+        std::fs::create_dir_all(dir.join("backups")).unwrap();
+        for day in ["2026-01-01", "2026-01-02", "2026-01-03"] {
+            std::fs::write(dir.join("backups").join(format!("profiles-{day}.json")), "{}").unwrap();
+        }
+        back_up_daily(&path, 2);
+        let mut kept: Vec<String> = std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        kept.sort();
+        let t = crate::events::today();
+        assert_eq!(kept, vec!["profiles-2026-01-03.json".to_string(), format!("profiles-{:04}-{:02}-{:02}.json", t.year, t.month, t.day)]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

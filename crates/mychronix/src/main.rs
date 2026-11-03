@@ -124,6 +124,17 @@ fn main() -> eframe::Result {
     }
     let path = std::env::args_os().nth(1).map(PathBuf::from);
     let hooks = hooks::get();
+    // One window at a time: two would save over each other's drivers and
+    // karts and both manage the WiFi. Held until the window closes.
+    let _one_window = match one_window() {
+        Some(lock) => lock,
+        None if hooks.screenshot.is_some() => None,
+        None => {
+            log::warn!("Mychronix is already open; not starting a second window");
+            eprintln!("Mychronix is already open.");
+            return Ok(());
+        }
+    };
     let screenshot = hooks.screenshot.clone();
     let demo = hooks.demo;
     eframe::run_native(
@@ -196,4 +207,23 @@ fn main() -> eframe::Result {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// Locks `~/Mychronix/.lock` for this window: Some(the lock, or None when
+/// there's no data folder to lock), None when another window holds it.
+fn one_window() -> Option<Option<std::fs::File>> {
+    let Some(path) = paths::data(".lock") else { return Some(None) };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else { return Some(None) };
+    match file.try_lock() {
+        Ok(()) => Some(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => None,
+        // A filesystem without locks: carry on as before.
+        Err(std::fs::TryLockError::Error(e)) => {
+            log::warn!("couldn't lock {}: {e}", path.display());
+            Some(None)
+        }
+    }
 }
