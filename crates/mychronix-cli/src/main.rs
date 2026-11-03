@@ -45,7 +45,7 @@ enum Command {
     },
     /// List downloaded sessions from their .xri summaries.
     Sessions {
-        /// Folder of sessions (default: ~/Mychronix/sessions/<each logger>).
+        /// Folder of sessions (default: `~/Mychronix/sessions/<each logger>`).
         dir: Option<PathBuf>,
     },
     /// Talk to a MyChron: a MyChron 6 plugged in by USB, else over WiFi (join its AiM-MYC… network first).
@@ -62,7 +62,7 @@ enum DataKeyCommand {
     List,
     /// Download every run that isn't already saved (as .drk or .mc4).
     Pull {
-        /// Folder to save into (default: ~/Mychronix/sessions/<logger serial>).
+        /// Folder to save into (default: `~/Mychronix/sessions/<logger serial>`).
         #[arg(long)]
         to: Option<PathBuf>,
     },
@@ -85,7 +85,7 @@ enum DeviceCommand {
     },
     /// Download every session (and its .xri summary) that isn't already saved.
     Pull {
-        /// Folder to save into (default: ~/Mychronix/sessions/<logger id>).
+        /// Folder to save into (default: `~/Mychronix/sessions/<logger id>`).
         #[arg(long)]
         to: Option<PathBuf>,
     },

@@ -53,7 +53,7 @@ pub struct Crossing {
 }
 
 /// Each pass across the line through `start_finish`, at right angles to the
-/// kart's direction of travel there: within [`RADIUS_M`] of the point, at
+/// kart's direction of travel there: within `RADIUS_M` of the point, at
 /// speed, timed where the path crosses the line (interpolated between fixes).
 pub fn crossings(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
     let (lat0, lon0) = start_finish;

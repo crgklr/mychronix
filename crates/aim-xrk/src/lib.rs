@@ -482,7 +482,7 @@ const GPS_ACC_HALF_MS: i64 = 200;
 const GPS_ACC_MIN_KMH: f64 = 1.0;
 
 /// Longitudinal acceleration in g from GPS speed: the slope over
-/// [`GPS_ACC_HALF_MS`] either side, as RaceStudio's "GPS LonAcc" (negative
+/// `GPS_ACC_HALF_MS` either side, as RaceStudio's "GPS LonAcc" (negative
 /// when braking).
 pub fn longitudinal_g(times_ms: &[i64], speed_kmh: &[f64]) -> Vec<f64> {
     const HALF_MS: i64 = GPS_ACC_HALF_MS;
@@ -504,7 +504,7 @@ pub fn longitudinal_g(times_ms: &[i64], speed_kmh: &[f64]) -> Vec<f64> {
 }
 
 /// Lateral acceleration in g from GPS: speed × heading turn rate, the turn
-/// rate averaged over [`GPS_ACC_HALF_MS`] either side as for
+/// rate averaged over `GPS_ACC_HALF_MS` either side as for
 /// [`longitudinal_g`]. RaceStudio's "GPS LatAcc"; positive in right-hand turns.
 pub fn lateral_g(times_ms: &[i64], speed_kmh: &[f64], yaw_rate_dps: &[f64]) -> Vec<f64> {
     const HALF_MS: i64 = GPS_ACC_HALF_MS;

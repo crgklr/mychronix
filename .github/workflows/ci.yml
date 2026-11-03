@@ -1,4 +1,4 @@
-# Formatting, tests and clippy on every push and pull request, so a change that breaks
+# Formatting, tests, clippy and docs on every push and pull request, so a change that breaks
 # something is caught before a release tag (release.yml tests again then).
 name: CI
 
@@ -32,3 +32,8 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Docs
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings

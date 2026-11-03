@@ -8,17 +8,17 @@ use std::sync::LazyLock;
 
 #[derive(Debug, Default)]
 pub struct Hooks {
-    /// MYCHRONIX_SCREENSHOT=<file>: save a screenshot there and quit…
+    /// `MYCHRONIX_SCREENSHOT=<file>`: save a screenshot there and quit…
     pub screenshot: Option<PathBuf>,
-    /// …MYCHRONIX_SCREENSHOT_FRAME=<n> frames in (default 20).
+    /// …`MYCHRONIX_SCREENSHOT_FRAME=<n>` frames in (default 20).
     pub screenshot_frame: u32,
     /// MYCHRONIX_DEMO: made-up names in place of the real ones.
     pub demo: bool,
     /// MYCHRONIX_WINDOWED: open at the normal window size, not maximized.
     pub windowed: bool,
-    /// MYCHRONIX_PAGE=<page>: start on that page.
+    /// `MYCHRONIX_PAGE=<page>`: start on that page.
     pub page: Option<String>,
-    /// With a session to open: MYCHRONIX_VIEW=<view>, MYCHRONIX_DISTANCE (the
+    /// With a session to open: `MYCHRONIX_VIEW=<view>`, MYCHRONIX_DISTANCE (the
     /// distance axis), MYCHRONIX_SPLITS, MYCHRONIX_REPORT, MYCHRONIX_COMPARE.
     pub view: Option<String>,
     pub distance: bool,
@@ -27,35 +27,35 @@ pub struct Hooks {
     pub compare: bool,
     /// MYCHRONIX_CLICKS="frame:x,y;…": input on those frames (see `App::raw_input_hook`).
     pub clicks: Option<String>,
-    /// MYCHRONIX_DROP="frame:path" drops a file on the window; MYCHRONIX_DRAG=<frame>
+    /// MYCHRONIX_DROP="frame:path" drops a file on the window; `MYCHRONIX_DRAG=<frame>`
     /// holds a dragged file over it from then on.
     pub drop: Option<(u32, PathBuf)>,
     pub drag: Option<u32>,
     /// MYCHRONIX_DEBUG_SCALE: print what egui thinks the display is.
     pub debug_scale: bool,
-    /// MYCHRONIX_SENSOR_CHECK=<logger id>: the sensor check, as if just downloaded.
+    /// `MYCHRONIX_SENSOR_CHECK=<logger id>`: the sensor check, as if just downloaded.
     pub sensor_check: Option<String>,
     /// MYCHRONIX_AIM_SYNC: fetch AiM's tracks even while taking a screenshot.
     pub aim_sync: bool,
-    /// MYCHRONIX_IMPORT=<folder>: import it at start.
+    /// `MYCHRONIX_IMPORT=<folder>`: import it at start.
     pub import: Option<PathBuf>,
-    /// MYCHRONIX_CLICK_SESSION=<n>: open that session on the Sessions page.
+    /// `MYCHRONIX_CLICK_SESSION=<n>`: open that session on the Sessions page.
     pub click_session: Option<u32>,
-    /// MYCHRONIX_CHANNEL_SEARCH=<text>: open the channel picker with it typed.
+    /// `MYCHRONIX_CHANNEL_SEARCH=<text>`: open the channel picker with it typed.
     pub channel_search: Option<String>,
-    /// Tracks page: MYCHRONIX_TRACK=<name> selected, MYCHRONIX_MAP=splits|elevation,
-    /// MYCHRONIX_SATELLITE, MYCHRONIX_DETAIL_SCROLL=<px>, MYCHRONIX_TRACKS_COLLAPSED.
+    /// Tracks page: `MYCHRONIX_TRACK=<name>` selected, MYCHRONIX_MAP=splits|elevation,
+    /// MYCHRONIX_SATELLITE, `MYCHRONIX_DETAIL_SCROLL=<px>`, MYCHRONIX_TRACKS_COLLAPSED.
     pub track: Option<String>,
     pub map: Option<String>,
     pub satellite: bool,
     pub detail_scroll: Option<f32>,
     pub tracks_collapsed: bool,
-    /// Events page: MYCHRONIX_EVENT=<title>, MYCHRONIX_CHAMPIONSHIP=<name>,
+    /// Events page: `MYCHRONIX_EVENT=<title>`, `MYCHRONIX_CHAMPIONSHIP=<name>`,
     /// MYCHRONIX_EVENT_DIALOG (the plan-an-event window).
     pub event: Option<String>,
     pub championship: Option<String>,
     pub event_dialog: bool,
-    /// Device page: MYCHRONIX_FAKE_DEVICE=<logger id> shows that logger's
+    /// Device page: `MYCHRONIX_FAKE_DEVICE=<logger id>` shows that logger's
     /// downloaded sessions as if it were connected; MYCHRONIX_FAKE_DIALOG
     /// (or =multi) opens the download window; MYCHRONIX_FAKE_USB_BLOCKED;
     /// MYCHRONIX_ADD_MYCHRON=wifi|key opens "Add a MyChron" at that step.
@@ -63,7 +63,7 @@ pub struct Hooks {
     pub fake_dialog: Option<String>,
     pub fake_usb_blocked: bool,
     pub add_mychron: Option<String>,
-    /// MYCHRONIX_UPDATE_TEST=<file>: a release, as GitHub would describe it.
+    /// `MYCHRONIX_UPDATE_TEST=<file>`: a release, as GitHub would describe it.
     pub update_test: Option<PathBuf>,
 }
 
