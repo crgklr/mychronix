@@ -297,6 +297,12 @@ use look::Kind;
 
 /// A session's files: the recording and everything kept beside it under
 /// its name (`a_0001.xrz`, `a_0001.xri`, `a_0001.meta.json`, …).
+/// The sessions a driver drove: named for them at download, else on their kart then
+/// (`session_driver`), so a sibling's sessions on a shared kart aren't theirs.
+fn driver_sessions<'a>(lib: &'a Library, profiles: &Profiles, name: &str) -> Vec<&'a tracks::LocalSession> {
+    lib.sessions.iter().filter(|s| !name.is_empty() && super::sessions_filter_ui::session_driver(s, profiles).eq_ignore_ascii_case(name)).collect()
+}
+
 fn session_files(path: &std::path::Path) -> Vec<PathBuf> {
     let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().map(|s| s.to_string_lossy().into_owned())) else { return Vec::new() };
     let prefix = format!("{stem}.");
@@ -615,7 +621,7 @@ impl App {
             Confirm::DeleteDriver { id, sure, backed_up } => {
                 let name = profiles.driver_name(Some(*id)).unwrap_or("this driver").to_string();
                 let karts: Vec<u32> = profiles.karts.iter().filter(|k| k.driver == Some(*id)).map(|k| k.id).collect();
-                let theirs: Vec<(String, PathBuf)> = lib.sessions.iter().filter(|s| s.kart.is_some_and(|k| karts.contains(&k))).map(|s| (s.logger.clone(), s.path.clone())).collect();
+                let theirs: Vec<(String, PathBuf)> = driver_sessions(&lib, profiles, &name).into_iter().map(|s| (s.logger.clone(), s.path.clone())).collect();
                 let mut mychrons: Vec<&String> = theirs.iter().map(|(l, _)| l).collect();
                 mychrons.sort();
                 mychrons.dedup();
@@ -746,7 +752,7 @@ impl App {
             Confirm::DeleteDriver { id, .. } => {
                 let name = profiles.driver_name(Some(id)).unwrap_or_default().to_string();
                 let karts: Vec<u32> = profiles.karts.iter().filter(|k| k.driver == Some(id)).map(|k| k.id).collect();
-                let theirs: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| s.kart.is_some_and(|k| karts.contains(&k))).collect();
+                let theirs = driver_sessions(lib, profiles, &name);
                 let files: Vec<PathBuf> = theirs.iter().flat_map(|s| session_files(&s.path)).collect();
                 let open_is_theirs = self.path.as_ref().is_some_and(|p| theirs.iter().any(|s| &s.path == p));
                 profiles.delete_driver(id);

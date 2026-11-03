@@ -520,14 +520,10 @@ enum DetailAction {
     Edit(EventDef),
 }
 
-/// The session's driver: entered at download, else the logger's saved name.
+/// The session's driver, as everywhere else (`session_driver`: entered at
+/// download, else the driver of the kart its MyChron was on then).
 fn driver_for(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
-    s.meta
-        .as_ref()
-        .map(|m| m.driver.clone())
-        .filter(|d| !d.trim().is_empty())
-        .or_else(|| profiles.get(&s.logger).map(|p| p.driver.clone()).filter(|d| !d.trim().is_empty()))
-        .unwrap_or_else(|| format!("Logger {}", s.logger))
+    Some(super::sessions_filter_ui::session_driver(s, profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("MyChron {}", s.logger))
 }
 
 fn driver_stats(
