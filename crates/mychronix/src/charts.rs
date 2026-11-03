@@ -91,9 +91,73 @@ pub fn scatter(
         .collect()
 }
 
+/// The scatter to start on: (across, up, color by). The grip circle when the
+/// session has the IMU's forward g and the GPS's lateral g, colored by speed
+/// when there is one; otherwise RPM against speed. `has` says whether the
+/// session recorded a channel.
+pub fn default_scatter(
+    has: impl Fn(&str) -> bool,
+) -> (&'static str, &'static str, Option<&'static str>) {
+    if has("Forward g") && has("GPS LatAcc") {
+        (
+            "GPS LatAcc",
+            "Forward g",
+            has("GPS Speed").then_some("GPS Speed"),
+        )
+    } else {
+        ("GPS Speed", "RPM", None)
+    }
+}
+
+/// The grip the kart reached on a grip circle (g): how far out its points
+/// go, at the 98th percentile so a lone bump doesn't set it. None with 50
+/// points or fewer beyond 0.2 g.
+pub fn grip_reached(points: &[[f64; 3]]) -> Option<f64> {
+    let mut r: Vec<f64> = points
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
+        .filter(|r| *r > 0.2)
+        .collect();
+    r.sort_by(f64::total_cmp);
+    (r.len() > 50).then(|| r[r.len() * 98 / 100])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scatter_starts_on_the_grip_circle_when_it_can() {
+        let has = |names: &'static [&'static str]| move |n: &str| names.contains(&n);
+        assert_eq!(
+            default_scatter(has(&["Forward g", "GPS LatAcc", "GPS LonAcc", "GPS Speed"])),
+            ("GPS LatAcc", "Forward g", Some("GPS Speed"))
+        );
+        // The GPS's own forward g isn't enough to start on it; nor is the IMU without GPS.
+        assert_eq!(
+            default_scatter(has(&["GPS LatAcc", "GPS LonAcc"])),
+            ("GPS Speed", "RPM", None)
+        );
+        assert_eq!(
+            default_scatter(has(&["Forward g", "RPM"])),
+            ("GPS Speed", "RPM", None)
+        );
+    }
+
+    #[test]
+    fn the_grip_reached_ignores_a_lone_bump() {
+        // 100 points at 1.2 g round the circle, near-still points, and one 3 g bump.
+        let mut pts: Vec<[f64; 3]> = (0..100)
+            .map(|k| {
+                let a = k as f64 / 100.0 * std::f64::consts::TAU;
+                [1.2 * a.cos(), 1.2 * a.sin(), 0.0]
+            })
+            .collect();
+        pts.extend([[0.05, 0.0, 0.0]; 30]);
+        pts.push([3.0, 0.0, 0.0]);
+        assert!((grip_reached(&pts).unwrap() - 1.2).abs() < 1e-9);
+        assert_eq!(grip_reached(&pts[..40]), None);
+    }
 
     fn channel(times: &[i64], values: &[f64]) -> Channel {
         Channel {

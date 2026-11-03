@@ -255,18 +255,8 @@ impl App {
             .find(|n| has(n))
             .filter(|_| has("GPS LatAcc"));
         if st.x.is_empty() || st.y.is_empty() {
-            match grip_y.filter(|&y| y == "Forward g") {
-                Some(y) => {
-                    st.x = "GPS LatAcc".into();
-                    st.y = y.into();
-                    st.color = has("GPS Speed").then(|| "GPS Speed".into());
-                }
-                None => {
-                    st.x = "GPS Speed".into();
-                    st.y = "RPM".into();
-                    st.color = None;
-                }
-            }
+            let (x, y, color) = charts::default_scatter(has);
+            (st.x, st.y, st.color) = (x.into(), y.into(), color.map(Into::into));
         }
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
@@ -322,19 +312,8 @@ impl App {
         let color = st.color.as_deref().and_then(find);
         let pts = charts::scatter(x, y, color, &windows, 6000);
         let gg = st.x == "GPS LatAcc" && (st.y == "Forward g" || st.y == "GPS LonAcc");
-        // The grip the kart actually reached: how far out the points go (98th
-        // percentile, so a lone bump doesn't set it).
-        let limit = gg
-            .then(|| {
-                let mut r: Vec<f64> = pts
-                    .iter()
-                    .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
-                    .filter(|r| *r > 0.2)
-                    .collect();
-                r.sort_by(f64::total_cmp);
-                (r.len() > 50).then(|| r[r.len() * 98 / 100])
-            })
-            .flatten();
+        // The grip the kart actually reached.
+        let limit = gg.then(|| charts::grip_reached(&pts)).flatten();
         // The gearing on RPM vs speed: rpm = (rpm per unit of speed) × speed.
         let gearing = (st.x == "GPS Speed" && st.y == "RPM")
             .then(|| {
