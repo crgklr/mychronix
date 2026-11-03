@@ -8,9 +8,9 @@
 use super::*;
 use crate::corner_model::{CornerModel, Slowing, Tone, STEP_M};
 
-const BRAKE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
-const TRAIL: Color32 = Color32::from_rgb(0xf0, 0xa0, 0x4b);
-const LIFT: Color32 = Color32::from_rgb(0x59, 0x61, 0x6d);
+const BRAKE: Color32 = theme::LOSE;
+const TRAIL: Color32 = theme::TRAIL;
+const LIFT: Color32 = theme::LIFT;
 /// The lap being looked at, against the best (green).
 const THIS_LAP: Color32 = Color32::from_rgb(0x5b, 0x9c, 0xf6);
 const ROW_H: f32 = 62.0;
@@ -290,7 +290,7 @@ impl App {
                     // Slower only in the thousandths: no loss worth coloring.
                     ("+0.00".to_string(), SURFACE_ACTIVE, SECONDARY)
                 } else {
-                    (format!("+{:.2}", model.loss(trace, k)), BRAKE.gamma_multiply(0.18), Color32::from_rgb(0xf3, 0x9a, 0x9a))
+                    (format!("+{:.2}", model.loss(trace, k)), BRAKE.gamma_multiply(0.18), theme::LOSE_TEXT)
                 };
                 let galley = p.layout_no_wrap(pill, semibold(11.5), ink);
                 let pr = Rect::from_min_size(pos2(tx, rect.top() + pad + 26.0), galley.size() + vec2(12.0, 2.0));
@@ -473,7 +473,7 @@ fn up_close(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize) {
                         let d = x - y;
                         if bi != trace && d.abs() >= 0.5 * 10f64.powi(-(dec as i32)) {
                             let good = if higher { d > 0.0 } else { d < 0.0 };
-                            ui.label(RichText::new(format!("{d:+.dec$}")).size(13.0).color(if good { theme::GOOD } else { Color32::from_rgb(0xf3, 0x9a, 0x9a) }));
+                            ui.label(RichText::new(format!("{d:+.dec$}")).size(13.0).color(if good { theme::GOOD } else { theme::LOSE_TEXT }));
                         } else {
                             ui.label("");
                         }
@@ -565,7 +565,7 @@ fn gap_chart(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, widt
         let color = if g[0] + g[1] > 0.0 { BRAKE } else { theme::GOOD };
         let quad = vec![w[0], w[1], pos2(w[1].x, base), pos2(w[0].x, base)];
         p.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.22), Stroke::NONE));
-        p.line_segment([w[0], w[1]], Stroke::new(2.0, if g[1] > 0.0 { Color32::from_rgb(0xf3, 0x9a, 0x9a) } else { theme::GOOD }));
+        p.line_segment([w[0], w[1]], Stroke::new(2.0, if g[1] > 0.0 { theme::LOSE_TEXT } else { theme::GOOD }));
     }
     if let (Some(end), Some(g)) = (pts.last(), gaps.last()) {
         // Beside the end of the line, kept inside the chart.

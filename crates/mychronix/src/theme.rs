@@ -23,10 +23,18 @@ pub const SECONDARY: Color32 = Color32::from_rgb(0xa9, 0xb1, 0xbc);
 pub const DIM: Color32 = Color32::from_rgb(0x6e, 0x77, 0x84);
 /// Status "good" (best lap). Reserved: never a channel color; always paired with a label.
 pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xc7, 0x59);
-/// Favorite stars. Not a channel color.
 /// Deleting things: buttons and warnings.
 pub const DANGER: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
+/// Favorite stars, and what changed or needs a look. Not a channel color.
 pub const FAVORITE: Color32 = Color32::from_rgb(0xf5, 0xb7, 0x2e);
+/// Time lost, and braking (Compare, Splits, Corners, Map).
+pub const LOSE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
+/// Text and lines for time lost, readable on the dark cards.
+pub const LOSE_TEXT: Color32 = Color32::from_rgb(0xf3, 0x9a, 0x9a);
+/// Trail braking: braking while turning in (Corners, Map).
+pub const TRAIL: Color32 = Color32::from_rgb(0xf0, 0xa0, 0x4b);
+/// Slowing off the brakes: a lift or a slide (Corners, Map).
+pub const LIFT: Color32 = Color32::from_rgb(0x59, 0x61, 0x6d);
 /// The logo's cyan: marks what's open (the session indicator in the rail).
 pub const ACCENT: Color32 = Color32::from_rgb(0x19, 0xd3, 0xf2);
 /// Text on a `TEXT`-filled control (selected chip, primary button).

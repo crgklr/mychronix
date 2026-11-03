@@ -68,7 +68,7 @@ fn compute(path: &std::path::Path, session: &Session, count: usize) -> Option<Co
 
 /// Green (fast) through amber to red (slow).
 fn rank_color(t: f32) -> Color32 {
-    const RED: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
+    const RED: Color32 = theme::LOSE;
     let t = t.clamp(0.0, 1.0);
     if t < 0.5 { mix(theme::GOOD, theme::FAVORITE, t * 2.0) } else { mix(theme::FAVORITE, RED, (t - 0.5) * 2.0) }
 }

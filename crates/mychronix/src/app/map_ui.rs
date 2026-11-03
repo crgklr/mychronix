@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::corner_model::{CornerModel, Slowing, STEP_M};
 
-const BRAKE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
-const TRAIL: Color32 = Color32::from_rgb(0xf0, 0xa0, 0x4b);
-const LIFT: Color32 = Color32::from_rgb(0x59, 0x61, 0x6d);
+const BRAKE: Color32 = theme::LOSE;
+const TRAIL: Color32 = theme::TRAIL;
+const LIFT: Color32 = theme::LIFT;
 /// The drawn track (no imagery): its asphalt, edges and the ground around it.
 const TRACK: Color32 = Color32::from_rgb(0x22, 0x27, 0x2d);
 const TRACK_EDGE: Color32 = Color32::from_rgb(0x3a, 0x41, 0x4b);
@@ -643,7 +643,7 @@ fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize,
             } else {
                 let worse = if higher { x < y } else { x > y };
                 let close = (x - y).abs() < 0.5 * 10f64.powi(-(dec as i32));
-                ui.label(RichText::new(format!("{y:.dec$}")).size(13.5).color(if close || !worse { DIM } else { Color32::from_rgb(0xf3, 0x9a, 0x9a) }));
+                ui.label(RichText::new(format!("{y:.dec$}")).size(13.5).color(if close || !worse { DIM } else { theme::LOSE_TEXT }));
             }
             ui.end_row();
         }

@@ -374,7 +374,7 @@ impl App {
 pub(super) fn gain_color(t: f32) -> Color32 {
     const GAIN: Color32 = theme::GOOD;
     const EVEN: Color32 = Color32::from_rgb(0x58, 0x5e, 0x66);
-    const LOSE: Color32 = Color32::from_rgb(0xe6, 0x67, 0x67);
+    const LOSE: Color32 = theme::LOSE;
     let t = t.clamp(-1.0, 1.0);
     if t < 0.0 { mix(EVEN, GAIN, -t) } else { mix(EVEN, LOSE, t) }
 }
