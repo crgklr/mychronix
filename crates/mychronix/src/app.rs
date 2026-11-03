@@ -172,6 +172,8 @@ pub struct App {
     /// The "Add a MyChron" window, while open.
     add_mychron: Option<device_ui::AddMyChron>,
     track_pick: Option<track_pick_ui::TrackPick>,
+    /// Changing who drove a session: (the session, the name picked, typing a new driver).
+    driver_pick: Option<(PathBuf, String, bool)>,
     /// Reloading the library in the background (see `library_load`).
     library_load: library_load::LibraryLoad,
     /// Track offers put off this run (by the name you typed), asked again next time.
@@ -695,6 +697,7 @@ impl eframe::App for App {
         self.key_poll(&ui.ctx().clone());
         self.sensor_dialog(&ui.ctx().clone());
         self.track_pick_dialog(&ui.ctx().clone());
+        self.driver_pick_dialog(&ui.ctx().clone());
         self.track_offer_dialog(&ui.ctx().clone());
         // After the pages and dialogs: a change they made starts reloading now.
         self.library_poll(&ui.ctx().clone());

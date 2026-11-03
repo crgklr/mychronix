@@ -381,7 +381,8 @@ impl App {
                 self.open_track_pick(p);
             }
         });
-        // Session · when · driver · kart, the driver in bold.
+        // Session · when · driver · kart, the driver in bold (click to change who drove).
+        let mut change_driver = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let mut first = true;
@@ -394,9 +395,20 @@ impl App {
                     ui.label(RichText::new("  ·  ").size(15.0).color(SECONDARY));
                 }
                 first = false;
-                ui.label(RichText::new(part).font(if strong { medium(15.0) } else { regular(15.0) }).color(if strong { TEXT } else { SECONDARY }));
+                if strong {
+                    let r = ui.add(egui::Label::new(RichText::new(part).font(medium(15.0)).color(TEXT)).sense(Sense::click()));
+                    if r.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    change_driver |= r.on_hover_text("Change who drove this session").clicked();
+                } else {
+                    ui.label(RichText::new(part).font(regular(15.0)).color(SECONDARY));
+                }
             }
         });
+        if change_driver && let Some(p) = self.path.clone() {
+            self.driver_pick = Some((p, i.driver.clone().unwrap_or_default(), false));
+        }
         // Laps timed from GPS, and why (see `jobs::relap`).
         let why = match session.info.laps_from_gps {
             Some(aim_xrk::relap::Retimed::Untimed) => Some("Laps timed from GPS at the track's start/finish line: the MyChron didn't time them (it recorded one long lap, or laps run together)."),
@@ -866,4 +878,58 @@ pub(super) fn driver_inputs(session: &Session) -> Vec<usize> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+impl App {
+    /// "Who drove this session?": a driver from the Garage (or a new one),
+    /// saved with the session as if entered at download.
+    pub(super) fn driver_pick_dialog(&mut self, ctx: &egui::Context) {
+        let Some((path, mut name, mut adding)) = self.driver_pick.take() else { return };
+        let drivers: Vec<String> = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).drivers.iter().map(|d| d.name.clone()).collect();
+        let (mut save, mut cancel) = (false, false);
+        let closed = garage_manage_ui::look::dialog(ctx, "driver_pick", 600.0, |ui| {
+            use garage_manage_ui::look;
+            look::header(ui, Icon::User, SECONDARY, None, "Who drove this session?", "Its laps count for them: their bests, race days and seat time.");
+            look::body(ui, |ui| {
+                if adding || drivers.is_empty() {
+                    suggest_field(ui, "pick_driver_new", &mut name, "New driver's name", &[], 420.0);
+                    if !name.trim().is_empty() && !drivers.iter().any(|d| d.eq_ignore_ascii_case(name.trim())) {
+                        look::note(ui, &format!("{} is added to the Garage.", name.trim()), DIM);
+                    }
+                } else if pick_field(ui, "pick_driver", &mut name, &drivers, "Pick a driver", Some("Add a driver…"), 420.0) {
+                    adding = true;
+                    name.clear();
+                }
+            });
+            look::footer_row(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    save = look::big_button(ui, "Save", Some(Icon::Check), look::Kind::Primary, !name.trim().is_empty());
+                    cancel = look::big_button(ui, "Cancel", None, look::Kind::Quiet, true);
+                });
+            });
+        });
+        if save {
+            let name = name.trim().to_string();
+            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+            if !profiles.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(&name)) {
+                profiles.driver_named(&name);
+                if let Err(e) = profiles.save() {
+                    self.error = Some(format!("Couldn't save the driver: {e}"));
+                }
+            }
+            let mut meta = crate::device::SessionMeta::load(&path).unwrap_or_default();
+            meta.driver = name;
+            match meta.save(&path) {
+                Ok(()) => {
+                    log::info!("driver changed for {}", path.display());
+                    self.reload_library();
+                    // Reopened, so the panel and everything else show the new driver.
+                    self.load(path);
+                }
+                Err(e) => self.error = Some(format!("Couldn't save the driver: {e}")),
+            }
+        } else if !closed && !cancel {
+            self.driver_pick = Some((path, name, adding));
+        }
+    }
 }
