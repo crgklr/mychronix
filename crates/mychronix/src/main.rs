@@ -15,6 +15,7 @@ mod aim_tracks;
 mod app;
 mod braking;
 mod bumps;
+mod channels;
 mod charts;
 mod compare;
 mod corner_model;

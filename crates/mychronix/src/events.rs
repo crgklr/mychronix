@@ -263,19 +263,15 @@ pub fn spawn_peak_egt(
                 Some(v) => *v,
                 None => {
                     let v = crate::jobs::open_session(&path).ok().and_then(|s| {
-                        s.channels
-                            .iter()
-                            .find(|c| {
-                                c.name.eq_ignore_ascii_case("Exhaust Temp")
-                                    || c.name.eq_ignore_ascii_case("EGT")
-                            })
-                            .and_then(|c| {
+                        crate::channels::find(&s, crate::channels::Role::ExhaustTemp).and_then(
+                            |c| {
                                 c.values
                                     .iter()
                                     .copied()
                                     .filter(|v| v.is_finite())
                                     .reduce(f64::max)
-                            })
+                            },
+                        )
                     });
                     cache.insert(key, v);
                     changed = true;

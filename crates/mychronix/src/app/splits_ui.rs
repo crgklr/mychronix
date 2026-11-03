@@ -560,7 +560,7 @@ fn split_detail(
     }
     ui.add_space(10.0);
     // Speed through the split against distance into it, per lap.
-    let speed = session.channels.iter().find(|ch| ch.name == "GPS Speed");
+    let speed = crate::channels::find(session, crate::channels::Role::Speed);
     // Each lap: its row, its time (ms), its line, and its length (m).
     type LapLine = (usize, i64, Vec<[f64; 2]>, f64);
     let mut per_lap: Vec<LapLine> = Vec::new();

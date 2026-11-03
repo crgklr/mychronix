@@ -251,10 +251,8 @@ impl App {
         } else {
             model.best_of[corner]
         };
-        let rpm = session
-            .channels
-            .iter()
-            .find(|c| c.name == "RPM" && !is_dead(c));
+        let rpm =
+            crate::channels::find(session, crate::channels::Role::Rpm).filter(|c| !is_dead(c));
         let lap = session.laps[model.traces[trace].lap];
 
         let colors = line_colors(

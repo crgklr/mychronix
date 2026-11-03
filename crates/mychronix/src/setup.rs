@@ -359,10 +359,8 @@ pub fn speed_from_rpm(
     }
     let clutch_in = clutch_rpm.unwrap_or_else(|| typical_clutch_rpm(engine));
     let per_kmh = setup.expected_rpm_per_kmh()?;
-    let rpm = session
-        .channels
-        .iter()
-        .find(|c| (c.name == "RPM" || c.name == "Engine") && c.values.len() > 10)?;
+    let rpm = crate::channels::find(session, crate::channels::Role::Rpm)
+        .filter(|c| c.values.len() > 10)?;
     let values = rpm
         .values
         .iter()
@@ -591,7 +589,7 @@ pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u
 
 /// Median engine RPM per km/h above 30 km/h (clutch locked), from RPM and GPS speed.
 pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
-    let rpm = session.channels.iter().find(|c| c.name == "RPM")?;
+    let rpm = crate::channels::find(session, crate::channels::Role::Rpm)?;
     let gps = session.gps.as_ref()?;
     let mut r: Vec<f64> = gps
         .times_ms

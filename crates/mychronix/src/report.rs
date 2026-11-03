@@ -193,30 +193,15 @@ impl Preset {
     }
 }
 
-/// Channels that measure the same thing under different names on different
-/// loggers: a MyChron 4 (through RaceStudio 2) records "Engine" and
-/// "Battery" where a MyChron 6 records "RPM" and "Internal Batt"; without
-/// GPS, speed is worked out from RPM.
-const SAME_CHANNEL: [&[&str]; 3] = [
-    &["RPM", "Engine"],
-    &["GPS Speed", crate::setup::SPEED_FROM_RPM],
-    &["Internal Batt", "Battery"],
-];
-
-/// `session`'s channel `name`, or the same thing under another name.
+/// `session`'s channel `name`, or what plays its role under another name
+/// (see `channels::Role`: a MyChron 4's Battery for Internal Batt, speed from
+/// RPM for GPS Speed without GPS).
 pub fn channel<'a>(session: &'a Session, name: &str) -> Option<&'a Channel> {
-    let real = |c: &&Channel| c.values.len() > 1;
     session
         .channels
         .iter()
-        .filter(real)
-        .find(|c| c.name == name)
-        .or_else(|| {
-            let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
-            group
-                .iter()
-                .find_map(|n| session.channels.iter().filter(real).find(|c| c.name == *n))
-        })
+        .find(|c| c.name == name && c.values.len() > 1)
+        .or_else(|| crate::channels::find(session, crate::channels::Role::of(name)?))
 }
 
 /// Lateral g for cornering and coasting: from GPS as RaceStudio does, else
