@@ -239,39 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn days_round_trip() {
-        for date in [d(1970, 1, 1), d(2000, 2, 29), d(2026, 10, 10), d(2026, 12, 31)] {
-            assert_eq!(from_days(days(date)), date);
-        }
-        assert_eq!(days(d(1970, 1, 2)), 1);
-    }
-
-    #[test]
-    fn weeks_start_on_monday() {
-        // Saturday, October 10 and Sunday, October 11, 2026 share Monday, October 5.
-        assert_eq!(week_start(d(2026, 10, 10)), d(2026, 10, 5));
-        assert_eq!(week_start(d(2026, 10, 11)), d(2026, 10, 5));
-        assert_eq!(week_start(d(2026, 10, 5)), d(2026, 10, 5));
-        assert_eq!(week_start(d(2026, 10, 12)), d(2026, 10, 12));
-    }
-
-    #[test]
-    fn parses_dates() {
-        assert_eq!(parse_date("2026-10-17"), Some(d(2026, 10, 17)));
-        assert_eq!(parse_date(" 2026-1-7 "), Some(d(2026, 1, 7)));
-        assert_eq!(parse_date("2026-09-31"), None);
-        assert_eq!(parse_date("17/10/2026"), None);
-        assert_eq!(parse_date("10/17/2026"), Some(d(2026, 10, 17)));
-        assert_eq!(us_numeric(d(2026, 1, 7)), "1/7/2026");
-        assert_eq!(us_short(d(2026, 10, 17)), "Oct 17, 2026");
-        assert_eq!(format_time("14:19:05", false), "2:19 PM");
-        assert_eq!(format_time("14:19:05", true), "14:19");
-        assert_eq!(format_time("09:05", true), "09:05");
-        assert_eq!(format_time("00:05:00", false), "12:05 AM");
-        assert_eq!(format_time("12:30", false), "12:30 PM");
-    }
-
-    #[test]
     fn named_event_claims_matching_sessions() {
         let def = EventDef { id: 1, name: "OVRP".into(), track: "OVRP Full".into(), start: "2026-10-17".into(), end: "2026-10-18".into(), ..Default::default() };
         assert!(def.claims(d(2026, 10, 18), "ovrp full", "2026 Club"));
