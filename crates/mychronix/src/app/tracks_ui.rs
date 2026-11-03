@@ -220,8 +220,6 @@ impl App {
         let matches = |t: &tracks::Track| in_view(t) && (!searching || t.search.contains(&needle));
         let by_name = |a: &usize, b: &usize| lib.tracks[*a].sort_key.cmp(&lib.tracks[*b].sort_key);
 
-        const HEADER_H: f32 = 44.0;
-        const TRACK_H: f32 = 76.0;
         let system = crate::countries::system_country();
         let grouped = self.track_page.view == TrackView::All;
         // Open the system country first (MYCHRONIX_TRACKS_COLLAPSED=1 skips that, for screenshots).
@@ -337,128 +335,22 @@ impl App {
                         }
                     }
                     Row::Track(i) => {
-                        let i = *i;
-                        let t = &lib.tracks[i];
-                        let fill = if self.track_page.sel == Some(i) {
-                            Some(SURFACE_ACTIVE)
-                        } else if response.hovered() {
-                            Some(SURFACE_HOVER)
-                        } else {
-                            None
-                        };
-                        if let Some(fill) = fill {
-                            p.rect_filled(
-                                rect.shrink2(vec2(0.0, 2.0)),
-                                CornerRadius::same(theme::RADIUS_SMALL + 2),
-                                fill,
-                            );
+                        let (open, star) = track_row(
+                            ui,
+                            lib,
+                            *i,
+                            rect,
+                            &response,
+                            k,
+                            self.track_page.sel == Some(*i),
+                            self.track_page.view,
+                            &favorites,
+                        );
+                        if open {
+                            clicked = Some(*i);
                         }
-                        let indent = if self.track_page.view == TrackView::All {
-                            8.0
-                        } else {
-                            0.0
-                        };
-                        let thumb = Rect::from_min_size(
-                            pos2(rect.left() + 8.0 + indent, rect.top() + 8.0),
-                            vec2(64.0, TRACK_H - 16.0),
-                        );
-                        outline_thumbnail(
-                            p,
-                            thumb,
-                            &t.outline,
-                            if t.kind == Kind::Custom {
-                                SERIES[1]
-                            } else {
-                                SECONDARY
-                            },
-                        );
-                        let left = thumb.right() + 12.0;
-                        let title = t.full_name.as_deref().unwrap_or(&t.name);
-                        let name_w = (rect.right() - left - 120.0).max(60.0);
-                        p.galley(
-                            pos2(left, rect.top() + 9.0),
-                            p.layout_job(single_line(title, medium(14.0), TEXT, name_w)),
-                            TEXT,
-                        );
-                        let place = if self.track_page.view == TrackView::All {
-                            t.locality()
-                        } else {
-                            [t.locality(), crate::countries::label(&t.country)]
-                                .into_iter()
-                                .filter(|s| !s.is_empty())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        };
-                        p.text(
-                            pos2(left, rect.top() + 39.0),
-                            egui::Align2::LEFT_CENTER,
-                            place,
-                            regular(12.5),
-                            SECONDARY,
-                        );
-                        p.text(
-                            pos2(left, rect.top() + 57.0),
-                            egui::Align2::LEFT_CENTER,
-                            t.description(),
-                            regular(12.0),
-                            DIM,
-                        );
-                        // Right: favorite star, then the name on the device; custom tag and sessions below.
-                        let star = Rect::from_center_size(
-                            pos2(rect.right() - 20.0, rect.top() + 18.0),
-                            Vec2::splat(26.0),
-                        );
-                        let star_resp =
-                            ui.interact(star, ui.id().with(("track_star", k)), Sense::click());
-                        let fav = favorites.contains(&t.guid);
-                        let (icon, tint) = if fav {
-                            (Icon::StarFilled, theme::FAVORITE)
-                        } else if star_resp.hovered() {
-                            (Icon::Star, TEXT)
-                        } else {
-                            (Icon::Star, DIM)
-                        };
-                        icon.image(tint, 16.0)
-                            .paint_at(ui, Rect::from_center_size(star.center(), Vec2::splat(16.0)));
-                        if star_resp.clicked() {
-                            starred = Some(t.guid.clone());
-                        }
-                        let p = ui.painter();
-                        p.text(
-                            pos2(star.left() - 4.0, rect.top() + 18.0),
-                            egui::Align2::RIGHT_CENTER,
-                            &t.name,
-                            regular(12.0),
-                            DIM,
-                        );
-                        let mut right = rect.right() - 12.0;
-                        if !t.sessions.is_empty() {
-                            let n = t.sessions.len();
-                            let g = p.text(
-                                pos2(right, rect.top() + 50.0),
-                                egui::Align2::RIGHT_CENTER,
-                                plural(n, "session"),
-                                regular(12.5),
-                                SECONDARY,
-                            );
-                            right = g.left() - 8.0;
-                        }
-                        if t.kind == Kind::Custom {
-                            let galley = p.layout_no_wrap("Custom".into(), semibold(11.0), TEXT);
-                            let r = Rect::from_min_size(
-                                pos2(right - galley.size().x - 14.0, rect.top() + 40.0),
-                                galley.size() + vec2(14.0, 6.0),
-                            );
-                            p.rect_stroke(
-                                r,
-                                CornerRadius::same(255),
-                                Stroke::new(1.0, DIM),
-                                egui::StrokeKind::Inside,
-                            );
-                            p.galley(r.center() - galley.size() / 2.0, galley, TEXT);
-                        }
-                        if response.clicked() && !star_resp.clicked() {
-                            clicked = Some(i);
+                        if star {
+                            starred = Some(lib.tracks[*i].guid.clone());
                         }
                     }
                 }
@@ -1687,6 +1579,147 @@ impl App {
         ui.add_space(14.0);
     }
 }
+
+/// One track in the track list, in `rect`: its outline, name, place and
+/// star. Returns whether it was clicked (to open it) and whether its star was.
+#[allow(clippy::too_many_arguments)]
+fn track_row(
+    ui: &mut Ui,
+    lib: &Library,
+    i: usize,
+    rect: Rect,
+    response: &egui::Response,
+    k: usize,
+    selected: bool,
+    view: TrackView,
+    favorites: &tracks::Favorites,
+) -> (bool, bool) {
+    let p = ui.painter();
+    let mut open = false;
+    let mut starred = false;
+    let t = &lib.tracks[i];
+    let fill = if selected {
+        Some(SURFACE_ACTIVE)
+    } else if response.hovered() {
+        Some(SURFACE_HOVER)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        p.rect_filled(
+            rect.shrink2(vec2(0.0, 2.0)),
+            CornerRadius::same(theme::RADIUS_SMALL + 2),
+            fill,
+        );
+    }
+    let indent = if view == TrackView::All { 8.0 } else { 0.0 };
+    let thumb = Rect::from_min_size(
+        pos2(rect.left() + 8.0 + indent, rect.top() + 8.0),
+        vec2(64.0, TRACK_H - 16.0),
+    );
+    outline_thumbnail(
+        p,
+        thumb,
+        &t.outline,
+        if t.kind == Kind::Custom {
+            SERIES[1]
+        } else {
+            SECONDARY
+        },
+    );
+    let left = thumb.right() + 12.0;
+    let title = t.full_name.as_deref().unwrap_or(&t.name);
+    let name_w = (rect.right() - left - 120.0).max(60.0);
+    p.galley(
+        pos2(left, rect.top() + 9.0),
+        p.layout_job(single_line(title, medium(14.0), TEXT, name_w)),
+        TEXT,
+    );
+    let place = if view == TrackView::All {
+        t.locality()
+    } else {
+        [t.locality(), crate::countries::label(&t.country)]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    p.text(
+        pos2(left, rect.top() + 39.0),
+        egui::Align2::LEFT_CENTER,
+        place,
+        regular(12.5),
+        SECONDARY,
+    );
+    p.text(
+        pos2(left, rect.top() + 57.0),
+        egui::Align2::LEFT_CENTER,
+        t.description(),
+        regular(12.0),
+        DIM,
+    );
+    // Right: favorite star, then the name on the device; custom tag and sessions below.
+    let star = Rect::from_center_size(
+        pos2(rect.right() - 20.0, rect.top() + 18.0),
+        Vec2::splat(26.0),
+    );
+    let star_resp = ui.interact(star, ui.id().with(("track_star", k)), Sense::click());
+    let fav = favorites.contains(&t.guid);
+    let (icon, tint) = if fav {
+        (Icon::StarFilled, theme::FAVORITE)
+    } else if star_resp.hovered() {
+        (Icon::Star, TEXT)
+    } else {
+        (Icon::Star, DIM)
+    };
+    icon.image(tint, 16.0)
+        .paint_at(ui, Rect::from_center_size(star.center(), Vec2::splat(16.0)));
+    if star_resp.clicked() {
+        starred = true;
+    }
+    let p = ui.painter();
+    p.text(
+        pos2(star.left() - 4.0, rect.top() + 18.0),
+        egui::Align2::RIGHT_CENTER,
+        &t.name,
+        regular(12.0),
+        DIM,
+    );
+    let mut right = rect.right() - 12.0;
+    if !t.sessions.is_empty() {
+        let n = t.sessions.len();
+        let g = p.text(
+            pos2(right, rect.top() + 50.0),
+            egui::Align2::RIGHT_CENTER,
+            plural(n, "session"),
+            regular(12.5),
+            SECONDARY,
+        );
+        right = g.left() - 8.0;
+    }
+    if t.kind == Kind::Custom {
+        let galley = p.layout_no_wrap("Custom".into(), semibold(11.0), TEXT);
+        let r = Rect::from_min_size(
+            pos2(right - galley.size().x - 14.0, rect.top() + 40.0),
+            galley.size() + vec2(14.0, 6.0),
+        );
+        p.rect_stroke(
+            r,
+            CornerRadius::same(255),
+            Stroke::new(1.0, DIM),
+            egui::StrokeKind::Inside,
+        );
+        p.galley(r.center() - galley.size() / 2.0, galley, TEXT);
+    }
+    if response.clicked() && !star_resp.clicked() {
+        open = true;
+    }
+    (open, starred)
+}
+
+/// The track list's row heights: a country's header, a track.
+const HEADER_H: f32 = 44.0;
+const TRACK_H: f32 = 76.0;
 
 /// A row of the track list.
 #[derive(Clone, Debug, PartialEq)]
