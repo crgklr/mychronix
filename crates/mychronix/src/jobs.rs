@@ -57,8 +57,21 @@ pub fn open_session(path: &std::path::Path) -> Result<aim_xrk::Session, String> 
         return Err("it has no recorded data (it may not be a session file)".into());
     }
     let mut session = session;
+    name_rpm(&mut session);
     relap(&mut session, path);
     Ok(session)
+}
+
+/// Engine speed is "RPM" everywhere in the app (graphs, charts, report
+/// columns, gearing, the assistant): a MyChron 4 run from RaceStudio 2 calls
+/// it "Engine", other files "Engine RPM".
+fn name_rpm(session: &mut aim_xrk::Session) {
+    if session.channel("RPM").is_some() {
+        return;
+    }
+    if let Some(c) = session.channels.iter_mut().find(|c| (c.name == "Engine" || c.name == "Engine RPM") && c.units.eq_ignore_ascii_case("rpm")) {
+        c.name = "RPM".into();
+    }
 }
 
 /// Laps timed from GPS when the logger's look untimed (one long lap, or laps
