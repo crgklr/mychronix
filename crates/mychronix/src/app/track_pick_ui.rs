@@ -332,7 +332,7 @@ impl App {
             self.reload_library();
             // The open one shows its laps at the track now theirs straight away.
             if let Some(open) = self.path.clone().filter(|p| targets.contains(p)) {
-                self.reopen(open);
+                self.act(Action::Reopen(open));
             }
             return;
         }

@@ -75,6 +75,17 @@ enum Page {
     Settings,
 }
 
+/// A change to the open session a page asks for (`App::act`), done after the
+/// frame's pages and dialogs have drawn.
+enum Action {
+    Open(PathBuf),
+    /// Open with lap `number` picked, the cursor halfway round it.
+    OpenAtLap(PathBuf, u32),
+    /// Open again (its laps changed), keeping the channels graphed.
+    Reopen(PathBuf),
+    Close,
+}
+
 /// The download dialog's state.
 struct DownloadDialog {
     meta: crate::device::SessionMeta,
@@ -145,9 +156,9 @@ pub struct App {
     page: Page,
     path: Option<PathBuf>,
     session: Option<std::sync::Arc<Session>>,
-    /// Close the open session at the end of this frame (`self.session` is
-    /// held aside while the page draws, so setting it to None there is undone).
-    close_session: bool,
+    /// What pages asked for this frame (open a session, close it), done once
+    /// they've all drawn: the open session is held aside while they draw.
+    actions: Vec<Action>,
     /// Statuses and problems, shown in one place (see `notices`).
     notices: notices::Notices,
     report: report_ui::ReportState,
@@ -183,11 +194,9 @@ pub struct App {
     pub screenshot_to: Option<PathBuf>,
     frames: u32,
 
-    /// The last error and device message written to the log.
     /// Frames seen by the input hook (for scripted test clicks).
     input_frames: u32,
-    /// The Garage: a session to open after the frame, and Events' plan dialog to open.
-    pending_open: Option<PathBuf>,
+    /// Events' plan dialog to open.
     plan_on_open: bool,
 
     profiles: Option<crate::profiles::Profiles>,
@@ -277,6 +286,11 @@ pub fn repair_assistants() {
 }
 
 impl App {
+    /// Asks for a change to the open session, done after this frame draws.
+    fn act(&mut self, action: Action) {
+        self.actions.push(action);
+    }
+
     /// Opens a session on screen; false when it couldn't be (a notice says why).
     pub fn load(&mut self, path: PathBuf) -> bool {
         match crate::jobs::open_session(&path) {
@@ -788,11 +802,34 @@ impl eframe::App for App {
         // After the pages and dialogs: a change they made starts reloading now.
         self.library_poll(&ui.ctx().clone());
 
-        // Put the session back, unless the page opened another one or closed it this frame.
-        if std::mem::take(&mut self.close_session) {
-            drop(session);
-        } else if self.session.is_none() {
+        // Put the session back (unless something opened another), then do what the pages asked.
+        if self.session.is_none() {
             self.session = session;
+        }
+        let actions = std::mem::take(&mut self.actions);
+        if !actions.is_empty() {
+            for a in actions {
+                match a {
+                    Action::Open(path) => {
+                        self.load(path);
+                    }
+                    Action::OpenAtLap(path, n) => {
+                        if self.load(path)
+                            && let Some(s) = &self.session
+                            && let Some(i) = s.laps.iter().position(|l| l.number as u32 == n)
+                        {
+                            self.analysis.lap = Some(i);
+                            self.analysis.cursor_s = Some(s.laps[i].duration_ms() as f64 / 2000.0);
+                        }
+                    }
+                    Action::Reopen(path) => self.reopen(path),
+                    Action::Close => {
+                        self.session = None;
+                        self.path = None;
+                    }
+                }
+            }
+            ui.ctx().request_repaint();
         }
         self.screenshot(ui);
     }

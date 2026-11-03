@@ -366,7 +366,7 @@ impl App {
                     self.sensors.digests = None;
                     self.sensors.digests_asked.clear();
                     self.reload_library();
-                    self.reopen(pick.path.clone());
+                    self.act(Action::Reopen(pick.path.clone()));
                     self.notices.success(format!(
                         "Start/finish line saved to {name}. Sessions there are timed from it."
                     ));

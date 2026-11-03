@@ -1145,7 +1145,7 @@ impl App {
             self.track_page.driver = p;
         }
         if let Some(path) = open {
-            self.load(path);
+            self.act(Action::Open(path));
         }
     }
 }

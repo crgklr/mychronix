@@ -984,9 +984,7 @@ impl App {
                     files.len()
                 );
                 if open_is_theirs {
-                    self.session = None;
-                    self.close_session = true;
-                    self.path = None;
+                    self.act(Action::Close);
                     self.page = Page::Garage;
                 }
                 self.garage.page = 0;

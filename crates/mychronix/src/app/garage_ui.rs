@@ -565,7 +565,7 @@ impl App {
             self.key_download(&ui.ctx().clone());
         }
         if let Some(p) = act.open_lap.take() {
-            self.pending_open = Some(p);
+            self.act(Action::Open(p));
         }
         self.sensors.digests = Some(digests);
         self.setup_baselines = Some(baselines);
@@ -587,9 +587,6 @@ impl App {
         }
         if let Some(p) = act.go {
             self.page = p;
-        }
-        if let Some(path) = self.pending_open.take() {
-            self.load(path);
         }
     }
 
@@ -1316,7 +1313,7 @@ impl App {
                 }
             });
         if let Some(p) = open {
-            self.load(p);
+            self.act(Action::Open(p));
         }
     }
 }

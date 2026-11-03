@@ -259,7 +259,7 @@ impl App {
         }
         self.want_weather(&shown_rows, &ui.ctx().clone());
         if let Some(path) = open {
-            self.load(path);
+            self.act(Action::Open(path));
         }
     }
 }

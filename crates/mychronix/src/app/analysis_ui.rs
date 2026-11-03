@@ -664,7 +664,7 @@ impl App {
         }
         if let Some(p) = open_path {
             self.analysis.session_panel = false;
-            self.load(p);
+            self.act(Action::Open(p));
         }
         if self.page != Page::Analysis {
             self.analysis.session_panel = false;
@@ -1736,7 +1736,7 @@ impl App {
                     log::info!("driver changed for {}", path.display());
                     self.reload_library();
                     // Reopened, so the panel and everything else show the new driver.
-                    self.load(path);
+                    self.act(Action::Open(path));
                 }
                 Err(e) => {
                     self.notices.error(format!("Couldn't save the driver: {e}"));
