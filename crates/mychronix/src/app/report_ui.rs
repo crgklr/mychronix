@@ -34,7 +34,10 @@ impl App {
         if config.columns.is_empty() {
             config.columns = Preset::Default.columns(session);
         }
-        let mut columns: Vec<Column> = config.columns.iter().filter(|c| report::channel(session, &c.channel).is_some()).cloned().collect();
+        // The logger's own lap-timing channels (Prev Lap Diff, Predictive Time…) are written about once a
+        // lap, against its own timing: no number per lap to show, so they're left out (and never offered).
+        let lap_timing = |name: &str| session.channels.iter().find(|c| c.name == name).is_some_and(|c| channel_group(c, false) == "Lap timing");
+        let mut columns: Vec<Column> = config.columns.iter().filter(|c| report::channel(session, &c.channel).is_some() && !lap_timing(&c.channel)).cloned().collect();
         // A layout picked on another logger that hardly fits this session (GPS
         // g-forces on a MyChron 4 without GPS): show the overview instead, and
         // keep the saved layout for the sessions it suits.
@@ -66,7 +69,7 @@ impl App {
                     .selected_text(if channel.is_empty() { "Channel…".to_string() } else { report::short_name(channel).to_string() })
                     .width(220.0)
                     .show_ui(ui, |ui| {
-                        for c in session.channels.iter().filter(|c| !is_dead(c)) {
+                        for c in session.channels.iter().filter(|c| !is_dead(c) && channel_group(c, false) != "Lap timing") {
                             let label = if report::short_name(&c.name) != c.name { format!("{} ({})", report::short_name(&c.name), c.name) } else { c.name.clone() };
                             ui.selectable_value(channel, c.name.clone(), label);
                         }
