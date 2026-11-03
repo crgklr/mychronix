@@ -383,7 +383,7 @@ impl App {
                     && let Some(p) = self.path.clone()
                 {
                     let track = self.session_track_name(&p).or_else(|| session.info.venue.clone()).unwrap_or_default();
-                    self.line_pick = line_pick_ui::LinePick::new(p, track, session.clone());
+                    self.line_pick = line_pick_ui::LinePick::new(p.clone(), track, session.clone(), self.session_outline(&p));
                 }
             }
         });
@@ -432,7 +432,7 @@ impl App {
             let link = ui.add(egui::Label::new(RichText::new("Set the start/finish line").size(14.0).color(theme::ACCENT)).sense(Sense::click()));
             if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && let Some(p) = self.path.clone() {
                 let track = self.session_track_name(&p).or_else(|| i.venue.clone()).unwrap_or_default();
-                self.line_pick = line_pick_ui::LinePick::new(p, track, session.clone());
+                self.line_pick = line_pick_ui::LinePick::new(p.clone(), track, session.clone(), self.session_outline(&p));
             }
         }
         if let Some(gaps) = recording_gaps_note(session, &self.recording_gaps) {

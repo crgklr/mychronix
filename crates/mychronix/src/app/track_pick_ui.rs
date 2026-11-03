@@ -67,6 +67,12 @@ impl App {
         s.track_name(&lib.tracks)
     }
 
+    /// The outline of the track a session is at, from its track file (empty when it has none).
+    pub(super) fn session_outline(&mut self, path: &std::path::Path) -> Vec<aim_track::LatLon> {
+        let lib = self.lib();
+        lib.sessions.iter().find(|s| s.path == path).and_then(|s| s.track).map(|t| lib.tracks[t].outline.clone()).unwrap_or_default()
+    }
+
     pub(super) fn open_track_pick(&mut self, path: PathBuf) {
         let lib = self.lib();
         let choice = lib.sessions.iter().find(|s| s.path == path).and_then(|s| match s.track {

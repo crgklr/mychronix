@@ -16,9 +16,12 @@ const POINT_EVERY_M: f64 = 4.0;
 pub(super) struct LinePick {
     path: PathBuf,
     session: std::sync::Arc<Session>,
-    /// The trace: degrees, and meters east and north of its first point.
-    latlon: Vec<(f64, f64)>,
-    xy: Vec<(f64, f64)>,
+    /// The whole GPS trace (every lap), to click on.
+    trace: Vec<aim_track::LatLon>,
+    /// The track's outline from its track file, when it has one.
+    outline: Vec<aim_track::LatLon>,
+    /// The racing line: the fastest lap, from the chosen line once there is one.
+    racing: Vec<aim_track::LatLon>,
     /// The point picked on the trace.
     chosen: Option<usize>,
     /// Your tracks near the session, and which one to change (None: save a new track).
@@ -26,24 +29,86 @@ pub(super) struct LinePick {
     update: Option<usize>,
     /// A new track's name.
     name: String,
+    memory: walkers::MapMemory,
+    fitted: bool,
 }
 
 impl LinePick {
-    pub fn new(path: PathBuf, track: String, session: std::sync::Arc<Session>) -> Option<Self> {
+    pub fn new(path: PathBuf, track: String, session: std::sync::Arc<Session>, outline: Vec<aim_track::LatLon>) -> Option<Self> {
         let gps = session.gps.as_ref()?;
         let n = gps.latitude.len().min(gps.longitude.len());
         if n < 100 {
             return None;
         }
-        // At most ~3,000 points: plenty to click on, quick to draw.
-        let step = (n / 3000).max(1);
-        let latlon: Vec<(f64, f64)> = (0..n).step_by(step).map(|i| (gps.latitude[i], gps.longitude[i])).filter(|(a, o)| a.is_finite() && o.is_finite() && (*a != 0.0 || *o != 0.0)).collect();
-        let (lat0, lon0) = *latlon.first()?;
-        let m_per_deg_lon = 111_320.0 * lat0.to_radians().cos();
-        let xy = latlon.iter().map(|(a, o)| ((o - lon0) * m_per_deg_lon, (a - lat0) * 110_540.0)).collect();
-        let near = crate::tracks::tracks_near(lat0, lon0, 3_000.0);
+        // At most ~4,000 points: plenty to click on, quick to draw.
+        let step = (n / 4000).max(1);
+        let trace: Vec<aim_track::LatLon> = (0..n).step_by(step).map(|i| aim_track::LatLon { lat: gps.latitude[i], lon: gps.longitude[i] }).filter(|p| p.lat.is_finite() && p.lon.is_finite() && (p.lat != 0.0 || p.lon != 0.0)).collect();
+        let first = *trace.first()?;
+        let near = crate::tracks::tracks_near(first.lat, first.lon, 3_000.0);
         let update = (!near.is_empty()).then_some(0);
-        Some(LinePick { path, session, latlon, xy, chosen: None, near, update, name: track })
+        // The session's own fastest lap, when the logger (or GPS) timed it.
+        let racing = session.best_lap(aim_xrk::laps::MIN_LAP_MS).map(|l| lap_path(gps, l.start_ms, l.end_ms)).unwrap_or_default();
+        Some(LinePick { path, session, trace, outline, racing, chosen: None, near, update, name: track, memory: walkers::MapMemory::default(), fitted: false })
+    }
+}
+
+/// The GPS points between two times.
+fn lap_path(gps: &aim_xrk::GpsTrack, from_ms: i64, to_ms: i64) -> Vec<aim_track::LatLon> {
+    (0..gps.times_ms.len()).filter(|&i| gps.times_ms[i] >= from_ms && gps.times_ms[i] <= to_ms).map(|i| aim_track::LatLon { lat: gps.latitude[i], lon: gps.longitude[i] }).collect()
+}
+
+/// What the map draws, and where a click landed (read after the map draws).
+struct LineOverlay {
+    trace: Vec<aim_track::LatLon>,
+    outline: Vec<aim_track::LatLon>,
+    racing: Vec<aim_track::LatLon>,
+    chosen: Option<usize>,
+    clicked: std::rc::Rc<std::cell::Cell<Option<usize>>>,
+}
+
+/// Colors for the map's layers (also the legend's).
+const TRACE: Color32 = Color32::from_rgba_premultiplied(56, 57, 59, 70);
+const OUTLINE: Color32 = Color32::from_rgb(0xf2, 0xf4, 0xf6);
+
+impl walkers::Plugin for LineOverlay {
+    fn run(self: Box<Self>, ui: &mut Ui, response: &egui::Response, projector: &walkers::Projector, _memory: &walkers::MapMemory) {
+        ui.set_clip_rect(response.rect.intersect(ui.clip_rect()));
+        let painter = ui.painter();
+        let screen = |p: &aim_track::LatLon| projector.project(walkers::lat_lon(p.lat, p.lon)).to_pos2();
+        let casing = |w: f32| Stroke::new(w, Color32::from_black_alpha(130));
+        // The track's outline, then every lap faintly, then the racing line on top.
+        if self.outline.len() > 2 {
+            let mut pts: Vec<egui::Pos2> = self.outline.iter().map(screen).collect();
+            pts.push(pts[0]);
+            painter.add(egui::Shape::line(pts.clone(), casing(9.0)));
+            painter.add(egui::Shape::line(pts, Stroke::new(5.0, OUTLINE.gamma_multiply(0.55))));
+        }
+        let trace: Vec<egui::Pos2> = self.trace.iter().map(screen).collect();
+        painter.add(egui::Shape::line(trace.clone(), Stroke::new(1.5, TRACE)));
+        if self.racing.len() > 2 {
+            let pts: Vec<egui::Pos2> = self.racing.iter().map(screen).collect();
+            painter.add(egui::Shape::line(pts.clone(), casing(6.0)));
+            painter.add(egui::Shape::line(pts, Stroke::new(3.0, theme::ACCENT)));
+        }
+        // The nearest point of the trace to the pointer, when it's close.
+        let near = |pos: egui::Pos2| trace.iter().enumerate().map(|(i, q)| (i, q.distance(pos))).min_by(|a, b| a.1.total_cmp(&b.1)).filter(|(_, d)| *d < 20.0).map(|(i, _)| i);
+        if let Some(i) = response.hover_pos().and_then(near) {
+            painter.circle_filled(trace[i], 6.0, Color32::from_black_alpha(160));
+            painter.circle_filled(trace[i], 4.5, TEXT);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if response.clicked() {
+            self.clicked.set(response.interact_pointer_pos().and_then(near));
+        }
+        // The line: across the track at the chosen point.
+        if let Some(i) = self.chosen {
+            let (a, b) = (trace[i.saturating_sub(3)], trace[(i + 3).min(trace.len() - 1)]);
+            let along = (b - a).normalized();
+            let across = vec2(-along.y, along.x) * 22.0;
+            painter.line_segment([trace[i] - across, trace[i] + across], Stroke::new(8.0, Color32::from_black_alpha(160)));
+            painter.line_segment([trace[i] - across, trace[i] + across], Stroke::new(5.0, theme::FAVORITE));
+            painter.text(trace[i] + across * 1.35, egui::Align2::CENTER_CENTER, "S/F", semibold(12.0), TEXT);
+        }
     }
 }
 
@@ -86,60 +151,87 @@ fn new_guid() -> [u8; 8] {
 impl App {
     pub(super) fn line_pick_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut pick) = self.line_pick.take() else { return };
-        let (mut save, mut cancel) = (false, false);
-        let closed = look::dialog(ctx, "line_pick", 760.0, |ui| {
+        let (mut save, mut cancel, mut toggle) = (false, false, false);
+        let satellite = self.track_page.satellite;
+        let clicked = std::rc::Rc::new(std::cell::Cell::new(None));
+        let closed = look::dialog(ctx, "line_pick", 1180.0, |ui| {
             look::header(ui, Icon::Flag, SECONDARY, None, "Start/finish line", "Click where the start/finish line crosses the track, then save it to a track.");
             look::body(ui, |ui| {
-                let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 320.0), Sense::click());
-                let p = ui.painter_at(rect);
-                p.rect_filled(rect, CornerRadius::same(12), SURFACE);
-                // Fit the trace, north up, keeping its shape.
-                let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
-                for &(x, y) in &pick.xy {
-                    (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
-                }
-                let inner = rect.shrink(24.0);
-                let scale = (inner.width() as f64 / (x1 - x0).max(1.0)).min(inner.height() as f64 / (y1 - y0).max(1.0));
-                let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-                let at = |(x, y): (f64, f64)| inner.center() + vec2(((x - cx) * scale) as f32, (-(y - cy) * scale) as f32);
-                let points: Vec<egui::Pos2> = pick.xy.iter().map(|&q| at(q)).collect();
-                p.add(egui::Shape::line(points.clone(), Stroke::new(2.0, SECONDARY)));
-                // The nearest point to the pointer, when it's close to the trace.
-                let near = |pos: egui::Pos2| points.iter().enumerate().map(|(i, q)| (i, q.distance(pos))).min_by(|a, b| a.1.total_cmp(&b.1)).filter(|(_, d)| *d < 24.0).map(|(i, _)| i);
-                if let Some(i) = response.hover_pos().and_then(near) {
-                    p.circle_filled(points[i], 5.0, TEXT);
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if response.clicked()
-                    && let Some(i) = response.interact_pointer_pos().and_then(near)
-                {
-                    pick.chosen = Some(i);
-                }
-                // The line: across the track at the chosen point.
-                if let Some(i) = pick.chosen {
-                    let (a, b) = (points[i.saturating_sub(2)], points[(i + 2).min(points.len() - 1)]);
-                    let along = (b - a).normalized();
-                    let across = vec2(-along.y, along.x) * 18.0;
-                    p.line_segment([points[i] - across, points[i] + across], Stroke::new(4.0, theme::ACCENT));
-                }
-                ui.add_space(10.0);
-                if pick.chosen.is_none() {
-                    look::note(ui, "Hover over the track and click where the start/finish line is.", DIM);
-                    return;
-                }
-                // Where it's saved: one of your tracks here, or a new one.
-                for (k, t) in pick.near.iter().enumerate() {
-                    if look::option(ui, pick.update == Some(k), Some(Icon::Track), &format!("Update {}", t.name), "Moves this track's start/finish line here. The original is kept in backups.") {
-                        pick.update = Some(k);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 20.0;
+                    // The map: satellite or streets, with the track drawn over it.
+                    let size = vec2(720.0, 560.0);
+                    if !pick.fitted {
+                        pick.fitted = true;
+                        let fit: &[aim_track::LatLon] = if pick.racing.len() > 2 { &pick.racing } else { &pick.trace };
+                        if let Some((c, zoom)) = super::tracks_ui::fit_view(fit, size) {
+                            pick.memory.center_at(walkers::lat_lon(c.lat, c.lon));
+                            let _ = pick.memory.set_zoom(zoom);
+                        }
                     }
-                }
-                if look::option(ui, pick.update.is_none(), Some(Icon::Plus), "Save as a new track", "A new track file made from this session's fastest lap, with the line here.") {
-                    pick.update = None;
-                }
-                if pick.update.is_none() {
-                    ui.add_space(6.0);
-                    look::text(ui, &mut pick.name, "Track name", Some(420.0));
-                }
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 6.0;
+                        let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite);
+                        let overlay = LineOverlay { trace: pick.trace.clone(), outline: pick.outline.clone(), racing: pick.racing.clone(), chosen: pick.chosen, clicked: clicked.clone() };
+                        let center = pick.trace.first().map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
+                        let map = ui.add_sized(size, walkers::Map::new(Some(tiles), &mut pick.memory, center).with_plugin(overlay));
+                        let corner = Rect::from_min_size(map.rect.right_top() + vec2(-190.0, 10.0), vec2(180.0, 36.0));
+                        // Over the map's corner, without taking room below it.
+                        let mut over = ui.new_child(egui::UiBuilder::new().max_rect(corner).layout(Layout::right_to_left(Align::Center)));
+                        over.spacing_mut().item_spacing.x = 4.0;
+                        toggle |= chip(&mut over, "Satellite", satellite).clicked() && !satellite;
+                        toggle |= chip(&mut over, "Map", !satellite).clicked() && satellite;
+                        // The legend, and whose map it is.
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            let swatch = |ui: &mut Ui, color: Color32, width: f32, label: &str| {
+                                let (r, _) = ui.allocate_exact_size(vec2(22.0, 12.0), Sense::hover());
+                                ui.painter().line_segment([r.left_center(), r.right_center()], Stroke::new(width, color));
+                                ui.label(RichText::new(label).size(12.5).color(SECONDARY));
+                                ui.add_space(10.0);
+                            };
+                            if pick.racing.len() > 2 {
+                                swatch(ui, theme::ACCENT, 3.0, if pick.chosen.is_some() { "Racing line (fastest lap from your line)" } else { "Racing line (fastest lap)" });
+                            }
+                            if pick.outline.len() > 2 {
+                                swatch(ui, OUTLINE.gamma_multiply(0.55), 5.0, "Track outline");
+                            }
+                            swatch(ui, TRACE, 2.0, "Every lap");
+                            swatch(ui, theme::FAVORITE, 4.0, "Start/finish");
+                        });
+                        let credit = if satellite { "Imagery © Esri, Maxar, Earthstar Geographics." } else { "Map data © OpenStreetMap contributors." };
+                        ui.label(RichText::new(format!("Drag to move, scroll to zoom.  {credit}")).size(11.5).color(DIM));
+                    });
+                    // The steps, and where it's saved.
+                    ui.vertical(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        let step = |ui: &mut Ui, n: &str, text: &str, done: bool| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(n).font(semibold(14.0)).color(if done { theme::GOOD } else { TEXT }));
+                                ui.add(egui::Label::new(RichText::new(text).font(regular(14.5)).color(SECONDARY)).wrap());
+                            });
+                        };
+                        step(ui, "1", "Click the track where the start/finish line is. Zoom in to place it exactly.", pick.chosen.is_some());
+                        step(ui, "2", "Save it to one of your tracks here, or as a new track.", false);
+                        ui.add_space(8.0);
+                        if pick.chosen.is_none() {
+                            look::note(ui, "Nothing is changed until you save.", DIM);
+                            return;
+                        }
+                        for (k, t) in pick.near.iter().enumerate() {
+                            if look::option(ui, pick.update == Some(k), Some(Icon::Track), &format!("Update {}", t.name), "Moves its line here; the original is backed up.") {
+                                pick.update = Some(k);
+                            }
+                        }
+                        if look::option(ui, pick.update.is_none(), Some(Icon::Plus), "Save as a new track", "Made from the fastest lap from your line.") {
+                            pick.update = None;
+                        }
+                        if pick.update.is_none() {
+                            look::text(ui, &mut pick.name, "Track name", None);
+                        }
+                    });
+                });
             });
             look::footer_row(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -149,8 +241,19 @@ impl App {
                 });
             });
         });
+        if toggle {
+            self.track_page.satellite = !satellite;
+        }
+        // A click on the trace places the line; the racing line follows it.
+        if let Some(i) = clicked.get() {
+            pick.chosen = Some(i);
+            let at = pick.trace[i];
+            if let Some((lap, _)) = lap_outline(&pick.session, (at.lat, at.lon)) {
+                pick.racing = lap.iter().map(|p| p.at).collect();
+            }
+        }
         if save && let Some(i) = pick.chosen {
-            let (lat, lon) = pick.latlon[i];
+            let (lat, lon) = (pick.trace[i].lat, pick.trace[i].lon);
             let saved = match pick.update.and_then(|k| pick.near.get(k)) {
                 Some(t) => self.move_track_line(&t.path, lat, lon).map(|_| t.name.clone()),
                 None => self.save_new_track(&pick, lat, lon).map(|_| pick.name.trim().to_string()),

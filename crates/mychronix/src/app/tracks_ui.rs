@@ -908,7 +908,7 @@ impl walkers::sources::TileSource for EsriImagery {
 }
 
 /// Center and web-map zoom that fit `points` into a `size` pixel view with a margin.
-fn fit_view(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f64)> {
+pub(super) fn fit_view(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f64)> {
     if points.len() < 2 {
         return None;
     }
