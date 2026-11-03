@@ -17,7 +17,7 @@ mod linking;
 
 pub use details::{Details, load_details};
 pub use favorites::Favorites;
-pub use lines::{Line, stamp, start_finishes_near};
+pub use lines::{Line, MyLines, stamp, start_finishes_near};
 pub use linking::{TrackOffer, name_match};
 
 use std::collections::HashMap;

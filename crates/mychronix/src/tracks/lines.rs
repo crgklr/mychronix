@@ -4,8 +4,47 @@
 use std::path::{Path, PathBuf};
 
 use aim_track::LatLon;
+use serde::{Deserialize, Serialize};
 
 use super::files_with_ext;
+
+/// Start/finish lines set in Mychronix (a session's Set the start/finish
+/// line), for tracks it knows no line for: `~/Mychronix/lines.json`. GPS lap
+/// timing tries them like your own tracks' lines.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MyLines {
+    pub lines: Vec<MyLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MyLine {
+    pub lat: f64,
+    pub lon: f64,
+    /// Where it is, as the session named it ("" when it didn't).
+    #[serde(default)]
+    pub track: String,
+}
+
+impl MyLines {
+    fn path() -> Option<PathBuf> {
+        crate::paths::data("lines.json")
+    }
+
+    pub fn load() -> Self {
+        crate::storage::load_or_default(Self::path())
+    }
+
+    /// Adds a line, replacing one set within 50 m of it (set again, a bit along).
+    pub fn add(lat: f64, lon: f64, track: &str) -> std::io::Result<()> {
+        let path = Self::path().ok_or_else(|| std::io::Error::other("no home folder"))?;
+        let mut all = Self::load();
+        let here = LatLon { lat, lon };
+        all.lines.retain(|l| LatLon { lat: l.lat, lon: l.lon }.distance_m(&here) > 50.0);
+        all.lines.push(MyLine { lat, lon, track: track.to_string() });
+        crate::storage::save(&path, &all)
+    }
+}
 
 /// What GPS lap timing had to go on: your custom tracks and AiM's lists, by
 /// name and size. Changes when a track is added or a list is updated.
@@ -16,6 +55,7 @@ pub fn stamp() -> String {
     files.extend(files_with_ext(&ours, "ria"));
     files.extend(crate::aim_tracks::list_path());
     files.extend(crate::aim_tracks::mychron_list_path());
+    files.extend(MyLines::path());
     for f in files {
         let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
         parts.push(format!("{}:{size}", f.file_name().unwrap_or_default().to_string_lossy()));
@@ -40,6 +80,7 @@ pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<Line>, Vec
     let here = LatLon { lat, lon };
     let line = |t: aim_track::TrackFile, guid: Option<String>| t.start_finish.map(|p| (p, guid.or(t.guid).unwrap_or_default()));
     let mut own: Vec<(LatLon, String)> = files_with_ext(&ours, "tkk").iter().filter_map(|p| line(aim_track::read_tkk(p).ok()?, None)).collect();
+    own.extend(MyLines::load().lines.into_iter().map(|l| (LatLon { lat: l.lat, lon: l.lon }, String::new())));
     let mut aim: Vec<(LatLon, String)> = Vec::new();
     let mut rias = files_with_ext(&ours, "ria");
     rias.extend(crate::aim_tracks::list_path());

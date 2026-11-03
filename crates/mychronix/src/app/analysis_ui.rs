@@ -415,6 +415,16 @@ impl App {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(why).size(13.0).color(DIM)).wrap());
         }
+        // Still one long lap after GPS timing: no start/finish line known here. Set one.
+        if session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session) && let Some(gps) = &session.gps {
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(RichText::new("The MyChron recorded one long lap here, and Mychronix doesn't know this track's start/finish line.").size(13.0).color(theme::FAVORITE)).wrap());
+            let link = ui.add(egui::Label::new(RichText::new("Set the start/finish line").size(14.0).color(theme::ACCENT)).sense(Sense::click()));
+            if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && let Some(p) = self.path.clone() {
+                let track = self.session_track_name(&p).or_else(|| i.venue.clone()).unwrap_or_default();
+                self.line_pick = line_pick_ui::LinePick::new(p, track, gps);
+            }
+        }
         if let Some(gaps) = recording_gaps_note(session, &self.recording_gaps) {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(gaps).size(13.0).color(DIM)).wrap());

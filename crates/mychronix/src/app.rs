@@ -44,6 +44,7 @@ mod compare_ui;
 mod window_ui;
 mod notices;
 mod look;
+mod line_pick_ui;
 
 pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
 
@@ -172,6 +173,8 @@ pub struct App {
     /// The "Add a MyChron" window, while open.
     add_mychron: Option<device_ui::AddMyChron>,
     track_pick: Option<track_pick_ui::TrackPick>,
+    /// Setting the start/finish line on a session's GPS trace.
+    line_pick: Option<line_pick_ui::LinePick>,
     /// Changing who drove a session: (the session, the name picked, typing a new driver).
     driver_pick: Option<(PathBuf, String, bool)>,
     /// Reloading the library in the background (see `library_load`).
@@ -648,6 +651,7 @@ impl eframe::App for App {
         self.sensor_dialog(&ui.ctx().clone());
         self.track_pick_dialog(&ui.ctx().clone());
         self.driver_pick_dialog(&ui.ctx().clone());
+        self.line_pick_dialog(&ui.ctx().clone());
         self.track_offer_dialog(&ui.ctx().clone());
         // Over everything, dialogs included.
         self.notices_overlay(&ui.ctx().clone());
