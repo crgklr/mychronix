@@ -208,9 +208,10 @@ pub fn week_start(d: Date) -> Date {
     from_days(n - (n + 3).rem_euclid(7))
 }
 
+/// Today on this computer's clock (local time: a race-day evening is still that day).
 pub fn today() -> Date {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    from_days((secs / 86_400) as i64)
+    let d = jiff::Zoned::now().date();
+    Date { year: d.year() as u16, month: d.month() as u8, day: d.day() as u8 }
 }
 
 /// "10/17/2026" as written in the US, or "2026-10-17" (also "2026-10-7").
