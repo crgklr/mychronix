@@ -1867,7 +1867,7 @@ fn kart_card(
             egui::Grid::new(id).num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
                 for (k, v) in rows {
                     ui.label(RichText::new(*k).size(13.0).color(DIM));
-                    ui.label(RichText::new(v).size(13.5).color(TEXT));
+                    ui.add(egui::Label::new(RichText::new(v).size(13.5).color(TEXT)).wrap());
                     ui.end_row();
                 }
             });
