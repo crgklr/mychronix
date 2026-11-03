@@ -5,10 +5,32 @@
 //! single damaged session file can't stop the rest.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Jobs running now, not counting workers that last as long as the app.
+static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+/// How many jobs are running (screenshots wait for none, see `App::screenshot`).
+pub fn running() -> usize {
+    RUNNING.load(Ordering::SeqCst)
+}
 
 /// Runs `work` on a background thread called `name`.
 pub fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
+    start(name, true, work);
+}
+
+/// Like [`spawn`], for a worker that runs as long as the app (the MyChron
+/// connection), so it isn't counted by [`running`].
+pub fn spawn_worker(name: &str, work: impl FnOnce() + Send + 'static) {
+    start(name, false, work);
+}
+
+fn start(name: &str, counted: bool, work: impl FnOnce() + Send + 'static) {
     let label = name.to_string();
+    if counted {
+        RUNNING.fetch_add(1, Ordering::SeqCst);
+    }
     let started = std::thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {
@@ -17,8 +39,14 @@ pub fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
                     "background job \"{label}\" stopped unexpectedly (details in crash.log)"
                 );
             }
+            if counted {
+                RUNNING.fetch_sub(1, Ordering::SeqCst);
+            }
         });
     if let Err(e) = started {
+        if counted {
+            RUNNING.fetch_sub(1, Ordering::SeqCst);
+        }
         log::error!("couldn't start background job \"{name}\": {e}");
     }
 }

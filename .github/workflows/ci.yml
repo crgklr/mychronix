@@ -1,4 +1,4 @@
-# Formatting, tests, clippy and docs on every push and pull request, so a change that breaks
+# Formatting, tests, screenshots, clippy and docs on every push and pull request, so a change that breaks
 # something is caught before a release tag (release.yml tests again then).
 name: CI
 
@@ -16,7 +16,8 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev pkg-config \
+            xvfb xauth libgl1-mesa-dri libegl1 libgl1 libxkbcommon-x11-0 libx11-xcb1 libxcursor1 libxrandr2 libxi6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,6 +30,21 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      # Each page on the made-up library against its reference image (see
+      # crates/mychronix/tests/screens.rs; scripts/screens/run.sh runs it the same way locally).
+      - name: Screenshots
+        run: xvfb-run -a -s "-screen 0 2560x1600x24" cargo test --locked -p mychronix --test screens -- --nocapture
+        env:
+          MYCHRONIX_SCREEN_TESTS: 1
+
+      - name: Keep the screenshots that differ
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/tmp/screens/*.png
+          if-no-files-found: ignore
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

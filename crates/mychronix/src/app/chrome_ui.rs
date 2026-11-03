@@ -249,11 +249,31 @@ impl App {
         let Some(path) = self.screenshot_to.clone() else {
             return;
         };
+        use std::sync::atomic::{AtomicU32, Ordering};
         self.frames += 1;
-        // MYCHRONIX_SCREENSHOT_FRAME delays the shot, e.g. to let map tiles load.
-        if self.frames == crate::hooks::get().screenshot_frame {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        // MYCHRONIX_SCREENSHOT_FRAME delays the shot, e.g. to let map tiles load; then it
+        // waits for background work (sessions read, track details, the library reloading)
+        // to have been idle for 10 frames, so what's on screen doesn't depend on timing.
+        static IDLE: AtomicU32 = AtomicU32::new(0);
+        let wanted = crate::hooks::get().screenshot_frame;
+        if self.frames >= wanted && IDLE.load(Ordering::SeqCst) < u32::MAX {
+            let idle = if crate::jobs::running() == 0 {
+                IDLE.fetch_add(1, Ordering::SeqCst) + 1
+            } else {
+                IDLE.store(0, Ordering::SeqCst);
+                0
+            };
+            let gave_up = self.frames > wanted + 3000;
+            if idle >= 10 || gave_up {
+                if gave_up {
+                    eprintln!("screenshot: background work never finished; taken anyway");
+                }
+                IDLE.store(u32::MAX, Ordering::SeqCst);
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            } else {
+                ui.ctx().request_repaint();
+            }
         }
         let image = ui.ctx().input(|i| {
             i.events.iter().find_map(|e| match e {

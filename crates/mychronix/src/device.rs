@@ -199,7 +199,7 @@ impl Worker {
     pub fn spawn(ctx: eframe::egui::Context) -> Self {
         let (cmd_tx, cmd_rx) = channel::<Command>();
         let (ev_tx, ev_rx) = channel::<Event>();
-        crate::jobs::spawn("mychron", move || {
+        crate::jobs::spawn_worker("mychron", move || {
             let send = |e: Event| {
                 let _ = ev_tx.send(e);
                 ctx.request_repaint();
