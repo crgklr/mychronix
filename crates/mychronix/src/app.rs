@@ -44,6 +44,7 @@ mod tracks_ui;
 mod device_page;
 mod compare_ui;
 mod window_ui;
+mod notices;
 
 pub(crate) use sessions_filter_ui::{session_driver, session_track};
 pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
@@ -144,7 +145,8 @@ pub struct App {
     /// Close the open session at the end of this frame (`self.session` is
     /// held aside while the page draws, so setting it to None there is undone).
     close_session: bool,
-    error: Option<String>,
+    /// Statuses and problems, shown in one place (see `notices`).
+    notices: notices::Notices,
     /// Selected channels and the color slot each keeps while selected.
     selected: BTreeMap<usize, usize>,
     /// Graphed channels in the order they were added (graphs stack in this order).
@@ -222,7 +224,6 @@ pub struct App {
     frames: u32,
 
     /// The last error and device message written to the log.
-    logged_error: Option<String>,
     /// Frames seen by the input hook (for scripted test clicks).
     input_frames: u32,
     /// The Garage: a session to open after the frame, and Events' plan dialog to open.
@@ -231,8 +232,6 @@ pub struct App {
     /// The Analysis session picker's driver filter and warm-up toggle.
     picker_logger: Option<String>,
     picker_warmups: bool,
-    /// The Settings page's last word on connecting an AI assistant.
-    mcp_message: Option<(bool, String)>,
 
     profiles: Option<crate::profiles::Profiles>,
     /// The Sessions page's filters (right column).
@@ -260,7 +259,8 @@ pub fn repair_assistants() {
 }
 
 impl App {
-    pub fn load(&mut self, path: PathBuf) {
+    /// Opens a session on screen; false when it couldn't be (a notice says why).
+    pub fn load(&mut self, path: PathBuf) -> bool {
         match crate::jobs::open_session(&path) {
             Ok(mut session) => {
                 self.fill_names(&mut session, &path);
@@ -275,14 +275,15 @@ impl App {
                 self.lap = session.best_lap(MIN_LAP_MS).and_then(|b| session.laps.iter().position(|l| l == b));
                 self.cursor_s = self.lap.map(|i| session.laps[i].duration_ms() as f64 / 1000.0 * 0.5);
                 self.map_channel = None;
-                self.error = None;
                 self.session = Some(std::sync::Arc::new(session));
                 self.path = Some(path);
                 self.page = Page::Analysis;
+                true
             }
             Err(e) => {
                 log::error!("couldn't open {}: {e}", path.display());
-                self.error = Some(format!("Couldn't open {}: {e}", file_name(&path)));
+                self.notices.error(format!("Couldn't open {}: {e}", file_name(&path)));
+                false
             }
         }
     }
@@ -291,8 +292,7 @@ impl App {
     /// channels graphed.
     pub(super) fn reopen(&mut self, path: PathBuf) {
         let (selected, order, map_channel, page) = (self.selected.clone(), self.graph_order.clone(), self.map_channel, self.page);
-        self.load(path);
-        if self.error.is_none() {
+        if self.load(path) {
             (self.selected, self.graph_order, self.map_channel, self.page) = (selected, order, map_channel, page);
         }
     }
@@ -637,23 +637,9 @@ impl eframe::App for App {
                 crate::jobs::spawn("wifi-restore", crate::device::restore_after_crash);
             }
         }
-        // Everything shown as an error or a device message also goes to the log, once.
-        if self.error != self.logged_error {
-            if let Some(e) = &self.error {
-                log::warn!("shown: {e}");
-            }
-            self.logged_error = self.error.clone();
-        }
-        if self.device.message != self.device.logged_message {
-            if let Some((ok, m)) = &self.device.message {
-                if *ok { log::info!("device: {m}") } else { log::warn!("device: {m}") }
-            }
-            self.device.logged_message = self.device.message.clone();
-        }
         // A damaged settings file was moved aside: say so once.
-        let warnings = crate::storage::take_warnings();
-        if !warnings.is_empty() {
-            self.error = Some(warnings.join("\n"));
+        for w in crate::storage::take_warnings() {
+            self.notices.warning(w);
         }
         self.relap_poll(&ui.ctx().clone());
         let session = self.session.take();
@@ -661,7 +647,6 @@ impl eframe::App for App {
 
         self.status_bar(ui, session.as_deref());
         self.update_bar(ui);
-        self.error_bar(ui);
 
         // The icon rail's space; the rail itself is drawn over the page (it slides out on hover).
         let rail_space = egui::Panel::left("rail")
@@ -699,6 +684,8 @@ impl eframe::App for App {
         self.track_pick_dialog(&ui.ctx().clone());
         self.driver_pick_dialog(&ui.ctx().clone());
         self.track_offer_dialog(&ui.ctx().clone());
+        // Over everything, dialogs included.
+        self.notices_overlay(&ui.ctx().clone());
         // After the pages and dialogs: a change they made starts reloading now.
         self.library_poll(&ui.ctx().clone());
 

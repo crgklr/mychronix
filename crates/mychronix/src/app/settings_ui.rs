@@ -96,7 +96,7 @@ impl App {
 
         if let Some(f) = change {
             if let Err(e) = crate::settings::change(f) {
-                self.error = Some(format!("Couldn't save the settings: {e}"));
+                self.notices.error(format!("Couldn't save the settings: {e}"));
             }
             // Units and the clock show everywhere: draw everything again in them.
             self.reload_library();
@@ -140,25 +140,22 @@ impl App {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if button(ui, Some(Icon::Plus), "Add to Claude Desktop", true).on_hover_text("Adds Mychronix to Claude Desktop's settings, keeping everything else in them").clicked() {
-                    self.mcp_message = Some(match add_to_claude(&command) {
-                        Ok(path) => (true, format!("Added to Claude Desktop ({}). Quit and reopen Claude Desktop, then look for Mychronix in its tools.", path.display())),
-                        Err(e) => (false, e),
-                    });
+                    match add_to_claude(&command) {
+                        Ok(path) => self.notices.success(format!("Added to Claude Desktop ({}). Quit and reopen Claude Desktop, then look for Mychronix in its tools.", path.display())),
+                        Err(e) => self.notices.error(e),
+                    };
                 }
                 if button(ui, Some(Icon::Plus), "Add to Codex", true).on_hover_text("Adds Mychronix to Codex's settings (~/.codex/config.toml), keeping everything else in them").clicked() {
-                    self.mcp_message = Some(match add_to_codex(&command) {
-                        Ok(path) => (true, format!("Added to Codex ({}). Restart Codex, then look for Mychronix in its MCP servers.", path.display())),
-                        Err(e) => (false, e),
-                    });
+                    match add_to_codex(&command) {
+                        Ok(path) => self.notices.success(format!("Added to Codex ({}). Restart Codex, then look for Mychronix in its MCP servers.", path.display())),
+                        Err(e) => self.notices.error(e),
+                    };
                 }
                 if button(ui, None, "Copy the command", false).on_hover_text("For other assistant apps: add an MCP server that runs this").clicked() {
                     ui.ctx().copy_text(command.clone());
-                    self.mcp_message = Some((true, "Copied. In your assistant app, add an MCP server (\"stdio\" or \"command\") that runs it.".into()));
+                    self.notices.success("Copied. In your assistant app, add an MCP server (\"stdio\" or \"command\") that runs it.");
                 }
             });
-            if let Some((ok, m)) = &self.mcp_message {
-                ui.add(egui::Label::new(RichText::new(m).size(13.0).color(if *ok { theme::GOOD } else { theme::DANGER })).wrap());
-            }
             ui.add(egui::Label::new(RichText::new(format!("Other apps: add an MCP server that runs  {command}")).size(12.5).color(DIM)).wrap());
         });
     }

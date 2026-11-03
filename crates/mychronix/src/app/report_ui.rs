@@ -310,7 +310,7 @@ impl App {
             changed = true;
         }
         if changed && let Err(e) = config.save() {
-            self.error = Some(format!("Couldn't save the report columns: {e}"));
+            self.notices.error(format!("Couldn't save the report columns: {e}"));
         }
         if let Some((i, t, k)) = to_corner {
             self.lap = Some(i);

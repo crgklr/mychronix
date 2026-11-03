@@ -24,7 +24,6 @@ pub(super) struct KeyState {
     pub listing: Option<(String, usize, Vec<RunInfo>)>,
     pub busy: Option<String>,
     pub progress: Option<(usize, usize)>,
-    pub message: Option<(bool, String)>,
 }
 
 /// Runs already saved for a logger, by start time ("MM/DD/YYYY", "HH:MM:SS").
@@ -78,7 +77,7 @@ impl App {
                     k.busy = None;
                     k.progress = None;
                     let n = saved.len();
-                    k.message = Some((true, format!("Downloaded {n} run{} from the data key. They're on the Sessions page.", if n == 1 { "" } else { "s" })));
+                    self.notices.success(format!("Downloaded {} from the data key.", plural(n, "session"))).go_to("Open Sessions", Page::Sessions);
                     if let Some((_, _, new)) = k.listing.as_mut() {
                         new.clear();
                     }
@@ -90,7 +89,7 @@ impl App {
                     log::warn!("data key: {e}");
                     k.busy = None;
                     k.progress = None;
-                    k.message = Some((false, e));
+                    self.notices.error(e);
                 }
             }
         }
@@ -100,7 +99,7 @@ impl App {
             log::error!("data key: the job stopped without finishing");
             k.busy = None;
             k.progress = None;
-            k.message = Some((false, "Reading the data key stopped unexpectedly. Unplug it, plug it back in, and try again.".into()));
+            self.notices.error("Reading the data key stopped unexpectedly. Unplug it, plug it back in, and try again.");
         }
         if k.busy.is_some() || k.last_check.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -110,7 +109,6 @@ impl App {
         let present = aim_link::datakey::is_present();
         if present && !k.present {
             log::info!("data key plugged in");
-            k.message = None;
             self.key_list(ctx);
         } else if !present && self.key.present {
             log::info!("data key unplugged");
@@ -188,7 +186,7 @@ impl App {
 
     /// The data key panel (Device page): status, new runs, Download.
     pub(super) fn key_panel(&mut self, ui: &mut Ui) {
-        if !self.key.present && self.key.message.is_none() {
+        if !self.key.present {
             return;
         }
         let ctx = ui.ctx().clone();
@@ -217,9 +215,6 @@ impl App {
                     ui.label(RichText::new(line).size(13.0).color(if self.key.present { theme::GOOD } else { SECONDARY }));
                     if let Some((done, of)) = self.key.progress {
                         ui.add(egui::ProgressBar::new(done as f32 / of.max(1) as f32).desired_width(260.0).text(format!("{done} of {of} runs")));
-                    }
-                    if let Some((ok, msg)) = &self.key.message {
-                        ui.label(RichText::new(msg).size(12.5).color(if *ok { SECONDARY } else { ui.visuals().error_fg_color }));
                     }
                 });
                 let new = self.key.listing.as_ref().map(|l| l.2.len()).unwrap_or(0);

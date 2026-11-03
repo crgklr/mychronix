@@ -322,7 +322,7 @@ impl App {
             self.track_page.groups_open.insert(code);
         }
         if let Some(guid) = starred && let Some(f) = self.track_page.favorites.as_mut() && let Err(e) = f.toggle(&guid) {
-            self.error = Some(format!("Couldn't save favorites: {e}"));
+            self.notices.error(format!("Couldn't save favorites: {e}"));
         }
         if let Some(i) = clicked {
             self.select_track(lib, i);
@@ -351,7 +351,7 @@ impl App {
                         let (icon, label) = if fav { (Icon::StarFilled, "Favorite") } else { (Icon::Star, "Add to favorites") };
                         let clicked = button_with(ui, Some(icon), fav.then_some(theme::FAVORITE), label, false).clicked();
                         if clicked && let Err(e) = self.track_page.favorites.as_mut().unwrap().toggle(&t.guid) {
-                            self.error = Some(format!("Couldn't save favorites: {e}"));
+                            self.notices.error(format!("Couldn't save favorites: {e}"));
                         }
                     });
                     let kind = if t.kind == Kind::Custom { "Custom track" } else { "AiM track" };

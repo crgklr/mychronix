@@ -261,7 +261,7 @@ impl App {
             let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);
             ignored.set(&logger, &channel, true);
             if let Err(e) = ignored.save() {
-                self.error = Some(format!("Couldn't save that: {e}"));
+                self.notices.error(format!("Couldn't save that: {e}"));
             }
         }
         let still = !sensor_check::problems(&checked, self.sensors.ignored.get_or_insert_with(Ignored::load)).is_empty();

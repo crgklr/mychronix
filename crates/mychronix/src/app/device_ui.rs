@@ -413,10 +413,6 @@ impl App {
         }
         if self.device.networks.is_empty() {
             Self::searching(ui, "Looking for your MyChron…", crate::device::JOIN_HINT);
-            if let Some((false, msg)) = &self.device.message {
-                ui.add_space(4.0);
-                look::note(ui, msg, ui.visuals().error_fg_color);
-            }
             return;
         }
         let current = self.device.current_wifi.clone().unwrap_or_else(|| "your current network".into());
@@ -436,7 +432,6 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if look::big_button(ui, "Join", None, Kind::Primary, self.device.busy.is_none()) {
                             self.device.busy = Some(format!("Joining {ssid}…"));
-                            self.device.message = None;
                             if let Some(dev) = &self.device.worker {
                                 let _ = dev.tx.send(crate::device::Command::Join { ssid: ssid.clone() });
                             }

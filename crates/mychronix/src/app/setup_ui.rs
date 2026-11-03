@@ -170,7 +170,7 @@ impl App {
                     k.next_setup = next;
                 }
                 if let Err(e) = profiles.save() {
-                    self.error = Some(format!("Couldn't save the setup: {e}"));
+                    self.notices.error(format!("Couldn't save the setup: {e}"));
                 }
             } else if open && !cancel {
                 self.setup_edit = Some(edit);
@@ -191,7 +191,7 @@ impl App {
                     s.setup = sheet;
                 }
             }
-            Some(Err(e)) => self.error = Some(format!("Couldn't save the setup: {e}")),
+            Some(Err(e)) => { self.notices.error(format!("Couldn't save the setup: {e}")); }
             None if open && !cancel => self.setup_edit = Some(edit),
             None => {}
         }

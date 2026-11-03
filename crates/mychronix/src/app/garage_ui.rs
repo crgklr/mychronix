@@ -530,7 +530,7 @@ impl App {
         if changed {
             log::info!("driver {}: {name}", if existing { "saved" } else { "added" });
             if let Err(e) = profiles.save() {
-                self.error = Some(format!("Couldn't save the driver: {e}"));
+                self.notices.error(format!("Couldn't save the driver: {e}"));
             }
             self.garage.kart_edit = open_kart;
         } else if open && !cancel {
@@ -715,7 +715,7 @@ impl App {
         if changed {
             log::info!("kart {}: {name}", if edit.id.is_some() { "saved" } else { "added" });
             if let Err(e) = profiles.save() {
-                self.error = Some(format!("Couldn't save the kart: {e}"));
+                self.notices.error(format!("Couldn't save the kart: {e}"));
             }
             // Baselines and each session's kart come from the karts.
             self.setup_baselines = None;

@@ -500,13 +500,13 @@ impl App {
             let id = defs.upsert(def);
             self.events_page.sel = Some(format!("def:{id}"));
             if let Err(e) = defs.save() {
-                self.error = Some(format!("Couldn't save events: {e}"));
+                self.notices.error(format!("Couldn't save events: {e}"));
             }
         } else if delete {
             defs.events.retain(|d| d.id != def.id);
             self.events_page.sel = None;
             if let Err(e) = defs.save() {
-                self.error = Some(format!("Couldn't save events: {e}"));
+                self.notices.error(format!("Couldn't save events: {e}"));
             }
         } else if open && !cancel {
             self.events_page.dialog = Some(def);

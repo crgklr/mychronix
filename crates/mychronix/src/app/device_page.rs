@@ -21,7 +21,6 @@ pub(super) struct DeviceState {
     pub(super) usb_blocked: bool,
     pub(super) usb_checked: f64,
     pub(super) usb_allow: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
-    pub(super) logged_message: Option<(bool, String)>,
     /// When the WiFi was last checked from another page.
     pub(super) wifi_check: f64,
     pub(super) files: Vec<aim_link::DirEntry>,
@@ -30,7 +29,6 @@ pub(super) struct DeviceState {
     /// What the worker is doing, shown while busy.
     pub(super) busy: Option<String>,
     pub(super) progress: Option<(usize, usize, String, u64, u64)>,
-    pub(super) message: Option<(bool, String)>,
     /// A setup typed in the download window whose download failed: the next one starts from it.
     pub(super) unsaved_setup: Option<crate::setup::Setup>,
     pub(super) last_scan: f64,
@@ -69,7 +67,7 @@ impl App {
             self.device.busy = None;
             self.device.scanning = false;
             self.device.progress = None;
-            self.device.message = Some((false, "The connection to the MyChron stopped unexpectedly and has been restarted. Try again.".into()));
+            self.notices.error("The connection to the MyChron stopped unexpectedly and has been restarted. Try again.");
             return;
         }
         for e in events {
@@ -80,7 +78,7 @@ impl App {
                     // undo the pause on the other networks' auto-connect.
                     if self.device.joined.is_some() && current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
                         let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
-                        self.device.message = Some((true, format!("You're back on {}. Your networks will connect automatically again.", current.clone().unwrap_or_default())));
+                        self.notices.success(format!("You're back on {}. Your networks will connect automatically again.", current.clone().unwrap_or_default()));
                     }
                     // Newly connected, or moved between USB and WiFi: read the list again.
                     let newly = logger.is_some() && (self.device.logger.is_none() || usb != self.device.usb);
@@ -135,7 +133,7 @@ impl App {
                     self.device.busy = None;
                     if new_tracks > 0 {
                         self.reload_library(); // pick up the new custom tracks
-                        self.device.message = Some((true, format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" })));
+                        self.notices.success(format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" }));
                     }
                     // New sessions are picked, except engine warm-ups (as RaceStudio does); All new picks those too.
                     let warm_up = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).is_some_and(listed_warm_up);
@@ -160,23 +158,23 @@ impl App {
                     if let Some((path, setup)) = self.device.pending_setup.take() {
                         // A session's own sheet is only changed from its Setup.
                         if crate::setup::Setup::path_for(&path).exists() {
-                            self.error = Some("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.".into());
+                            self.notices.error("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.");
                         } else if let Err(e) = setup.save(&path) {
-                            self.error = Some(format!("Couldn't save the setup: {e}"));
+                            self.notices.error(format!("Couldn't save the setup: {e}"));
                         } else if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
                             // The kart's next setup is now that session's.
                             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
                             if let Some(k) = profiles.karts.iter_mut().find(|k| k.logger == id.to_string() && k.next_setup.is_some()) {
                                 k.next_setup = None;
                                 if let Err(e) = profiles.save() {
-                                    self.error = Some(format!("Couldn't save: {e}"));
+                                    self.notices.error(format!("Couldn't save: {e}"));
                                 }
                             }
                         }
                     }
                     self.device.busy = None;
                     self.device.progress = None;
-                    self.device.message = Some((true, format!("Downloaded {}. They're on the Sessions page.", plural(saved.len(), "session"))));
+                    let mut done = format!("Downloaded {}.", plural(saved.len(), "session"));
                     // Check the new sessions' sensors in the background: the files as saved.
                     if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
                         self.check_downloaded(saved, &id.to_string(), &ctx);
@@ -188,12 +186,11 @@ impl App {
                         log::info!("download finished: leaving the MyChron's WiFi");
                         self.device.busy = Some("Reconnecting to your network…".into());
                         let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
-                        if let Some((_, m)) = self.device.message.as_mut() {
-                            m.push_str(" Mychronix is reconnecting you to your WiFi.");
-                        }
-                    } else if cfg!(target_os = "macos") && self.device.current_wifi.as_deref().is_some_and(|w| w.starts_with("AiM-")) && let Some((_, m)) = self.device.message.as_mut() {
-                        m.push_str(" You can switch back to your WiFi from the menu bar.");
+                        done.push_str(" Mychronix is reconnecting you to your WiFi.");
+                    } else if cfg!(target_os = "macos") && self.device.current_wifi.as_deref().is_some_and(|w| w.starts_with("AiM-")) {
+                        done.push_str(" You can switch back to your WiFi from the menu bar.");
                     }
+                    self.notices.success(done).go_to("Open Sessions", Page::Sessions);
                 }
                 Event::Error(msg) => {
                     // A setup typed for a download that failed is offered again next time.
@@ -202,7 +199,7 @@ impl App {
                     }
                     self.device.busy = None;
                     self.device.progress = None;
-                    self.device.message = Some((false, msg));
+                    self.notices.error(msg);
                 }
             }
         }
@@ -263,11 +260,13 @@ impl App {
                 Ok(()) => {
                     self.device.usb_blocked = false;
                     self.device.usb_checked = now;
-                    self.device.message = Some((true, "USB access allowed. Your MyChron will show up in a moment.".into()));
+                    self.notices.success("USB access allowed. Your MyChron will show up in a moment.");
                     // Look again now rather than at the next scan.
                     self.device.last_scan = 0.0;
                 }
-                Err(e) => self.device.message = Some((false, e)),
+                Err(e) => {
+                    self.notices.error(e);
+                }
             }
         }
         let every = if self.device.logger.is_some() { 15.0 } else { 4.0 };
@@ -288,16 +287,6 @@ impl App {
         ui.label(RichText::new("Your MyChrons, how to download from them, and their sessions.").font(regular(14.5)).color(SECONDARY));
         ui.add_space(18.0);
 
-        if let Some((ok, msg)) = self.device.message.clone() {
-            let color = if ok { theme::GOOD } else { ui.visuals().error_fg_color };
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(msg).color(color));
-                if ui.add(Icon::X.image(DIM, 14.0).sense(Sense::click())).clicked() {
-                    self.device.message = None;
-                }
-            });
-            ui.add_space(8.0);
-        }
 
         if crate::hooks::get().fake_dialog.is_some() && self.device.dialog.is_none() && self.frames < 3 && self.device.logger.is_some() {
             let multi = crate::hooks::get().fake_dialog.as_deref() == Some("multi");
@@ -540,7 +529,6 @@ impl App {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     if button(ui, None, "Join", true).clicked() && self.device.busy.is_none() {
                                         self.device.busy = Some(format!("Joining {ssid}…"));
-                                        self.device.message = None;
                                         let _ = self.device.worker.as_ref().unwrap().tx.send(crate::device::Command::Join { ssid: ssid.clone() });
                                     }
                                 });
@@ -859,7 +847,7 @@ impl App {
             let lib = self.library.get_or_insert_with(Library::load);
             profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
             if let Err(e) = profiles.save() {
-                self.error = Some(format!("Couldn't save the driver and kart: {e}"));
+                self.notices.error(format!("Couldn't save the driver and kart: {e}"));
             }
             self.setup_baselines = None;
             self.reload_library();
@@ -884,14 +872,13 @@ impl App {
             };
             if crate::hooks::get().fake_device.is_some() {
                 // Preview mode: there's no MyChron to download from.
-                self.device.message = Some((true, format!(
+                self.notices.info(format!(
                     "Preview only: would download {} session{} with these details. Turn on the MyChron to do it for real.",
                     files.len(),
                     if files.len() == 1 { "" } else { "s" }
-                )));
+                ));
             } else if let Some(dir) = self.logger_dir() {
                 self.device.busy = Some("Downloading…".into());
-                self.device.message = None;
                 let _ = self.device.worker.as_ref().unwrap().tx.send(crate::device::Command::Download { files, dir, replace: dlg.replace });
             }
         } else if open && !cancel {

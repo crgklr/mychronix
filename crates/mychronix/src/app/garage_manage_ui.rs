@@ -444,7 +444,7 @@ impl App {
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         profiles.snoozed.insert(u.logger.clone(), u.sessions);
         if let Err(e) = profiles.save() {
-            self.error = Some(format!("Couldn't save: {e}"));
+            self.notices.error(format!("Couldn't save: {e}"));
         }
     }
 
@@ -597,7 +597,7 @@ impl App {
                 profiles.mount(&s.logger, kart, &|l: &str| crate::profiles::moved_now(lib.newest_start(l)));
                 log::info!("MyChron {} set up on kart {kart}", s.logger);
                 if let Err(e) = profiles.save() {
-                    self.error = Some(format!("Couldn't save: {e}"));
+                    self.notices.error(format!("Couldn't save: {e}"));
                 }
                 self.setup_baselines = None;
                 self.library = Some(lib);
@@ -757,7 +757,7 @@ impl App {
                 let open_is_theirs = self.path.as_ref().is_some_and(|p| theirs.iter().any(|s| &s.path == p));
                 profiles.delete_driver(id);
                 if !files.is_empty() && let Err(e) = trash::delete_all(&files) {
-                    self.error = Some(format!("{name} was deleted, but some session files couldn't go to the Trash: {e}"));
+                    self.notices.error(format!("{name} was deleted, but some session files couldn't go to the Trash: {e}"));
                 }
                 // A MyChron's folder left empty goes too.
                 let mut dirs: Vec<&std::path::Path> = theirs.iter().filter_map(|s| s.path.parent()).collect();
@@ -781,7 +781,7 @@ impl App {
             Confirm::RemoveMyChron { logger, .. } => profiles.remove_logger(&logger, &|l: &str| crate::profiles::moved_now(lib.newest_start(l))),
         }
         if let Err(e) = self.profiles.as_ref().map(|p| p.save()).unwrap_or(Ok(())) {
-            self.error = Some(format!("Couldn't save: {e}"));
+            self.notices.error(format!("Couldn't save: {e}"));
         }
         self.reload_library();
         self.setup_baselines = None;

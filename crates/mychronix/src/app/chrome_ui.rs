@@ -130,35 +130,6 @@ impl App {
         }
     }
 
-    /// Something went wrong (a save failed, a file couldn't be opened): a bar
-    /// across the top that stays until dismissed. Also in the log.
-    pub(super) fn error_bar(&mut self, ui: &mut Ui) {
-        let Some(err) = self.error.clone() else { return };
-        let mut dismiss = false;
-        egui::Panel::top("error")
-            .show_separator_line(false)
-            .frame(Frame::new().fill(theme::DANGER.gamma_multiply(0.16)).inner_margin(Margin { left: 16, right: 16 + window_ui::CORNER_W as i8, top: 9, bottom: 9 }))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    ui.add(Icon::TriangleAlert.image(theme::DANGER, 15.0));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let x = ui.add(Icon::X.image(SECONDARY, 13.0).sense(Sense::click())).on_hover_text("Dismiss");
-                        if x.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        dismiss = x.clicked();
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.add(egui::Label::new(RichText::new(err).font(medium(13.5)).color(TEXT)).wrap());
-                        });
-                    });
-                });
-            });
-        if dismiss {
-            self.error = None;
-        }
-    }
-
     pub(super) fn status_bar(&self, ui: &mut Ui, session: Option<&Session>) {
         egui::Panel::bottom("status")
             .exact_size(30.0)

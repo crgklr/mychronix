@@ -914,7 +914,7 @@ impl App {
             if !profiles.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(&name)) {
                 profiles.driver_named(&name);
                 if let Err(e) = profiles.save() {
-                    self.error = Some(format!("Couldn't save the driver: {e}"));
+                    self.notices.error(format!("Couldn't save the driver: {e}"));
                 }
             }
             let mut meta = crate::device::SessionMeta::load(&path).unwrap_or_default();
@@ -926,7 +926,7 @@ impl App {
                     // Reopened, so the panel and everything else show the new driver.
                     self.load(path);
                 }
-                Err(e) => self.error = Some(format!("Couldn't save the driver: {e}")),
+                Err(e) => { self.notices.error(format!("Couldn't save the driver: {e}")); }
             }
         } else if !closed && !cancel {
             self.driver_pick = Some((path, name, adding));

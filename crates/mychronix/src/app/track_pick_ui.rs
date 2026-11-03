@@ -193,7 +193,7 @@ impl App {
             self.sensors.digests = None;
             self.sensors.digests_asked.clear();
             if let Some(e) = failed {
-                self.error = Some(format!("Couldn't save the track: {e}"));
+                self.notices.error(format!("Couldn't save the track: {e}"));
             }
             self.reload_library();
             // The open one shows its laps at the track now theirs straight away.
@@ -317,7 +317,7 @@ impl App {
             None => log::info!("kept {} session(s) named {} as they are", paths.len(), offer.typed),
         }
         if let Some(e) = failed {
-            self.error = Some(format!("Couldn't save the track: {e}"));
+            self.notices.error(format!("Couldn't save the track: {e}"));
         }
         self.reload_library();
     }
