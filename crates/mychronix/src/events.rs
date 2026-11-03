@@ -120,16 +120,29 @@ pub fn session_key(lib: &Library, i: usize, profiles: &crate::profiles::Profiles
     let s = &lib.sessions[i];
     let date = s.summary.date?;
     let meta = s.meta.clone().unwrap_or_default();
-    let track = Some(meta.track)
-        .filter(|t| !t.trim().is_empty())
-        .or_else(|| s.summary.track.clone())
-        .or_else(|| s.track.map(|t| lib.tracks[t].name.clone()))
+    // An engine warm-up in the pits records no track: it belongs with what
+    // the same MyChron recorded at a track that day.
+    let track = track_of(lib, i)
+        .or_else(|| {
+            lib.sessions.iter().enumerate().filter(|(_, o)| o.summary.date == Some(date) && o.logger == s.logger).find_map(|(j, _)| track_of(lib, j))
+        })
         .unwrap_or_else(|| "No track".into());
     let championship = Some(meta.championship)
         .filter(|c| !c.trim().is_empty())
         .or_else(|| profiles.get(&s.logger).map(|p| p.championship.clone()))
         .unwrap_or_default();
     Some(SessionKey { date, track, championship })
+}
+
+/// A session's own track name: the one entered at download, else the logger's, else the library's.
+fn track_of(lib: &Library, i: usize) -> Option<String> {
+    let s = &lib.sessions[i];
+    s.meta
+        .as_ref()
+        .map(|m| m.track.clone())
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| s.summary.track.clone())
+        .or_else(|| s.track.map(|t| lib.tracks[t].name.clone()))
 }
 
 /// Groups every session into events. Planned events with no sessions yet are
@@ -349,5 +362,33 @@ mod tests {
         assert!(!def.claims(d(2026, 10, 17), "OVRP Short", ""));
         let champ = EventDef { championship: "2026 Club".into(), ..def };
         assert!(!champ.claims(d(2026, 10, 17), "OVRP Full", "Other"));
+    }
+
+    #[test]
+    fn a_warm_up_without_a_track_joins_that_days_event() {
+        use aim_xrk::SessionSummary;
+        let session = |logger: &str, date: Date, time: &str, track: Option<&str>| crate::tracks::LocalSession {
+            path: format!("/x/{logger}/{time}.xrz").into(),
+            logger: logger.into(),
+            summary: SessionSummary { date: Some(date), start_time: Some(time.into()), track: track.map(String::from), ..Default::default() },
+            track: None,
+            meta: None,
+            setup: None,
+            weather: None,
+            kart: None,
+        };
+        let day = d(2026, 10, 31);
+        let lib = Library {
+            sessions: vec![
+                session("111", day, "08:55:00", None),              // warm-up in the pits
+                session("111", day, "10:14:00", Some("Club Ring")), // on track
+                session("222", day, "09:00:00", None),              // another MyChron with nothing on track that day
+            ],
+            ..Default::default()
+        };
+        let events = group(&lib, &crate::profiles::Profiles::default(), &Events::default());
+        let ring = events.iter().find(|e| e.track == "Club Ring").unwrap();
+        assert_eq!(ring.sessions, vec![0, 1]);
+        assert!(events.iter().any(|e| e.track == "No track" && e.sessions == vec![2]));
     }
 }
