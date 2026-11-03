@@ -74,7 +74,7 @@ pub(super) struct Unplaced {
     /// Its sessions that belong to no kart.
     pub sessions: usize,
     /// It had a kart before: (driver, kart, when it came off).
-    pub before: Option<(String, String, String)>,
+    pub before: Option<(String, String, Option<crate::dates::Stamp>)>,
 }
 
 use look::Kind;
@@ -236,7 +236,7 @@ impl App {
                     (
                         profiles.driver_name(k.driver).unwrap_or("").to_string(),
                         k.name.clone(),
-                        until.to_string(),
+                        until,
                     )
                 });
                 Some(Unplaced {
@@ -262,7 +262,7 @@ impl App {
                 } else {
                     format!("{driver}'s {kart}")
                 };
-                let when = crate::dates::stamp_month_day(until);
+                let when = until.map(crate::dates::stamp_month_day).unwrap_or_default();
                 (
                     format!("Previously used {model} detected"),
                     format!(
@@ -1026,7 +1026,9 @@ mod tests {
         assert_eq!(got, ["a_0001.meta.json", "a_0001.xri", "a_0001.xrz"]);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
-            crate::dates::stamp_month_day("2026-12-20 10:00:00"),
+            crate::dates::stamp_month_day(
+                crate::dates::Stamp::parse("2026-12-20 10:00:00").unwrap()
+            ),
             "Dec 20"
         );
     }

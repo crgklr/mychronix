@@ -4,6 +4,110 @@
 
 use aim_xrk::summary::Date;
 
+/// When a session started, or when a MyChron moved between karts: a date and
+/// time on the logger's own (local) clock. Compared as times; written as
+/// `2026-10-31 08:55:00` (in `profiles.json` and `setups.json` too).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Stamp(jiff::civil::DateTime);
+
+impl Stamp {
+    /// A session's start from its date and its time (`HH:MM:SS`; midnight
+    /// when the logger recorded none).
+    pub fn new(date: Date, time: Option<&str>) -> Option<Self> {
+        let mut t = time
+            .unwrap_or("")
+            .split(':')
+            .map(|x| x.trim().parse::<i8>().ok());
+        let (h, m, s) = (
+            t.next().flatten().unwrap_or(0),
+            t.next().flatten().unwrap_or(0),
+            t.next().flatten().unwrap_or(0),
+        );
+        let d = jiff::civil::Date::new(date.year as i16, date.month as i8, date.day as i8).ok()?;
+        Some(Stamp(
+            d.to_datetime(jiff::civil::Time::new(h, m, s, 0).ok()?),
+        ))
+    }
+
+    /// Now, on this computer's clock.
+    pub fn now() -> Self {
+        Stamp(
+            jiff::Zoned::now()
+                .datetime()
+                .with()
+                .subsec_nanosecond(0)
+                .build()
+                .unwrap_or_default(),
+        )
+    }
+
+    /// `2026-10-31 08:55:00` (also `2026-10-31 08:55`, and a bare date: midnight).
+    pub fn parse(text: &str) -> Option<Self> {
+        let (date, time) = text.trim().split_once(' ').unwrap_or((text.trim(), ""));
+        let mut d = date.split('-').map(|x| x.parse::<u16>().ok());
+        let date = Date {
+            year: d.next()??,
+            month: d.next()?? as u8,
+            day: d.next()?? as u8,
+        };
+        Stamp::new(date, Some(time).filter(|t| !t.is_empty()))
+    }
+
+    /// From a time in another zone (`tz_from`, e.g. a MyChron's UTC file
+    /// times) to this one's local clock (`tz_to`).
+    pub fn moved(self, from: &jiff::tz::TimeZone, to: &jiff::tz::TimeZone) -> Option<Self> {
+        let z = self
+            .0
+            .to_zoned(from.clone())
+            .ok()?
+            .with_time_zone(to.clone());
+        Some(Stamp(z.datetime()))
+    }
+
+    pub fn date(self) -> Date {
+        let d = self.0.date();
+        Date {
+            year: d.year() as u16,
+            month: d.month() as u8,
+            day: d.day() as u8,
+        }
+    }
+
+    /// `HH:MM:SS`.
+    pub fn time(self) -> String {
+        self.0.strftime("%H:%M:%S").to_string()
+    }
+}
+
+/// A `jiff` date as the summaries' `Date`.
+pub fn date_of(d: jiff::civil::Date) -> Date {
+    Date {
+        year: d.year() as u16,
+        month: d.month() as u8,
+        day: d.day() as u8,
+    }
+}
+
+impl std::fmt::Display for Stamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.strftime("%Y-%m-%d %H:%M:%S"))
+    }
+}
+
+/// An optional `Stamp` as files keep it: the text, or "" for none.
+pub mod stamp_text {
+    use super::Stamp;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(s: &Option<Stamp>, out: S) -> Result<S::Ok, S::Error> {
+        out.serialize_str(&s.map(|s| s.to_string()).unwrap_or_default())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<Option<Stamp>, D::Error> {
+        Ok(Stamp::parse(&String::deserialize(input)?))
+    }
+}
+
 const MONTHS: [&str; 12] = [
     "January",
     "February",
@@ -65,30 +169,18 @@ pub fn long(d: Date) -> String {
     )
 }
 
-/// "Oct 17" from a session start like "2026-10-17 14:19:05" ("" when it isn't one).
-pub fn stamp_month_day(stamp: &str) -> String {
-    stamp_date(stamp).map(month_day).unwrap_or_default()
+/// "Oct 17": the day of a session start.
+pub fn stamp_month_day(stamp: Stamp) -> String {
+    month_day(stamp.date())
 }
 
-/// "Oct 17, 2026 at 2:19 PM" from a session start like "2026-10-17 14:19:05".
-pub fn stamp_words(stamp: &str) -> String {
-    let (_, time) = stamp.split_once(' ').unwrap_or((stamp, ""));
-    match stamp_date(stamp) {
-        Some(d) if time.is_empty() => us_short(d),
-        Some(d) => format!("{} at {}", us_short(d), clock_time(time)),
-        None => stamp.to_string(),
-    }
-}
-
-/// The date of a session start like "2026-10-17 14:19:05".
-fn stamp_date(stamp: &str) -> Option<Date> {
-    let mut p = stamp.get(..10)?.split('-').map(|x| x.parse::<u16>().ok());
-    let (year, month, day) = (p.next()??, p.next()??, p.next()??);
-    (1..=12).contains(&month).then_some(Date {
-        year,
-        month: month as u8,
-        day: day as u8,
-    })
+/// "Oct 17, 2026 at 2:19 PM": a session start.
+pub fn stamp_words(stamp: Stamp) -> String {
+    format!(
+        "{} at {}",
+        us_short(stamp.date()),
+        clock_time(&stamp.time())
+    )
 }
 
 /// Days since 1970-01-01 (Howard Hinnant's days_from_civil).
@@ -251,7 +343,10 @@ mod tests {
         assert_eq!(month_day(d), "Oct 31");
         assert_eq!(day_month_day(d), "Sat, Oct 31");
         assert_eq!(day_numeric(d), "Sat 10/31");
-        assert_eq!(stamp_month_day("2026-10-31 08:58:10"), "Oct 31");
+        assert_eq!(
+            stamp_month_day(Stamp::parse("2026-10-31 08:58:10").unwrap()),
+            "Oct 31"
+        );
         assert_eq!(
             long(Date {
                 year: 2024,
@@ -267,6 +362,42 @@ mod tests {
                 day: 1
             }),
             "Saturday, January 1, 2000"
+        );
+    }
+
+    #[test]
+    fn stamps_compare_as_times_and_keep_their_file_format() {
+        let a = Stamp::parse("2026-10-10 14:00:00").unwrap();
+        let b = Stamp::parse("2026-10-10 9:05:00").unwrap();
+        // As text "9:05" sorted after "14:00"; as times it's earlier.
+        assert!(b < a);
+        assert_eq!(b.to_string(), "2026-10-10 09:05:00");
+        assert_eq!(
+            Stamp::new(d(2026, 10, 31), None).unwrap().to_string(),
+            "2026-10-31 00:00:00"
+        );
+        // In profiles.json: the text, or "" for none, both ways.
+        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+        struct Past {
+            #[serde(with = "stamp_text")]
+            until: Option<Stamp>,
+        }
+        let json = r#"{"until":"2026-10-11 02:21:31"}"#;
+        let past: Past = serde_json::from_str(json).unwrap();
+        assert_eq!(serde_json::to_string(&past).unwrap(), json);
+        let none: Past = serde_json::from_str(r#"{"until":""}"#).unwrap();
+        assert_eq!(
+            (none.until, serde_json::to_string(&none).unwrap().as_str()),
+            (None, r#"{"until":""}"#)
+        );
+        // A MyChron lists file times in UTC: 12:58 UTC is 8:58 at UTC-4.
+        let utc = Stamp::parse("2026-10-31 12:58:46").unwrap();
+        let edt = jiff::tz::TimeZone::fixed(jiff::tz::offset(-4));
+        assert_eq!(
+            utc.moved(&jiff::tz::TimeZone::UTC, &edt)
+                .unwrap()
+                .to_string(),
+            "2026-10-31 08:58:46"
         );
     }
 }

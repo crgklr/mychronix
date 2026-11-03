@@ -302,7 +302,7 @@ fn list_sessions(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(40) as usize;
-    let mut rows: Vec<(String, Value)> = Vec::new();
+    let mut rows: Vec<(Option<crate::dates::Stamp>, Value)> = Vec::new();
     for (i, s) in lib.sessions.iter().enumerate() {
         let d = s.driver(profiles);
         let t = lib.sessions[i].track_name(&lib.tracks).unwrap_or_default();
@@ -337,7 +337,7 @@ fn list_sessions(
             }),
         ));
     }
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
     let total = rows.len();
     Ok(
         json!({ "sessions": rows.into_iter().take(limit).map(|r| r.1).collect::<Vec<_>>(), "matching": total }),

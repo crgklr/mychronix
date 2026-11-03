@@ -168,7 +168,7 @@ fn kart_setup_now(lib: &Library, resolved: &[setup::Resolved], row: &KartRow) ->
         (Some(i), Some(k))
             if k.past_baselines
                 .last()
-                .is_some_and(|p| p.until.as_str() >= lib.sessions[i].start().as_str()) =>
+                .is_some_and(|p| p.until >= lib.sessions[i].start()) =>
         {
             k.baseline.clone()
         }
@@ -1122,7 +1122,7 @@ impl App {
                 .sessions
                 .iter()
                 .filter(|s| s.kart == Some(id))
-                .map(|s| s.start())
+                .filter_map(|s| s.start())
                 .max();
             let mut kart = Kart {
                 id,

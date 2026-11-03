@@ -627,7 +627,7 @@ impl App {
     /// The session picked for download that a setup entered with them is
     /// saved on, with its start (see `device::setup_target`); None when
     /// none of them is newer than what's here.
-    fn download_setup_target(&self, lib: &Library) -> Option<(PathBuf, String)> {
+    fn download_setup_target(&self, lib: &Library) -> Option<(PathBuf, crate::dates::Stamp)> {
         let dir = self.logger_dir()?;
         let id = self
             .device
@@ -637,7 +637,7 @@ impl App {
             .map(|i| i.to_string())
             .unwrap_or_default();
         let tz = jiff::tz::TimeZone::system();
-        let picked: Vec<(aim_link::DirEntry, String)> = self
+        let picked: Vec<(aim_link::DirEntry, Option<crate::dates::Stamp>)> = self
             .device
             .files
             .iter()
@@ -656,7 +656,7 @@ impl App {
                 )
             })
             .collect();
-        crate::device::setup_target(&dir, &picked, &lib.newest_start(&id))
+        crate::device::setup_target(&dir, &picked, lib.newest_start(&id))
     }
 
     pub(super) fn device_status(&mut self, ui: &mut Ui) {
@@ -1082,7 +1082,7 @@ impl App {
             .get_or_insert_with(|| self.download_setup_target(&lib))
             .clone();
         let setup_from = match &target {
-            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", crate::dates::stamp_words(start)),
+            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", crate::dates::stamp_words(*start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
         };
         // The Garage's drivers and karts, and what this MyChron is on now.

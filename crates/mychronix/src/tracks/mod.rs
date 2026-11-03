@@ -248,9 +248,9 @@ impl LocalSession {
             .or_else(|| self.summary.track.clone())
     }
 
-    /// When it started, as `Profiles::kart_for` compares it.
-    pub fn start(&self) -> String {
-        crate::profiles::stamp(self.summary.date, self.summary.start_time.as_deref())
+    /// When it started (None when the logger recorded no date).
+    pub fn start(&self) -> Option<crate::dates::Stamp> {
+        crate::dates::Stamp::new(self.summary.date?, self.summary.start_time.as_deref())
     }
 }
 
@@ -546,18 +546,17 @@ impl Library {
     /// Gives each session the kart its MyChron was on when it was recorded.
     pub fn assign_karts(&mut self, profiles: &crate::profiles::Profiles) {
         for s in &mut self.sessions {
-            s.kart = profiles.kart_for(&s.logger, &s.start()).map(|k| k.id);
+            s.kart = profiles.kart_for(&s.logger, s.start()).map(|k| k.id);
         }
     }
 
-    /// The start of a MyChron's newest session here, or "" (see `Profiles::mount`).
-    pub fn newest_start(&self, logger: &str) -> String {
+    /// The start of a MyChron's newest session here (see `Profiles::mount`).
+    pub fn newest_start(&self, logger: &str) -> Option<crate::dates::Stamp> {
         self.sessions
             .iter()
             .filter(|s| s.logger == logger)
-            .map(|s| s.start())
+            .filter_map(|s| s.start())
             .max()
-            .unwrap_or_default()
     }
 
     pub fn count(&self, kind: Kind) -> usize {
@@ -668,7 +667,7 @@ mod tests {
             driver: Some(1),
             ..Default::default()
         });
-        profiles.mount("12345678", 1, &|_: &str| String::new());
+        profiles.mount("12345678", 1, &|_: &str| None);
 
         let lib = Library::load_from(&tracks, &sessions, &profiles);
         assert_eq!(
@@ -692,7 +691,10 @@ mod tests {
         // Named at download wins; else the kart's driver.
         assert_eq!(by(3).driver(&profiles), "Alex");
         assert_eq!(by(1).driver(&profiles), "Sam");
-        assert_eq!(by(3).start(), "2026-10-10 11:00:00");
+        assert_eq!(
+            by(3).start().map(|s| s.to_string()).as_deref(),
+            Some("2026-10-10 11:00:00")
+        );
         let _ = std::fs::remove_dir_all(sessions.parent().unwrap());
     }
 

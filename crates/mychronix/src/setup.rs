@@ -427,12 +427,12 @@ impl Baselines {
     /// The baseline for `key` at a session that started at `stamp`, with
     /// which one it is (0 the oldest): an earlier one if the session came
     /// before that baseline was changed, else the current one.
-    fn at(&self, key: &str, stamp: &str) -> (usize, Option<Setup>) {
+    fn at(&self, key: &str, stamp: Option<crate::dates::Stamp>) -> (usize, Option<Setup>) {
         let past = self.past.get(key).map(Vec::as_slice).unwrap_or_default();
         let some = |s: &Setup| Some(s.clone()).filter(|s| *s != Setup::default());
         match past
             .iter()
-            .position(|p| !stamp.is_empty() && stamp <= p.until.as_str())
+            .position(|p| stamp.is_some() && stamp <= p.until)
         {
             Some(k) => (k, some(&past[k].setup)),
             None => (past.len(), self.loggers.get(key).and_then(some)),
@@ -472,7 +472,7 @@ pub fn resolve(lib: &Library, baselines: &Baselines) -> Vec<Resolved> {
     resolve_with(&own, &keys(lib), &stamps(lib), &order, baselines)
 }
 
-fn stamps(lib: &Library) -> Vec<String> {
+fn stamps(lib: &Library) -> Vec<Option<crate::dates::Stamp>> {
     lib.sessions.iter().map(|s| s.start()).collect()
 }
 
@@ -488,7 +488,7 @@ fn chronological(lib: &Library) -> Vec<usize> {
 fn resolve_with(
     own: &[Option<Setup>],
     loggers: &[String],
-    stamps: &[String],
+    stamps: &[Option<crate::dates::Stamp>],
     order: &[usize],
     baselines: &Baselines,
 ) -> Vec<Resolved> {
@@ -504,7 +504,7 @@ fn resolve_with(
     let mut current: BTreeMap<&str, (Setup, Source, usize)> = BTreeMap::new();
     for &i in order {
         let logger = loggers[i].as_str();
-        let (era, base) = baselines.at(logger, &stamps[i]);
+        let (era, base) = baselines.at(logger, stamps[i]);
         // A setup carries over within one baseline; the first session after
         // the baseline was changed starts from the new one.
         let before = match current.get(logger) {
@@ -581,7 +581,7 @@ pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u
     // A baseline changed since the newest session is what runs now.
     let now = baselines.past.get(&key).map_or(0, Vec::len);
     match newest {
-        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => {
+        Some(i) if baselines.at(&key, lib.sessions[i].start()).0 == now => {
             Some(resolved[i].setup.carried())
         }
         _ => baselines.loggers.get(&key).map(|b| b.carried()),
@@ -639,6 +639,11 @@ mod tests {
 
     use super::*;
 
+    /// A start or a move time, as written in files.
+    fn st(s: &str) -> Option<crate::dates::Stamp> {
+        crate::dates::Stamp::parse(s)
+    }
+
     fn gearing(drive: &str, driven: &str) -> Setup {
         Setup {
             drive_teeth: drive.into(),
@@ -656,7 +661,7 @@ mod tests {
         changed.notes = "Went up one for the long straight".into();
         let own = vec![None, Some(changed), None, None];
         let loggers = vec!["A".to_string(), "A".into(), "A".into(), "B".into()];
-        let stamps = vec![String::new(); 4];
+        let stamps = vec![None; 4];
         let r = resolve_with(&own, &loggers, &stamps, &[0, 1, 2, 3], &baselines);
         assert_eq!(r[0].source, Source::Baseline);
         assert_eq!(r[0].setup.driven_teeth, "80");
@@ -677,20 +682,20 @@ mod tests {
             baseline: gearing("10", "80"),
             ..Default::default()
         };
-        kart.change_baseline(gearing("10", "82"), Some("2026-10-11 02:21:31".into()));
+        kart.change_baseline(gearing("10", "82"), st("2026-10-11 02:21:31"));
         let mut baselines = Baselines::default();
         baselines.loggers.insert("K".into(), kart.baseline.clone());
         baselines
             .past
             .insert("K".into(), kart.past_baselines.clone());
-        let stamps: Vec<String> = [
+        let stamps: Vec<_> = [
             "2026-10-10 14:00:00",
             "2026-10-11 01:00:00",
             "2026-10-11 02:21:31",
             "2026-10-18 10:00:00",
             "2026-10-18 11:00:00",
         ]
-        .map(String::from)
+        .map(st)
         .to_vec();
         let loggers = vec!["K".to_string(); 5];
         // The second session had its own sheet (81): it carries on only until the baseline change.
@@ -700,7 +705,7 @@ mod tests {
         assert_eq!(teeth, ["80", "81", "81", "82", "82"]);
         assert_eq!(r[3].source, Source::Baseline);
         // Changing it again before any new session doesn't add a step.
-        kart.change_baseline(gearing("10", "84"), Some("2026-10-11 02:21:31".into()));
+        kart.change_baseline(gearing("10", "84"), st("2026-10-11 02:21:31"));
         assert_eq!(kart.past_baselines.len(), 1);
         assert_eq!(kart.past_baselines[0].setup.driven_teeth, "80");
         // A kart with no sessions yet just takes the new baseline.

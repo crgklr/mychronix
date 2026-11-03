@@ -91,7 +91,7 @@ struct DownloadDialog {
     replace: bool,
     /// The session a changed setup is saved on, with its start, worked out
     /// once when the window first draws (see `download_setup_target`).
-    setup_target: Option<Option<(PathBuf, String)>>,
+    setup_target: Option<Option<(PathBuf, crate::dates::Stamp)>>,
     /// Typing a new driver's name instead of picking one from the Garage.
     adding_driver: bool,
 }

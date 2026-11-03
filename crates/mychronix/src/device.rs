@@ -9,6 +9,7 @@
 //! start if Mychronix quit while joined (see [`restore_after_crash`]). On a
 //! Mac you join the MyChron's network from the menu bar (see `mod wifi`).
 
+use crate::dates::Stamp;
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -118,18 +119,16 @@ pub fn start_of(
     entry: &DirEntry,
     summary: Option<&SessionSummary>,
     tz: &jiff::tz::TimeZone,
-) -> String {
-    if let Some(s) = summary.filter(|s| s.date.is_some()) {
-        return crate::profiles::stamp(s.date, s.start_time.as_deref());
+) -> Option<Stamp> {
+    if let Some(d) = summary.and_then(|s| s.date) {
+        return Stamp::new(d, summary.and_then(|s| s.start_time.as_deref()));
     }
-    jiff::civil::DateTime::strptime("%m/%d/%Y %H:%M:%S", listed(entry))
-        .and_then(|utc| utc.to_zoned(jiff::tz::TimeZone::UTC))
-        .map(|utc| {
-            utc.with_time_zone(tz.clone())
-                .strftime("%Y-%m-%d %H:%M:%S")
-                .to_string()
-        })
-        .unwrap_or_default()
+    let utc = jiff::civil::DateTime::strptime("%m/%d/%Y %H:%M:%S", listed(entry)).ok()?;
+    let utc = Stamp::new(
+        crate::dates::date_of(utc.date()),
+        Some(&utc.time().strftime("%H:%M:%S").to_string()),
+    )?;
+    utc.moved(&jiff::tz::TimeZone::UTC, tz)
 }
 
 /// Which of the sessions being downloaded (each with its start, see
@@ -140,15 +139,18 @@ pub fn start_of(
 /// downloaded.
 pub fn setup_target(
     dir: &Path,
-    files: &[(DirEntry, String)],
-    newest: &str,
-) -> Option<(PathBuf, String)> {
+    files: &[(DirEntry, Option<Stamp>)],
+    newest: Option<Stamp>,
+) -> Option<(PathBuf, Stamp)> {
     files
         .iter()
         .filter(|(e, _)| downloaded(dir, e).is_none())
-        .min_by(|a, b| (&a.1, &a.0.name).cmp(&(&b.1, &b.0.name)))
-        .filter(|(_, start)| !start.is_empty() && start.as_str() > newest)
-        .map(|(e, start)| (target_for(dir, e), start.clone()))
+        .min_by(|a, b| (a.1, &a.0.name).cmp(&(b.1, &b.0.name)))
+        .and_then(|(e, start)| {
+            start
+                .filter(|s| Some(*s) > newest)
+                .map(|s| (target_for(dir, e), s))
+        })
 }
 
 impl SessionMeta {
@@ -967,6 +969,11 @@ mod wifi {
 mod tests {
     use super::*;
 
+    /// A start or a move time, as written in files.
+    fn st(s: &str) -> Option<crate::dates::Stamp> {
+        crate::dates::Stamp::parse(s)
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn splits_nmcli_terse_fields() {
@@ -1108,11 +1115,11 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            setup_target(&dir, &picked, "2026-10-24 14:47:00"),
-            Some((dir.join("a_0049.xrz"), "2026-10-31 08:58:46".into()))
+            setup_target(&dir, &picked, st("2026-10-24 14:47:00")),
+            Some((dir.join("a_0049.xrz"), st("2026-10-31 08:58:46").unwrap()))
         );
         // Nothing newer than what's here: no session gets it.
-        assert_eq!(setup_target(&dir, &picked, "2026-11-01 10:00:00"), None);
+        assert_eq!(setup_target(&dir, &picked, st("2026-11-01 10:00:00")), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1141,7 +1148,7 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            setup_target(&dir, &picked, "").map(|(p, _)| p),
+            setup_target(&dir, &picked, st("")).map(|(p, _)| p),
             Some(dir.join("a_0002.xrz"))
         );
         std::fs::remove_dir_all(&dir).unwrap();
