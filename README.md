@@ -99,7 +99,7 @@ and the track's GPS position, so share only what you're happy to make public.
   with the time gap and where time was won and lost.
 - **Speed without GPS**: worked out from RPM, gearing and rear tire size (marked
   wherever it's used, since it can't be exact), so a MyChron without GPS still
-  gets corners and comparisons.
+  gets speed graphs, lap tables and comparisons (corners and the map need GPS).
 - **Events**: sessions grouped by week, track and championship, as RaceStudio
   does, plus events you plan ahead; a season summary per championship.
 - **Setup sheets**: gearing, tires and pressures, weight and ballast, jetting
@@ -327,6 +327,8 @@ mychronix-cli info session.xrz        # a session's laps and channels
 mychronix-cli sessions                # downloaded sessions
 mychronix-cli device probe            # is a MyChron answering (USB, else WiFi)?
 mychronix-cli device pull             # download every new session (USB, else WiFi)
+mychronix-cli datakey list            # the runs on a MyChron 4 data key
+mychronix-cli datakey pull            # download the key's runs not saved yet
 ```
 
 `-v` / `-vv` print more. On a Mac the tool is inside the app, at
@@ -373,8 +375,7 @@ Roughly in priority order:
 - [ ] Export sessions and laps to CSV.
 - [ ] Drag and drop on Linux under Wayland (waiting on the windowing library).
 - [ ] Make a custom track from a session's lap; import and export `.tkk` files.
-- [ ] Device information: firmware version, tracks stored on the MyChron,
-      odometers (read-only).
+- [ ] Device information: firmware version and odometers (read-only).
 - [ ] Compare laps by time when there's no GPS and no gearing.
 - [ ] Read the MyChron 4's CAN devices' own readings.
 - [ ] Split divisions by corners and straights, saved per track.
