@@ -209,9 +209,7 @@ impl App {
         }
         let profiles = self.profiles.get_or_insert_with(Profiles::load);
         profiles.snoozed.insert(u.logger.clone(), u.sessions);
-        if let Err(e) = profiles.save() {
-            self.notices.error(format!("Couldn't save: {e}"));
-        }
+        self.profiles_changed();
     }
 
     /// Setting up a MyChron: whose it is, which kart, and (if that kart has
@@ -362,10 +360,8 @@ impl App {
                 // sessions without a kart become this kart's.
                 profiles.mount(&s.logger, kart, &|l: &str| crate::profiles::moved_now(lib.newest_start(l)));
                 log::info!("MyChron {} set up on kart {kart}", s.logger);
-                if let Err(e) = profiles.save() {
-                    self.notices.error(format!("Couldn't save: {e}"));
-                }
-                self.setup_baselines = None;
+                // Its sessions are this kart's now: worked out again.
+                self.profiles_changed();
                 return;
             }
         }
@@ -542,11 +538,7 @@ impl App {
             Confirm::RemoveKart { id, .. } => profiles.remove_kart(id),
             Confirm::RemoveMyChron { logger, .. } => profiles.remove_logger(&logger, &|l: &str| crate::profiles::moved_now(lib.newest_start(l))),
         }
-        if let Err(e) = self.profiles.as_ref().map(|p| p.save()).unwrap_or(Ok(())) {
-            self.notices.error(format!("Couldn't save: {e}"));
-        }
-        self.reload_library();
-        self.setup_baselines = None;
+        self.profiles_changed();
     }
 }
 

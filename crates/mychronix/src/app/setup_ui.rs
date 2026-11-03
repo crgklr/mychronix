@@ -169,9 +169,7 @@ impl App {
                 if let Some(k) = profiles.karts.iter_mut().find(|k| k.id == id) {
                     k.next_setup = next;
                 }
-                if let Err(e) = profiles.save() {
-                    self.notices.error(format!("Couldn't save the setup: {e}"));
-                }
+                self.profiles_changed();
             } else if open && !cancel {
                 self.setup_edit = Some(edit);
             }

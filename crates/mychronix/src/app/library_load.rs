@@ -26,6 +26,18 @@ impl App {
         self.library.as_mut().map(std::sync::Arc::make_mut)
     }
 
+    /// The drivers, karts or MyChrons changed: saved, and what's worked out from
+    /// them (each session's kart, the setups it starts from) worked out again.
+    pub(super) fn profiles_changed(&mut self) {
+        if let Some(p) = &self.profiles
+            && let Err(e) = p.save()
+        {
+            self.notices.error(format!("Couldn't save your drivers and karts: {e}"));
+        }
+        self.setup_baselines = None;
+        self.reload_library();
+    }
+
     /// The tracks or sessions on disk changed: load them again in the background.
     pub(super) fn reload_library(&mut self) {
         self.library_load.wanted += 1;

@@ -100,7 +100,7 @@ impl App {
                             let entry = profiles.loggers.entry(id.to_string()).or_default();
                             if entry.model != model {
                                 entry.model = model.to_string();
-                                let _ = profiles.save();
+                                self.profiles_changed();
                             }
                         }
                     }
@@ -166,9 +166,7 @@ impl App {
                             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
                             if let Some(k) = profiles.karts.iter_mut().find(|k| k.logger == id.to_string() && k.next_setup.is_some()) {
                                 k.next_setup = None;
-                                if let Err(e) = profiles.save() {
-                                    self.notices.error(format!("Couldn't save: {e}"));
-                                }
+                                self.profiles_changed();
                             }
                         }
                     }
@@ -842,11 +840,7 @@ impl App {
             let lib = self.lib();
             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
             profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
-            if let Err(e) = profiles.save() {
-                self.notices.error(format!("Couldn't save the driver and kart: {e}"));
-            }
-            self.setup_baselines = None;
-            self.reload_library();
+            self.profiles_changed();
             // Each file gets the dialog's details; with several tracks, its own track from the logger.
             let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
                 .device.files

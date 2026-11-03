@@ -912,9 +912,7 @@ impl App {
             let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
             if !profiles.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(&name)) {
                 profiles.driver_named(&name);
-                if let Err(e) = profiles.save() {
-                    self.notices.error(format!("Couldn't save the driver: {e}"));
-                }
+                self.profiles_changed();
             }
             let mut meta = crate::device::SessionMeta::load(&path).unwrap_or_default();
             meta.driver = name;
