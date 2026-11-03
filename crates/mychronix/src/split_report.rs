@@ -114,9 +114,37 @@ pub fn stats(values: &[i64]) -> Option<(f64, f64, i64, f64)> {
     Some((mean, median, *sorted.last().unwrap(), sd))
 }
 
+/// The table cells, (row, split), of `n` splits in a row from `start`: on
+/// along the row, then on from the next row's first split.
+pub fn rolling_cells(
+    (row, split): (usize, usize),
+    n: usize,
+) -> std::collections::HashSet<(usize, usize)> {
+    let mut cells = std::collections::HashSet::new();
+    let (mut r, mut s) = (row, split);
+    for _ in 0..n {
+        cells.insert((r, s));
+        s += 1;
+        if s == n {
+            s = 0;
+            r += 1;
+        }
+    }
+    cells
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rolling_lap_runs_on_into_the_next_row() {
+        let cells = rolling_cells((2, 3), 5);
+        let mut cells: Vec<_> = cells.into_iter().collect();
+        cells.sort();
+        assert_eq!(cells, [(2, 3), (2, 4), (3, 0), (3, 1), (3, 2)]);
+        assert_eq!(rolling_cells((0, 0), 4).len(), 4);
+    }
 
     fn row(n: i32, s: &[i64]) -> Row {
         Row {

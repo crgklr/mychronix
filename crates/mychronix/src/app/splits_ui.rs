@@ -225,20 +225,8 @@ impl App {
         let best_lap_splits = best_lap_row.and_then(|r| r.splits.clone());
         let theoretical = split_report::best_theoretical(&best);
         let rolling = split_report::best_rolling(&c.rows, &included, n);
-        let rolling_cells: std::collections::HashSet<(usize, usize)> = rolling
-            .map(|(_, ri, k)| {
-                let mut cells = std::collections::HashSet::new();
-                let (mut r, mut s) = (ri, k);
-                for _ in 0..n {
-                    cells.insert((r, s));
-                    s += 1;
-                    if s == n {
-                        s = 0;
-                        r += 1;
-                    }
-                }
-                cells
-            })
+        let rolling_cells = rolling
+            .map(|(_, ri, k)| split_report::rolling_cells((ri, k), n))
             .unwrap_or_default();
 
         let gap = 14.0;
@@ -254,39 +242,168 @@ impl App {
             ui.allocate_ui_with_layout(vec2(table_w, height), column, |ui| {
                 ui.set_width(table_w);
                 card(ui, |ui| {
-                    // The header stays put while the laps scroll; both scroll sideways together.
-                    egui::ScrollArea::horizontal().id_salt("splits_table_x").auto_shrink([false, true]).show(ui, |ui| {
-                        let lap_w = 112.0;
-                        let cell_w = 86.0;
-                        let row_h = 26.0;
-                        // Header: split number and length; click to see it in detail.
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.allocate_exact_size(vec2(lap_w, 34.0), Sense::hover());
-                            let (r, _) = ui.allocate_exact_size(vec2(cell_w, 34.0), Sense::hover());
-                            ui.painter().text(r.left_center(), egui::Align2::LEFT_CENTER, "Lap time", medium(13.0), SECONDARY);
-                            for k in 0..n {
-                                let (r, resp) = ui.allocate_exact_size(vec2(cell_w, 34.0), Sense::click());
-                                let on = st.selected == Some(k);
-                                if on || resp.hovered() {
-                                    ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else { SURFACE_HOVER });
-                                }
-                                ui.painter().text(r.left_top() + vec2(6.0, 9.0), egui::Align2::LEFT_CENTER, format!("Split {}", k + 1), medium(13.0), if on { TEXT } else { SECONDARY });
-                                ui.painter().text(r.left_top() + vec2(6.0, 25.0), egui::Align2::LEFT_CENTER, format!("{:.0} {}", crate::units::distance(c.lengths[k]), crate::units::distance_unit()), regular(11.5), DIM);
-                                if resp.hovered() {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                }
-                                if resp.on_hover_text("Show this split in detail").clicked() {
-                                    select = Some(if on { None } else { Some(k) });
-                                }
-                            }
-                        });
-                        ui.add_space(4.0);
-                        egui::ScrollArea::vertical().id_salt("splits_table").max_height(height - 70.0 - 38.0).auto_shrink([false, true]).show(ui, |ui| {
+                    let clicks = SplitsTable {
+                        st,
+                        c,
+                        n,
+                        included: &included,
+                        inc_rows: &inc_rows,
+                        best: &best,
+                        best_lap_row,
+                        best_lap_splits: &best_lap_splits,
+                        theoretical,
+                        rolling,
+                        rolling_cells: &rolling_cells,
+                        height,
+                    }
+                    .show(ui);
+                    (toggle, select, hovered_row) =
+                        (clicks.toggle, clicks.select, clicks.hovered_row);
+                });
+            });
+            ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
+                ui.set_width(detail_w);
+                egui::ScrollArea::vertical()
+                    .id_salt("split_detail")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        split_detail(
+                            ui,
+                            session,
+                            c,
+                            &included,
+                            st.selected,
+                            st.hovered_row,
+                            height,
+                        );
+                    });
+            });
+        });
+        st.hovered_row = hovered_row;
+        if let Some(sel) = select {
+            st.selected = sel;
+        }
+        if let Some(lap) = toggle
+            && !st.excluded.remove(&lap)
+        {
+            st.excluded.insert(lap);
+        }
+    }
+}
+
+/// The splits table: every lap's splits, the best ones marked, with the
+/// best theoretical and rolling laps under it.
+struct SplitsTable<'a> {
+    st: &'a SplitsState,
+    c: &'a Computed,
+    n: usize,
+    included: &'a [bool],
+    inc_rows: &'a Vec<&'a Row>,
+    best: &'a Vec<Option<i64>>,
+    best_lap_row: Option<&'a Row>,
+    best_lap_splits: &'a Option<Vec<i64>>,
+    theoretical: Option<i64>,
+    rolling: Option<(i64, usize, usize)>,
+    rolling_cells: &'a std::collections::HashSet<(usize, usize)>,
+    height: f32,
+}
+
+/// What was done in the splits table: a lap ticked or unticked, a split
+/// picked (or unpicked) for the detail, the row under the pointer.
+struct TableClicks {
+    toggle: Option<i32>,
+    select: Option<Option<usize>>,
+    hovered_row: Option<usize>,
+}
+
+impl SplitsTable<'_> {
+    fn show(&self, ui: &mut Ui) -> TableClicks {
+        let SplitsTable {
+            st,
+            c,
+            n,
+            included,
+            inc_rows,
+            best,
+            best_lap_row,
+            best_lap_splits,
+            theoretical,
+            rolling,
+            rolling_cells,
+            height,
+        } = *self;
+        let mut toggle = None;
+        let mut select = None;
+        let mut hovered_row = None;
+        // The header stays put while the laps scroll; both scroll sideways together.
+        egui::ScrollArea::horizontal()
+            .id_salt("splits_table_x")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let lap_w = 112.0;
+                let cell_w = 86.0;
+                let row_h = 26.0;
+                // Header: split number and length; click to see it in detail.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.allocate_exact_size(vec2(lap_w, 34.0), Sense::hover());
+                    let (r, _) = ui.allocate_exact_size(vec2(cell_w, 34.0), Sense::hover());
+                    ui.painter().text(
+                        r.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        "Lap time",
+                        medium(13.0),
+                        SECONDARY,
+                    );
+                    for k in 0..n {
+                        let (r, resp) = ui.allocate_exact_size(vec2(cell_w, 34.0), Sense::click());
+                        let on = st.selected == Some(k);
+                        if on || resp.hovered() {
+                            ui.painter().rect_filled(
+                                r,
+                                CornerRadius::same(theme::RADIUS_SMALL),
+                                if on { SURFACE_ACTIVE } else { SURFACE_HOVER },
+                            );
+                        }
+                        ui.painter().text(
+                            r.left_top() + vec2(6.0, 9.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("Split {}", k + 1),
+                            medium(13.0),
+                            if on { TEXT } else { SECONDARY },
+                        );
+                        ui.painter().text(
+                            r.left_top() + vec2(6.0, 25.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!(
+                                "{:.0} {}",
+                                crate::units::distance(c.lengths[k]),
+                                crate::units::distance_unit()
+                            ),
+                            regular(11.5),
+                            DIM,
+                        );
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if resp.on_hover_text("Show this split in detail").clicked() {
+                            select = Some(if on { None } else { Some(k) });
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("splits_table")
+                    .max_height(height - 70.0 - 38.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
                         // Columns' ranges, for coloring.
                         let ranges: Vec<Option<(i64, i64)>> = (0..n)
                             .map(|k| {
-                                let v: Vec<i64> = inc_rows.iter().filter_map(|r| r.splits.as_ref().map(|s| s[k])).collect();
+                                let v: Vec<i64> = inc_rows
+                                    .iter()
+                                    .filter_map(|r| r.splits.as_ref().map(|s| s[k]))
+                                    .collect();
                                 Some((*v.iter().min()?, *v.iter().max()?))
                             })
                             .collect();
@@ -295,33 +412,101 @@ impl App {
                             let resp = ui
                                 .horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
-                                    let (lr, _) = ui.allocate_exact_size(vec2(lap_w, row_h), Sense::hover());
-                                    let cb = Rect::from_center_size(pos2(lr.left() + 10.0, lr.center().y), Vec2::splat(16.0));
-                                    let cbr = ui.interact(cb, ui.id().with(("split_cb", ri)), Sense::click());
-                                    ui.painter().rect_stroke(cb, CornerRadius::same(4), Stroke::new(1.3, if on { TEXT } else { DIM }), egui::StrokeKind::Inside);
+                                    let (lr, _) =
+                                        ui.allocate_exact_size(vec2(lap_w, row_h), Sense::hover());
+                                    let cb = Rect::from_center_size(
+                                        pos2(lr.left() + 10.0, lr.center().y),
+                                        Vec2::splat(16.0),
+                                    );
+                                    let cbr = ui.interact(
+                                        cb,
+                                        ui.id().with(("split_cb", ri)),
+                                        Sense::click(),
+                                    );
+                                    ui.painter().rect_stroke(
+                                        cb,
+                                        CornerRadius::same(4),
+                                        Stroke::new(1.3, if on { TEXT } else { DIM }),
+                                        egui::StrokeKind::Inside,
+                                    );
                                     if on {
                                         Icon::Check.image(TEXT, 12.0).paint_at(ui, cb.shrink(2.0));
                                     }
-                                    if cbr.on_hover_text(if on { "Leave out" } else { "Include" }).clicked() {
+                                    if cbr
+                                        .on_hover_text(if on { "Leave out" } else { "Include" })
+                                        .clicked()
+                                    {
                                         toggle = Some(r.lap_number);
                                     }
-                                    ui.painter().text(pos2(lr.left() + 28.0, lr.center().y), egui::Align2::LEFT_CENTER, format!("Lap {}", r.lap_number), medium(13.5), if on { TEXT } else { DIM });
-                                    let is_best = best_lap_row.is_some_and(|b| b.lap_number == r.lap_number);
-                                    let (tr, _) = ui.allocate_exact_size(vec2(cell_w, row_h), Sense::hover());
-                                    ui.painter().text(tr.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format_lap_time(r.lap_ms), regular(13.5), if !on { DIM } else if is_best { theme::GOOD } else { TEXT });
+                                    ui.painter().text(
+                                        pos2(lr.left() + 28.0, lr.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        format!("Lap {}", r.lap_number),
+                                        medium(13.5),
+                                        if on { TEXT } else { DIM },
+                                    );
+                                    let is_best =
+                                        best_lap_row.is_some_and(|b| b.lap_number == r.lap_number);
+                                    let (tr, _) =
+                                        ui.allocate_exact_size(vec2(cell_w, row_h), Sense::hover());
+                                    ui.painter().text(
+                                        tr.left_center() + vec2(6.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        format_lap_time(r.lap_ms),
+                                        regular(13.5),
+                                        if !on {
+                                            DIM
+                                        } else if is_best {
+                                            theme::GOOD
+                                        } else {
+                                            TEXT
+                                        },
+                                    );
                                     for k in 0..n {
-                                        let (cr, _) = ui.allocate_exact_size(vec2(cell_w, row_h), Sense::hover());
+                                        let (cr, _) = ui.allocate_exact_size(
+                                            vec2(cell_w, row_h),
+                                            Sense::hover(),
+                                        );
                                         let Some(s) = &r.splits else {
-                                            ui.painter().text(cr.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, "—", regular(13.5), DIM);
+                                            ui.painter().text(
+                                                cr.left_center() + vec2(6.0, 0.0),
+                                                egui::Align2::LEFT_CENTER,
+                                                "—",
+                                                regular(13.5),
+                                                DIM,
+                                            );
                                             continue;
                                         };
-                                        let v = split_report::cell(s, k, st.values, st.cumulative, &best, best_lap_splits.as_deref());
-                                        if st.color && on && let Some((lo, hi)) = ranges[k] {
-                                            let t = if hi > lo { (s[k] - lo) as f32 / (hi - lo) as f32 } else { 0.0 };
-                                            ui.painter().rect_filled(cr, CornerRadius::same(4), rank_color(t).gamma_multiply(0.28));
+                                        let v = split_report::cell(
+                                            s,
+                                            k,
+                                            st.values,
+                                            st.cumulative,
+                                            best,
+                                            best_lap_splits.as_deref(),
+                                        );
+                                        if st.color
+                                            && on
+                                            && let Some((lo, hi)) = ranges[k]
+                                        {
+                                            let t = if hi > lo {
+                                                (s[k] - lo) as f32 / (hi - lo) as f32
+                                            } else {
+                                                0.0
+                                            };
+                                            ui.painter().rect_filled(
+                                                cr,
+                                                CornerRadius::same(4),
+                                                rank_color(t).gamma_multiply(0.28),
+                                            );
                                         }
                                         if rolling_cells.contains(&(ri, k)) && on {
-                                            ui.painter().rect_stroke(cr, CornerRadius::same(4), Stroke::new(1.5, theme::FAVORITE), egui::StrokeKind::Inside);
+                                            ui.painter().rect_stroke(
+                                                cr,
+                                                CornerRadius::same(4),
+                                                Stroke::new(1.5, theme::FAVORITE),
+                                                egui::StrokeKind::Inside,
+                                            );
                                         }
                                         let is_best_split = on && best[k] == Some(s[k]);
                                         let text = match (st.values, v) {
@@ -329,9 +514,25 @@ impl App {
                                             (Values::Times, Some(v)) => seconds(v),
                                             (_, Some(v)) => format_delta(v),
                                         };
-                                        let color = if !on { DIM } else if is_best_split && !st.cumulative { theme::GOOD } else { TEXT };
-                                        let font = if st.hovered_row == Some(ri) { semibold(13.5) } else { regular(13.5) };
-                                        ui.painter().text(cr.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, text, font, color);
+                                        let color = if !on {
+                                            DIM
+                                        } else if is_best_split && !st.cumulative {
+                                            theme::GOOD
+                                        } else {
+                                            TEXT
+                                        };
+                                        let font = if st.hovered_row == Some(ri) {
+                                            semibold(13.5)
+                                        } else {
+                                            regular(13.5)
+                                        };
+                                        ui.painter().text(
+                                            cr.left_center() + vec2(6.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            text,
+                                            font,
+                                            color,
+                                        );
                                     }
                                 })
                                 .response;
@@ -343,73 +544,104 @@ impl App {
                         ui.add_space(8.0);
                         hairline(ui);
                         ui.add_space(6.0);
-                        let col = |k: usize| inc_rows.iter().filter_map(|r| r.splits.as_ref().map(|s| s[k])).collect::<Vec<i64>>();
-                        let laps_col: Vec<i64> = inc_rows.iter().filter(|r| r.splits.is_some()).map(|r| r.lap_ms).collect();
+                        let col = |k: usize| {
+                            inc_rows
+                                .iter()
+                                .filter_map(|r| r.splits.as_ref().map(|s| s[k]))
+                                .collect::<Vec<i64>>()
+                        };
+                        let laps_col: Vec<i64> = inc_rows
+                            .iter()
+                            .filter(|r| r.splits.is_some())
+                            .map(|r| r.lap_ms)
+                            .collect();
                         // Each row's label, and how it sums up a column of split times.
                         type StatRow<'a> = (&'a str, Box<dyn Fn(&[i64]) -> Option<String>>);
                         let stat_rows: [StatRow; 5] = [
-                            ("Best", Box::new(|v: &[i64]| v.iter().min().map(|&x| seconds(x)))),
-                            ("Average", Box::new(|v: &[i64]| split_report::stats(v).map(|s| seconds(s.0.round() as i64)))),
-                            ("Median", Box::new(|v: &[i64]| split_report::stats(v).map(|s| seconds(s.1.round() as i64)))),
-                            ("Slowest", Box::new(|v: &[i64]| split_report::stats(v).map(|s| seconds(s.2)))),
-                            ("Std dev", Box::new(|v: &[i64]| split_report::stats(v).map(|s| format!("{:.3}", s.3 / 1000.0)))),
+                            (
+                                "Best",
+                                Box::new(|v: &[i64]| v.iter().min().map(|&x| seconds(x))),
+                            ),
+                            (
+                                "Average",
+                                Box::new(|v: &[i64]| {
+                                    split_report::stats(v).map(|s| seconds(s.0.round() as i64))
+                                }),
+                            ),
+                            (
+                                "Median",
+                                Box::new(|v: &[i64]| {
+                                    split_report::stats(v).map(|s| seconds(s.1.round() as i64))
+                                }),
+                            ),
+                            (
+                                "Slowest",
+                                Box::new(|v: &[i64]| split_report::stats(v).map(|s| seconds(s.2))),
+                            ),
+                            (
+                                "Std dev",
+                                Box::new(|v: &[i64]| {
+                                    split_report::stats(v).map(|s| format!("{:.3}", s.3 / 1000.0))
+                                }),
+                            ),
                         ];
                         for (name, f) in &stat_rows {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                let (lr, _) = ui.allocate_exact_size(vec2(lap_w, 22.0), Sense::hover());
-                                ui.painter().text(lr.left_center() + vec2(28.0, 0.0), egui::Align2::LEFT_CENTER, *name, medium(12.5), SECONDARY);
+                                let (lr, _) =
+                                    ui.allocate_exact_size(vec2(lap_w, 22.0), Sense::hover());
+                                ui.painter().text(
+                                    lr.left_center() + vec2(28.0, 0.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    *name,
+                                    medium(12.5),
+                                    SECONDARY,
+                                );
                                 for k in 0..=n {
                                     let v = if k == 0 { f(&laps_col) } else { f(&col(k - 1)) };
-                                    let (cr, _) = ui.allocate_exact_size(vec2(cell_w, 22.0), Sense::hover());
+                                    let (cr, _) =
+                                        ui.allocate_exact_size(vec2(cell_w, 22.0), Sense::hover());
                                     let text = match (k, v) {
                                         (0, Some(t)) if !t.contains(':') && *name != "Std dev" => t,
                                         (_, Some(t)) => t,
                                         _ => "—".into(),
                                     };
-                                    ui.painter().text(cr.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, text, regular(12.5), SECONDARY);
+                                    ui.painter().text(
+                                        cr.left_center() + vec2(6.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        text,
+                                        regular(12.5),
+                                        SECONDARY,
+                                    );
                                 }
                             });
                         }
-                        });
                     });
-                    ui.add_space(8.0);
-                    // The two laps you could have done.
-                    ui.horizontal_wrapped(|ui| {
-                        if let Some(t) = theoretical {
-                            ui.label(RichText::new("Best theoretical").size(12.5).color(DIM));
-                            ui.label(RichText::new(format_lap_time(t)).font(semibold(14.0)).color(theme::GOOD))
-                                .on_hover_text("Your best time in every split added together");
-                            ui.add_space(14.0);
-                        }
-                        if let Some((t, ri, k)) = rolling {
-                            ui.label(RichText::new("Best rolling").size(12.5).color(DIM));
-                            ui.label(RichText::new(format_lap_time(t)).font(semibold(14.0)).color(theme::FAVORITE)).on_hover_text(format!(
-                                "The fastest lap's worth of splits actually driven in a row, starting at lap {} split {} (outlined)",
-                                c.rows[ri].lap_number,
-                                k + 1
-                            ));
-                            ui.add_space(14.0);
-                        }
-                        ui.label(RichText::new(format!("Statistics over {} ticked laps.", inc_rows.len())).size(12.0).color(DIM));
-                    });
-                });
             });
-            ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
-                ui.set_width(detail_w);
-                egui::ScrollArea::vertical().id_salt("split_detail").auto_shrink([false, false]).show(ui, |ui| {
-                    split_detail(ui, session, c, &included, st.selected, st.hovered_row, height);
-                });
-            });
+        ui.add_space(8.0);
+        // The two laps you could have done.
+        ui.horizontal_wrapped(|ui| {
+            if let Some(t) = theoretical {
+                ui.label(RichText::new("Best theoretical").size(12.5).color(DIM));
+                ui.label(RichText::new(format_lap_time(t)).font(semibold(14.0)).color(theme::GOOD))
+                    .on_hover_text("Your best time in every split added together");
+                ui.add_space(14.0);
+            }
+            if let Some((t, ri, k)) = rolling {
+                ui.label(RichText::new("Best rolling").size(12.5).color(DIM));
+                ui.label(RichText::new(format_lap_time(t)).font(semibold(14.0)).color(theme::FAVORITE)).on_hover_text(format!(
+                    "The fastest lap's worth of splits actually driven in a row, starting at lap {} split {} (outlined)",
+                    c.rows[ri].lap_number,
+                    k + 1
+                ));
+                ui.add_space(14.0);
+            }
+            ui.label(RichText::new(format!("Statistics over {} ticked laps.", inc_rows.len())).size(12.0).color(DIM));
         });
-        st.hovered_row = hovered_row;
-        if let Some(sel) = select {
-            st.selected = sel;
-        }
-        if let Some(lap) = toggle
-            && !st.excluded.remove(&lap)
-        {
-            st.excluded.insert(lap);
+        TableClicks {
+            toggle,
+            select,
+            hovered_row,
         }
     }
 }
