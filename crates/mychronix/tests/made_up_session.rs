@@ -108,8 +108,13 @@ fn a_made_up_session_reads_back_through_the_assistant_server() {
     let dir = home.join("Mychronix/sessions/123456");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("20260919-093000_007.mc4"), run()).unwrap();
-    // The assistant server is off until it's turned on in Settings.
-    std::fs::write(home.join("Mychronix/settings.json"), r#"{"mcp": true}"#).unwrap();
+    // The assistant server is off until it's turned on in Settings; the clock and
+    // units are set so the answers read the same in every region.
+    std::fs::write(
+        home.join("Mychronix/settings.json"),
+        r#"{"mcp": true, "clock": "24", "units": "metric"}"#,
+    )
+    .unwrap();
 
     let mut server = Server::start(&home);
     let list = server.tool("list_sessions", json!({}));
