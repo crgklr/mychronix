@@ -6,7 +6,9 @@ use super::*;
 use look::{self, Kind};
 
 /// Session files a file picker offers.
-const SESSION_FILES: [&str; 10] = ["xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4"];
+const SESSION_FILES: [&str; 10] = [
+    "xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4",
+];
 
 impl App {
     /// Whether to welcome: nothing in the library or the Garage, and no
@@ -14,14 +16,30 @@ impl App {
     pub(super) fn first_run(&mut self) -> bool {
         let lib = self.lib();
         let empty_lib = lib.sessions.is_empty();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-        empty_lib && profiles.drivers.is_empty() && profiles.garage_karts().next().is_none() && self.device.logger.is_none() && !self.key.present
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load);
+        empty_lib
+            && profiles.drivers.is_empty()
+            && profiles.garage_karts().next().is_none()
+            && self.device.logger.is_none()
+            && !self.key.present
     }
 
     /// Asks for session files (or folders) and imports them in the background.
     pub(super) fn import_dialog(&mut self, folders: bool, ctx: &egui::Context) {
-        let dialog = rfd::FileDialog::new().set_title(if folders { "Import a folder of sessions" } else { "Import session files" });
-        let picked = if folders { dialog.pick_folders() } else { dialog.add_filter("AiM sessions (.xrk, .xrz, .drk)", &SESSION_FILES).pick_files() };
+        let dialog = rfd::FileDialog::new().set_title(if folders {
+            "Import a folder of sessions"
+        } else {
+            "Import session files"
+        });
+        let picked = if folders {
+            dialog.pick_folders()
+        } else {
+            dialog
+                .add_filter("AiM sessions (.xrk, .xrz, .drk)", &SESSION_FILES)
+                .pick_files()
+        };
         match picked.filter(|p| !p.is_empty()) {
             Some(paths) => self.start_import(paths, ctx),
             None => log::info!("import: the file picker closed without a choice"),
@@ -43,13 +61,24 @@ impl App {
     /// Whether this window can receive dropped files: on a Mac and under X11,
     /// but not on Wayland (the windowing library doesn't support drops there).
     pub(super) fn can_drop() -> bool {
-        !(cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("WINIT_UNIX_BACKEND").as_deref() != Ok("x11"))
+        !(cfg!(target_os = "linux")
+            && std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && std::env::var("WINIT_UNIX_BACKEND").as_deref() != Ok("x11"))
     }
 
     /// Files or folders dropped on the window, to import. Returns whether
     /// something is being dragged over it right now (to highlight where to drop).
     pub(super) fn import_drops(&mut self, ctx: &egui::Context) -> bool {
-        let (dropped, hovering) = ctx.input(|i| (i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect::<Vec<_>>(), !i.raw.hovered_files.is_empty()));
+        let (dropped, hovering) = ctx.input(|i| {
+            (
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .collect::<Vec<_>>(),
+                !i.raw.hovered_files.is_empty(),
+            )
+        });
         if !dropped.is_empty() {
             self.start_import(dropped, ctx);
         }
@@ -63,7 +92,9 @@ impl App {
         loop {
             let Some(rx) = &self.import_rx else { return };
             match rx.try_recv() {
-                Ok(crate::import::Event::Progress { done, total }) => self.import_progress = Some((done, total)),
+                Ok(crate::import::Event::Progress { done, total }) => {
+                    self.import_progress = Some((done, total))
+                }
                 Ok(crate::import::Event::Finished(report)) => {
                     self.import_rx = None;
                     self.import_progress = None;
@@ -188,75 +219,129 @@ impl App {
 
     /// One of the two ways to start: a large card, its content centered and
     /// its actions along the bottom, so both cards' buttons line up.
-    fn start_card(ui: &mut Ui, w: f32, h: f32, body: impl FnOnce(&mut Ui), actions: impl FnOnce(&mut Ui)) -> Rect {
+    fn start_card(
+        ui: &mut Ui,
+        w: f32,
+        h: f32,
+        body: impl FnOnce(&mut Ui),
+        actions: impl FnOnce(&mut Ui),
+    ) -> Rect {
         let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
-        ui.painter().rect_filled(rect, CornerRadius::same(18), SURFACE);
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(18), SURFACE);
         let inner = rect.shrink2(vec2(36.0, 40.0));
-        let mut top = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Center)));
+        let mut top = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(Layout::top_down(Align::Center)),
+        );
         body(&mut top);
         let bottom = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 44.0), inner.max);
-        let mut foot = ui.new_child(egui::UiBuilder::new().max_rect(bottom).layout(Layout::top_down(Align::Center)));
+        let mut foot = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(bottom)
+                .layout(Layout::top_down(Align::Center)),
+        );
         actions(&mut foot);
         rect
     }
 
     /// After an import, on the Garage: what came in and what to do next.
     pub(super) fn import_banner(&mut self, ui: &mut Ui) {
-        let Some(r) = self.import_report.clone() else { return };
+        let Some(r) = self.import_report.clone() else {
+            return;
+        };
         let mut close = false;
-        Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin::symmetric(22, 18)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 16.0;
-                let ok = r.added > 0;
-                let (r0, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
-                let tint = if ok { theme::GOOD } else { SECONDARY };
-                ui.painter().circle_filled(r0.center(), 22.0, tint.gamma_multiply(0.15));
-                (if ok { Icon::CircleCheck } else { Icon::FolderOpen }).image(tint, 22.0).paint_at(ui, Rect::from_center_size(r0.center(), Vec2::splat(22.0)));
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 3.0;
-                    let title = if ok {
-                        format!("Imported {} from {}", plural(r.added, "session"), plural(r.loggers.len(), "MyChron"))
-                    } else if r.already > 0 {
-                        "Those sessions are already here".to_string()
-                    } else if !r.not_sessions.is_empty() && r.searched.is_empty() {
-                        if r.not_sessions.len() == 1 { format!("{} isn't a session file", r.not_sessions[0]) } else { "Those aren't session files".to_string() }
+        Frame::new()
+            .fill(SURFACE)
+            .corner_radius(CornerRadius::same(theme::RADIUS))
+            .inner_margin(Margin::symmetric(22, 18))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 16.0;
+                    let ok = r.added > 0;
+                    let (r0, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
+                    let tint = if ok { theme::GOOD } else { SECONDARY };
+                    ui.painter()
+                        .circle_filled(r0.center(), 22.0, tint.gamma_multiply(0.15));
+                    (if ok {
+                        Icon::CircleCheck
                     } else {
-                        "No sessions found there".to_string()
-                    };
-                    ui.label(RichText::new(title).font(semibold(17.0)).color(TEXT));
-                    let mut notes = Vec::new();
-                    if r.already > 0 {
-                        notes.push(if r.already == 1 { "1 session was already in your library".to_string() } else { format!("{} sessions were already in your library", r.already) });
-                    }
-                    if !r.unreadable.is_empty() {
-                        notes.push(format!("{} couldn't be read", plural(r.unreadable.len(), "file")));
-                    }
-                    // Say plainly what was left alone, so nothing seems "imported" that wasn't.
-                    if ok || r.already > 0 {
-                        match r.not_sessions.len() {
-                            0 => {}
-                            1 => notes.push(format!("{} isn't a session file", r.not_sessions[0])),
-                            n => notes.push(format!("{n} files weren't session files")),
+                        Icon::FolderOpen
+                    })
+                    .image(tint, 22.0)
+                    .paint_at(ui, Rect::from_center_size(r0.center(), Vec2::splat(22.0)));
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        let title = if ok {
+                            format!(
+                                "Imported {} from {}",
+                                plural(r.added, "session"),
+                                plural(r.loggers.len(), "MyChron")
+                            )
+                        } else if r.already > 0 {
+                            "Those sessions are already here".to_string()
+                        } else if !r.not_sessions.is_empty() && r.searched.is_empty() {
+                            if r.not_sessions.len() == 1 {
+                                format!("{} isn't a session file", r.not_sessions[0])
+                            } else {
+                                "Those aren't session files".to_string()
+                            }
+                        } else {
+                            "No sessions found there".to_string()
+                        };
+                        ui.label(RichText::new(title).font(semibold(17.0)).color(TEXT));
+                        let mut notes = Vec::new();
+                        if r.already > 0 {
+                            notes.push(if r.already == 1 {
+                                "1 session was already in your library".to_string()
+                            } else {
+                                format!("{} sessions were already in your library", r.already)
+                            });
                         }
-                    }
-                    if !r.searched.is_empty() {
-                        notes.push(format!("Only session files were taken from {}", r.searched.join(", ")));
-                    }
-                    if ok {
-                        notes.push("Next: say whose each MyChron is, below".to_string());
-                    } else if r.already == 0 && r.unreadable.is_empty() {
-                        notes.push("Session files end in .xrk, .xrz or .drk".to_string());
-                    }
-                    ui.label(RichText::new(notes.join("  ·  ")).font(regular(14.0)).color(SECONDARY));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(Icon::X.image(DIM, 16.0).sense(Sense::click())).clicked() {
-                        close = true;
-                    }
+                        if !r.unreadable.is_empty() {
+                            notes.push(format!(
+                                "{} couldn't be read",
+                                plural(r.unreadable.len(), "file")
+                            ));
+                        }
+                        // Say plainly what was left alone, so nothing seems "imported" that wasn't.
+                        if ok || r.already > 0 {
+                            match r.not_sessions.len() {
+                                0 => {}
+                                1 => notes
+                                    .push(format!("{} isn't a session file", r.not_sessions[0])),
+                                n => notes.push(format!("{n} files weren't session files")),
+                            }
+                        }
+                        if !r.searched.is_empty() {
+                            notes.push(format!(
+                                "Only session files were taken from {}",
+                                r.searched.join(", ")
+                            ));
+                        }
+                        if ok {
+                            notes.push("Next: say whose each MyChron is, below".to_string());
+                        } else if r.already == 0 && r.unreadable.is_empty() {
+                            notes.push("Session files end in .xrk, .xrz or .drk".to_string());
+                        }
+                        ui.label(
+                            RichText::new(notes.join("  ·  "))
+                                .font(regular(14.0))
+                                .color(SECONDARY),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(Icon::X.image(DIM, 16.0).sense(Sense::click()))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
                 });
             });
-        });
         ui.add_space(12.0);
         if close {
             self.import_report = None;

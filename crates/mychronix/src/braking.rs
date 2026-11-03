@@ -30,7 +30,9 @@ pub fn lap_zones(session: &Session, lap: &Lap) -> Option<(Vec<Zone>, DistancePro
     let profile = DistanceProfile::from_gps(session, lap)?;
     let lo = gps.times_ms.partition_point(|&t| t < lap.start_ms);
     let hi = gps.times_ms.partition_point(|&t| t <= lap.end_ms);
-    let zones = find_zones(&gps.times_ms[lo..hi], &gps.speed_kmh[lo..hi], |t| profile.dist_at(t as f64));
+    let zones = find_zones(&gps.times_ms[lo..hi], &gps.speed_kmh[lo..hi], |t| {
+        profile.dist_at(t as f64)
+    });
     Some((zones, profile))
 }
 
@@ -92,7 +94,10 @@ mod tests {
     #[test]
     fn finds_each_corner_from_peak_to_low() {
         // Straight at 50, brake to 30, accelerate to 52, brake to 25, back up to 40.
-        let v = [48.0, 50.0, 46.0, 40.0, 34.0, 30.0, 31.0, 38.0, 45.0, 52.0, 47.0, 35.0, 25.0, 27.0, 33.0, 40.0];
+        let v = [
+            48.0, 50.0, 46.0, 40.0, 34.0, 30.0, 31.0, 38.0, 45.0, 52.0, 47.0, 35.0, 25.0, 27.0,
+            33.0, 40.0,
+        ];
         let z = zones_of(&v);
         assert_eq!(z.len(), 2);
         assert_eq!((z[0].entry_kmh, z[0].min_kmh), (50.0, 30.0));
@@ -104,5 +109,4 @@ mod tests {
     fn wobble_on_a_straight_is_not_a_corner() {
         assert!(zones_of(&[50.0, 48.5, 50.5, 49.0, 51.0, 49.5, 51.5]).is_empty());
     }
-
 }

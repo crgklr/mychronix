@@ -18,7 +18,10 @@ pub fn stamp() -> String {
     files.extend(crate::aim_tracks::mychron_list_path());
     for f in files {
         let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
-        parts.push(format!("{}:{size}", f.file_name().unwrap_or_default().to_string_lossy()));
+        parts.push(format!(
+            "{}:{size}",
+            f.file_name().unwrap_or_default().to_string_lossy()
+        ));
     }
     parts.join(",")
 }
@@ -38,29 +41,55 @@ pub struct Line {
 pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<Line>, Vec<Line>) {
     let ours = crate::paths::data("tracks").unwrap_or_default();
     let here = LatLon { lat, lon };
-    let line = |t: aim_track::TrackFile, guid: Option<String>| t.start_finish.map(|p| (p, guid.or(t.guid).unwrap_or_default()));
-    let mut own: Vec<(LatLon, String)> = files_with_ext(&ours, "tkk").iter().filter_map(|p| line(aim_track::read_tkk(p).ok()?, None)).collect();
+    let line = |t: aim_track::TrackFile, guid: Option<String>| {
+        t.start_finish
+            .map(|p| (p, guid.or(t.guid).unwrap_or_default()))
+    };
+    let mut own: Vec<(LatLon, String)> = files_with_ext(&ours, "tkk")
+        .iter()
+        .filter_map(|p| line(aim_track::read_tkk(p).ok()?, None))
+        .collect();
     let mut aim: Vec<(LatLon, String)> = Vec::new();
     let mut rias = files_with_ext(&ours, "ria");
     rias.extend(crate::aim_tracks::list_path());
     rias.extend(crate::aim_tracks::mychron_list_path());
     for path in rias {
         let custom = path.file_name().is_some_and(|n| n == "dev.ria");
-        let Ok(records) = aim_track::read_ria(&path) else { continue };
+        let Ok(records) = aim_track::read_ria(&path) else {
+            continue;
+        };
         // A list records each track's center; its start/finish is in its own file.
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let points = records
             .into_iter()
             .filter(|r| r.center.is_some_and(|c| c.distance_m(&here) <= within_m))
-            .filter_map(|r| line(aim_track::read_tkk(dir.join(format!("{}.tkk", r.id))).ok()?, Some(r.guid)));
-        if custom { own.extend(points) } else { aim.extend(points) }
+            .filter_map(|r| {
+                line(
+                    aim_track::read_tkk(dir.join(format!("{}.tkk", r.id))).ok()?,
+                    Some(r.guid),
+                )
+            });
+        if custom {
+            own.extend(points)
+        } else {
+            aim.extend(points)
+        }
     }
     let near = |points: Vec<(LatLon, String)>| {
-        let mut v: Vec<(f64, LatLon, String)> = points.into_iter().map(|(p, g)| (p.distance_m(&here), p, g)).filter(|(d, _, _)| *d <= within_m).collect();
+        let mut v: Vec<(f64, LatLon, String)> = points
+            .into_iter()
+            .map(|(p, g)| (p.distance_m(&here), p, g))
+            .filter(|(d, _, _)| *d <= within_m)
+            .collect();
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
         // The same line from several sources, once.
         v.dedup_by(|a, b| a.1.distance_m(&b.1) < 1.0 && a.2 == b.2);
-        v.into_iter().map(|(_, p, guid)| Line { at: (p.lat, p.lon), guid }).collect::<Vec<_>>()
+        v.into_iter()
+            .map(|(_, p, guid)| Line {
+                at: (p.lat, p.lon),
+                guid,
+            })
+            .collect::<Vec<_>>()
     };
     (near(own), near(aim))
 }
@@ -83,8 +112,20 @@ pub fn tracks_near(lat: f64, lon: f64, within_m: f64) -> Vec<NearTrack> {
         .into_iter()
         .filter_map(|path| {
             let t = aim_track::read_tkk(&path).ok()?;
-            let d = t.start_finish.or(t.center).map(|p| p.distance_m(&here)).filter(|d| *d <= within_m)?;
-            Some(NearTrack { path, name: if t.full_name.is_empty() { t.name } else { t.full_name }, distance_m: d })
+            let d = t
+                .start_finish
+                .or(t.center)
+                .map(|p| p.distance_m(&here))
+                .filter(|d| *d <= within_m)?;
+            Some(NearTrack {
+                path,
+                name: if t.full_name.is_empty() {
+                    t.name
+                } else {
+                    t.full_name
+                },
+                distance_m: d,
+            })
         })
         .collect();
     out.sort_by(|a, b| a.distance_m.total_cmp(&b.distance_m));

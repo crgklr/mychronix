@@ -58,7 +58,10 @@ impl DirEntry {
         let lower = self.name.to_ascii_lowercase();
         // MyChron 6s also store some sessions as .hrz (format not known yet;
         // kept as downloaded).
-        lower.ends_with(".xrz") || lower.ends_with(".hrz") || lower.ends_with(".xrk") || lower.ends_with(".drk")
+        lower.ends_with(".xrz")
+            || lower.ends_with(".hrz")
+            || lower.ends_with(".xrk")
+            || lower.ends_with(".drk")
     }
 }
 
@@ -75,7 +78,9 @@ pub fn is_safe_file_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && !name.starts_with('.')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 pub fn parse_listing(data: &[u8]) -> Result<Vec<DirEntry>, Error> {
@@ -84,9 +89,16 @@ pub fn parse_listing(data: &[u8]) -> Result<Vec<DirEntry>, Error> {
         if file.tag_str() != "FLE" {
             continue;
         }
-        let mut entry = DirEntry { name: String::new(), size: 0, date: String::new(), time: String::new() };
+        let mut entry = DirEntry {
+            name: String::new(),
+            size: 0,
+            date: String::new(),
+            time: String::new(),
+        };
         for field in frame::parse_all(&file.payload)? {
-            let text = String::from_utf8_lossy(&field.payload).trim_end_matches('\0').to_string();
+            let text = String::from_utf8_lossy(&field.payload)
+                .trim_end_matches('\0')
+                .to_string();
             match field.tag_str() {
                 "N" => entry.name = text,
                 "SZ" => entry.size = text.trim().parse().unwrap_or(0),
@@ -160,13 +172,22 @@ impl Logger {
         let keepalive = Arc::new(AtomicBool::new(true));
         {
             let running = keepalive.clone();
-            std::thread::Builder::new().name("aim-ka".into()).spawn(move || keep_alive(addr, running))?;
+            std::thread::Builder::new()
+                .name("aim-ka".into())
+                .spawn(move || keep_alive(addr, running))?;
         }
-        let mut logger = Self { reader: BufReader::new(stream.try_clone()?), writer: stream, keepalive };
+        let mut logger = Self {
+            reader: BufReader::new(stream.try_clone()?),
+            writer: stream,
+            keepalive,
+        };
         logger.send(STCP, HELLO.to_vec())?;
         let reply = logger.recv()?;
         if reply.tag != *STCP || reply.payload.len() != 8 {
-            return Err(Error::Protocol(format!("unexpected hello reply {:?}", reply.tag_str())));
+            return Err(Error::Protocol(format!(
+                "unexpected hello reply {:?}",
+                reply.tag_str()
+            )));
         }
         Ok(logger)
     }
@@ -179,13 +200,21 @@ impl Logger {
 
     /// The recorded sessions, oldest first by name.
     pub fn sessions(&mut self) -> Result<Vec<DirEntry>, Error> {
-        let mut entries: Vec<_> = self.list(SESSIONS_DIR)?.into_iter().filter(DirEntry::is_session).collect();
+        let mut entries: Vec<_> = self
+            .list(SESSIONS_DIR)?
+            .into_iter()
+            .filter(DirEntry::is_session)
+            .collect();
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(entries)
     }
 
     /// Downloads a file. `progress(done, total)` is called after every chunk.
-    pub fn read_file(&mut self, path: &str, progress: impl FnMut(u64, u64)) -> Result<Vec<u8>, Error> {
+    pub fn read_file(
+        &mut self,
+        path: &str,
+        progress: impl FnMut(u64, u64),
+    ) -> Result<Vec<u8>, Error> {
         self.request(cmd::READ_FILE, path, progress)
     }
 
@@ -208,9 +237,14 @@ impl Logger {
                 // A payload staged for another command (another app's
                 // download cut short, or newer firmware's identify bundle):
                 // read it out so the logger moves on, then wait for ours.
-                PHASE_READY if reply_command(&reply).is_some_and(|c| c != (command, sub)) && stale < 3 => {
+                PHASE_READY
+                    if reply_command(&reply).is_some_and(|c| c != (command, sub)) && stale < 3 =>
+                {
                     stale += 1;
-                    log::warn!("{path}: the logger had {len} bytes staged for command {:?}; clearing them", reply_command(&reply));
+                    log::warn!(
+                        "{path}: the logger had {len} bytes staged for command {:?}; clearing them",
+                        reply_command(&reply)
+                    );
                     let mut got = 0u64;
                     while got < len as u64 {
                         let chunk = self.pull(got as u32)?;
@@ -222,7 +256,9 @@ impl Logger {
                 }
                 PHASE_READY => size = Some(len as u64),
                 PHASE_SEND_TO_LOGGER => {
-                    return Err(Error::Protocol(format!("{path}: the logger asked for data; writes aren't supported")));
+                    return Err(Error::Protocol(format!(
+                        "{path}: the logger asked for data; writes aren't supported"
+                    )));
                 }
                 other => {
                     return Err(Error::Protocol(format!(
@@ -235,7 +271,9 @@ impl Logger {
         let size = size.unwrap_or(0);
         log::debug!("{path}: {size} bytes to read");
         if size > MAX_FILE_BYTES {
-            return Err(Error::Protocol(format!("{path}: the logger reports {size} bytes, more than any session file should be")));
+            return Err(Error::Protocol(format!(
+                "{path}: the logger reports {size} bytes, more than any session file should be"
+            )));
         }
 
         // Grow as data arrives rather than trusting the reported size up front.
@@ -244,7 +282,9 @@ impl Logger {
             let offset = data.len() as u32;
             let chunk = self.pull(offset)?;
             if chunk.is_empty() {
-                return Err(Error::Protocol(format!("{path}: empty chunk at offset {offset}")));
+                return Err(Error::Protocol(format!(
+                    "{path}: empty chunk at offset {offset}"
+                )));
             }
             data.extend_from_slice(&chunk);
             progress(data.len() as u64, size);
@@ -258,7 +298,9 @@ impl Logger {
     fn pull(&mut self, offset: u32) -> Result<Vec<u8>, Error> {
         for attempt in 0..=CHUNK_RETRIES {
             if attempt > 0 {
-                log::warn!("no reply for offset {offset}; asking again ({attempt} of {CHUNK_RETRIES})");
+                log::warn!(
+                    "no reply for offset {offset}; asking again ({attempt} of {CHUNK_RETRIES})"
+                );
             }
             self.send(STCP, offset.to_le_bytes().to_vec())?;
             loop {
@@ -270,17 +312,33 @@ impl Logger {
                         }
                         // A duplicate of an earlier chunk: keep reading.
                     }
-                    Ok(f) => return Err(Error::Protocol(format!("unexpected {} frame while reading", f.tag_str()))),
-                    Err(Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => break,
+                    Ok(f) => {
+                        return Err(Error::Protocol(format!(
+                            "unexpected {} frame while reading",
+                            f.tag_str()
+                        )));
+                    }
+                    Err(Error::Io(e))
+                        if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                    {
+                        break;
+                    }
                     Err(e) => return Err(e),
                 }
             }
         }
-        Err(Error::Protocol(format!("no reply for offset {offset} after {CHUNK_RETRIES} retries")))
+        Err(Error::Protocol(format!(
+            "no reply for offset {offset} after {CHUNK_RETRIES} retries"
+        )))
     }
 
     fn send(&mut self, tag: &[u8; 4], payload: Vec<u8>) -> Result<(), Error> {
-        log::trace!("send {} {} bytes: {:02x?}", String::from_utf8_lossy(tag), payload.len(), &payload[..payload.len().min(64)]);
+        log::trace!(
+            "send {} {} bytes: {:02x?}",
+            String::from_utf8_lossy(tag),
+            payload.len(),
+            &payload[..payload.len().min(64)]
+        );
         Frame::new(tag, payload).write_to(&mut self.writer)?;
         self.writer.flush()?;
         Ok(())
@@ -289,7 +347,12 @@ impl Logger {
     fn recv(&mut self) -> Result<Frame, Error> {
         let frame = Frame::read_from(&mut self.reader, MAX_FRAME);
         match &frame {
-            Ok(f) => log::trace!("recv {} {} bytes: {:02x?}", f.tag_str(), f.payload.len(), &f.payload[..f.payload.len().min(64)]),
+            Ok(f) => log::trace!(
+                "recv {} {} bytes: {:02x?}",
+                f.tag_str(),
+                f.payload.len(),
+                &f.payload[..f.payload.len().min(64)]
+            ),
             Err(e) => log::debug!("recv failed: {e}"),
         }
         frame
@@ -300,14 +363,26 @@ impl Logger {
 /// Commands that erase or reset something on the logger, as (command, group):
 /// delete file, remove folder, empty folder, format media, format data, erase
 /// firmware, reset WiFi. Mychronix only reads, and refuses to build these.
-const DESTRUCTIVE: [(u16, u16); 7] = [(0x06, 0x04), (0x07, 0x04), (0x08, 0x04), (0x09, 0x04), (0x0d, 0x04), (0x1000, 0x05), (0x05, 0x0c)];
+const DESTRUCTIVE: [(u16, u16); 7] = [
+    (0x06, 0x04),
+    (0x07, 0x04),
+    (0x08, 0x04),
+    (0x09, 0x04),
+    (0x0d, 0x04),
+    (0x1000, 0x05),
+    (0x05, 0x0c),
+];
 
 pub(crate) fn request_body(command: u16, sub: u16, path: &str) -> Result<Vec<u8>, Error> {
     if DESTRUCTIVE.contains(&(command, sub)) {
-        return Err(Error::Protocol(format!("refusing destructive command {command:#x}/{sub:#x}")));
+        return Err(Error::Protocol(format!(
+            "refusing destructive command {command:#x}/{sub:#x}"
+        )));
     }
     if path.len() > 31 || !path.is_ascii() {
-        return Err(Error::Protocol(format!("path {path:?} must be ASCII and at most 31 bytes")));
+        return Err(Error::Protocol(format!(
+            "path {path:?} must be ASCII and at most 31 bytes"
+        )));
     }
     let mut b = vec![0u8; 64];
     b[8..10].copy_from_slice(&command.to_le_bytes());
@@ -327,13 +402,19 @@ fn reply_phase(reply: &Frame) -> Result<(u16, u32), Error> {
         )));
     }
     let p = &reply.payload;
-    Ok((u16::from_le_bytes([p[24], p[25]]), u32::from_le_bytes(p[16..20].try_into().unwrap())))
+    Ok((
+        u16::from_le_bytes([p[24], p[25]]),
+        u32::from_le_bytes(p[16..20].try_into().unwrap()),
+    ))
 }
 
 /// The command a reply answers (bytes 8–11, as in the request), if it says.
 fn reply_command(reply: &Frame) -> Option<(u16, u16)> {
     let p = reply.payload.get(8..12)?;
-    let c = (u16::from_le_bytes([p[0], p[1]]), u16::from_le_bytes([p[2], p[3]]));
+    let c = (
+        u16::from_le_bytes([p[0], p[1]]),
+        u16::from_le_bytes([p[2], p[3]]),
+    );
     (c != (0, 0)).then_some(c)
 }
 
@@ -369,7 +450,17 @@ mod tests {
         for ok in ["a_0035.xrz", "a_0035.xri", "nl2amuco.tkk", "summary1.csv"] {
             assert!(is_safe_file_name(ok), "{ok}");
         }
-        for bad in ["", "..", "../x.xrz", "a/b.xrz", "..\\x", ".bashrc", "x y.xrz", "/etc/passwd", "a_0035.xrz\0"] {
+        for bad in [
+            "",
+            "..",
+            "../x.xrz",
+            "a/b.xrz",
+            "..\\x",
+            ".bashrc",
+            "x y.xrz",
+            "/etc/passwd",
+            "a_0035.xrz\0",
+        ] {
             assert!(!is_safe_file_name(bad), "{bad}");
         }
     }

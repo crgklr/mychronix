@@ -9,8 +9,8 @@
 //! The protocol was worked out from captures of RaceStudio 3 talking to a
 //! MyChron 6; see `docs/protocol-notes.md`. Only reads are implemented.
 
-pub mod datakey;
 pub mod client;
+pub mod datakey;
 pub mod discovery;
 pub mod frame;
 pub mod saved;
@@ -41,7 +41,11 @@ impl Link {
         }
     }
 
-    pub fn read_file(&mut self, path: &str, progress: impl FnMut(u64, u64)) -> Result<Vec<u8>, Error> {
+    pub fn read_file(
+        &mut self,
+        path: &str,
+        progress: impl FnMut(u64, u64),
+    ) -> Result<Vec<u8>, Error> {
         match self {
             Link::Wifi(l) => l.read_file(path, progress),
             Link::Usb(l) => l.read_file(path, progress),

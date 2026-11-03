@@ -26,7 +26,11 @@ fn dot(a: V, b: V) -> f64 {
 }
 
 fn cross(a: V, b: V) -> V {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 fn unit(a: V) -> V {
@@ -78,14 +82,28 @@ pub enum NoMount {
 
 /// Works out the mount from the accelerometers (X, Y, Z, same timebase) and
 /// the GPS's speed and forward acceleration (`gps_lon_g`, one per GPS point).
-pub fn find_mount(accel: [&Channel; 3], gps: &GpsTrack, gps_lon_g: &[f64]) -> Result<Mount, NoMount> {
+pub fn find_mount(
+    accel: [&Channel; 3],
+    gps: &GpsTrack,
+    gps_lon_g: &[f64],
+) -> Result<Mount, NoMount> {
     let [x, y, z] = accel;
     let n = x.values.len().min(y.values.len()).min(z.values.len());
     if n < 100 || gps.len() < 100 || gps_lon_g.len() != gps.len() {
         return Err(NoMount::TooShort);
     }
-    let speed: Vec<(i64, f64)> = gps.times_ms.iter().copied().zip(gps.speed_kmh.iter().copied()).collect();
-    let lon: Vec<(i64, f64)> = gps.times_ms.iter().copied().zip(gps_lon_g.iter().copied()).collect();
+    let speed: Vec<(i64, f64)> = gps
+        .times_ms
+        .iter()
+        .copied()
+        .zip(gps.speed_kmh.iter().copied())
+        .collect();
+    let lon: Vec<(i64, f64)> = gps
+        .times_ms
+        .iter()
+        .copied()
+        .zip(gps_lon_g.iter().copied())
+        .collect();
     let a = |i: usize| [x.values[i], y.values[i], z.values[i]];
 
     // Up: gravity, averaged over every moment the kart was still.
@@ -103,7 +121,11 @@ pub fn find_mount(accel: [&Channel; 3], gps: &GpsTrack, gps_lon_g: &[f64]) -> Re
     if still_ms < STILL_MS {
         return Err(NoMount::NeverStill);
     }
-    let g = [sum[0] / count as f64, sum[1] / count as f64, sum[2] / count as f64];
+    let g = [
+        sum[0] / count as f64,
+        sum[1] / count as f64,
+        sum[2] / count as f64,
+    ];
     let gravity = dot(g, g).sqrt();
     if !(0.85..=1.15).contains(&gravity) {
         return Err(NoMount::OddGravity(gravity));
@@ -112,7 +134,14 @@ pub fn find_mount(accel: [&Channel; 3], gps: &GpsTrack, gps_lon_g: &[f64]) -> Re
 
     // Forward: the level direction that best matches the GPS (least squares
     // over two level axes, then its angle).
-    let e1 = unit(cross(up, if up[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] }));
+    let e1 = unit(cross(
+        up,
+        if up[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        },
+    ));
     let e2 = cross(up, e1);
     let rows: Vec<(f64, f64, f64)> = (0..n)
         .filter(|&i| at(&speed, x.times_ms[i]) >= MOVING_KMH)
@@ -141,7 +170,10 @@ pub fn find_mount(accel: [&Channel; 3], gps: &GpsTrack, gps_lon_g: &[f64]) -> Re
     let forward = [0, 1, 2].map(|k| angle.cos() * e1[k] + angle.sin() * e2[k]);
 
     // How well it matches, smoothed to about the GPS's own smoothing.
-    let raw: Vec<f64> = rows.iter().map(|&(h1, h2, _)| angle.cos() * h1 + angle.sin() * h2).collect();
+    let raw: Vec<f64> = rows
+        .iter()
+        .map(|&(h1, h2, _)| angle.cos() * h1 + angle.sin() * h2)
+        .collect();
     let smooth: Vec<f64> = (0..raw.len())
         .map(|i| {
             let (lo, hi) = (i.saturating_sub(4), (i + 5).min(raw.len()));
@@ -152,12 +184,27 @@ pub fn find_mount(accel: [&Channel; 3], gps: &GpsTrack, gps_lon_g: &[f64]) -> Re
     let smooth: Vec<f64> = smooth.iter().map(|v| v - forward_bias).collect();
     let mean = rows.iter().map(|r| r.2).sum::<f64>() / rows.len() as f64;
     let total: f64 = rows.iter().map(|r| (r.2 - mean).powi(2)).sum();
-    let error: f64 = rows.iter().zip(&smooth).map(|(r, s)| (r.2 - s).powi(2)).sum();
-    let fit = if total > 0.0 { 1.0 - error / total } else { 0.0 };
+    let error: f64 = rows
+        .iter()
+        .zip(&smooth)
+        .map(|(r, s)| (r.2 - s).powi(2))
+        .sum();
+    let fit = if total > 0.0 {
+        1.0 - error / total
+    } else {
+        0.0
+    };
     if fit < MIN_FIT {
         return Err(NoMount::PoorFit(fit));
     }
-    Ok(Mount { tilt_deg: up[2].abs().min(1.0).acos().to_degrees(), gravity, up, forward, forward_bias, fit })
+    Ok(Mount {
+        tilt_deg: up[2].abs().min(1.0).acos().to_degrees(),
+        gravity,
+        up,
+        forward,
+        forward_bias,
+        fit,
+    })
 }
 
 /// "Forward g" (positive speeding up, negative braking) and "Vertical g"
@@ -176,8 +223,18 @@ pub fn kart_channels(accel: [&Channel; 3], mount: &Mount) -> Vec<Channel> {
         values,
     };
     vec![
-        channel("Forward g", (0..n).map(|i| dot(a(i), mount.forward) - mount.forward_bias).collect()),
-        channel("Vertical g", (0..n).map(|i| dot(a(i), mount.up) - mount.gravity).collect()),
+        channel(
+            "Forward g",
+            (0..n)
+                .map(|i| dot(a(i), mount.forward) - mount.forward_bias)
+                .collect(),
+        ),
+        channel(
+            "Vertical g",
+            (0..n)
+                .map(|i| dot(a(i), mount.up) - mount.gravity)
+                .collect(),
+        ),
     ]
 }
 
@@ -207,7 +264,10 @@ pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Ch
         v[i.min(v.len() - 1)]
     };
     let speed: Vec<f64> = t.iter().map(|&ms| gps_at(&gps.speed_kmh, ms)).collect();
-    let yaw: Vec<f64> = t.iter().map(|&ms| gps_at(&gps.yaw_rate_dps, ms + GPS_LAG_MS)).collect();
+    let yaw: Vec<f64> = t
+        .iter()
+        .map(|&ms| gps_at(&gps.yaw_rate_dps, ms + GPS_LAG_MS))
+        .collect();
     let w = |i: usize| [x.values[i], y.values[i], z.values[i]];
     // The gyro's zero, while the kart sits still.
     let still: Vec<usize> = (0..n).filter(|&i| speed[i] < STILL_KMH).collect();
@@ -227,16 +287,27 @@ pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Ch
     }
     // Back to zero on straights: the drift between two straights is taken out
     // in a straight line.
-    let straight: Vec<usize> = (0..n).filter(|&i| yaw[i].abs() < 3.0 && speed[i] > 20.0).collect();
+    let straight: Vec<usize> = (0..n)
+        .filter(|&i| yaw[i].abs() < 3.0 && speed[i] > 20.0)
+        .collect();
     if straight.len() < 50 {
         return None;
     }
     let angle: Vec<[f64; 3]> = (0..n)
         .map(|i| {
             let j = straight.partition_point(|&q| q <= i);
-            let (a, b) = (straight[j.saturating_sub(1)], straight[j.min(straight.len() - 1)]);
-            let f = if b > a { (i as f64 - a as f64) / (b - a) as f64 } else { 0.0 };
-            [0, 1, 2].map(|k| total[i][k] - (total[a][k] + f.clamp(0.0, 1.0) * (total[b][k] - total[a][k])))
+            let (a, b) = (
+                straight[j.saturating_sub(1)],
+                straight[j.min(straight.len() - 1)],
+            );
+            let f = if b > a {
+                (i as f64 - a as f64) / (b - a) as f64
+            } else {
+                0.0
+            };
+            [0, 1, 2].map(|k| {
+                total[i][k] - (total[a][k] + f.clamp(0.0, 1.0) * (total[b][k] - total[a][k]))
+            })
         })
         .collect();
     // The column: the direction whose angle best follows the path's curvature.
@@ -260,13 +331,19 @@ pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Ch
         let pivot = m[i];
         for r in (0..3).filter(|&r| r != i) {
             let f = m[r][i];
-            m[r][i..].iter_mut().zip(&pivot[i..]).for_each(|(v, pv)| *v -= f * pv);
+            m[r][i..]
+                .iter_mut()
+                .zip(&pivot[i..])
+                .for_each(|(v, pv)| *v -= f * pv);
         }
     }
     let fit_w = [m[0][3], m[1][3], m[2][3]];
     let mean = moving.iter().map(|&i| curvature(i)).sum::<f64>() / moving.len() as f64;
     let total_var: f64 = moving.iter().map(|&i| (curvature(i) - mean).powi(2)).sum();
-    let error: f64 = moving.iter().map(|&i| (curvature(i) - dot(fit_w, angle[i])).powi(2)).sum();
+    let error: f64 = moving
+        .iter()
+        .map(|&i| (curvature(i) - dot(fit_w, angle[i])).powi(2))
+        .sum();
     let fit = 1.0 - error / total_var;
     if fit < MIN_STEER_FIT {
         log::debug!("IMU: no steering (it follows the kart's turning with R² {fit:.2} only)");
@@ -298,7 +375,12 @@ pub fn grip_used(forward: &Channel, lat_times_ms: &[i64], lat_g: &[f64]) -> Opti
         let i = lat_times_ms.partition_point(|&x| x <= t).saturating_sub(1);
         lat_g[i.min(lat_g.len() - 1)]
     };
-    let combined: Vec<f64> = forward.times_ms.iter().zip(&forward.values).map(|(&t, &f)| (f * f + lat(t).powi(2)).sqrt()).collect();
+    let combined: Vec<f64> = forward
+        .times_ms
+        .iter()
+        .zip(&forward.values)
+        .map(|(&t, &f)| (f * f + lat(t).powi(2)).sqrt())
+        .collect();
     let mut busy: Vec<f64> = combined.iter().copied().filter(|&g| g > 0.2).collect();
     if busy.len() < 100 {
         return None;
@@ -312,7 +394,10 @@ pub fn grip_used(forward: &Channel, lat_times_ms: &[i64], lat_g: &[f64]) -> Opti
         decimals: 0,
         interpolate: true,
         times_ms: forward.times_ms.clone(),
-        values: combined.iter().map(|g| (g / limit * 100.0).min(120.0)).collect(),
+        values: combined
+            .iter()
+            .map(|g| (g / limit * 100.0).min(120.0))
+            .collect(),
     })
 }
 
@@ -331,7 +416,11 @@ mod tests {
         for i in 0..3000 {
             let t = i as i64 * 20;
             let moving = t >= 10_000;
-            let f = if moving { 0.4 * ((t - 10_000) as f64 / 4000.0 * std::f64::consts::TAU).sin() } else { 0.0 };
+            let f = if moving {
+                0.4 * ((t - 10_000) as f64 / 4000.0 * std::f64::consts::TAU).sin()
+            } else {
+                0.0
+            };
             // Kart frame: forward f, up 1 g. Logger frame: rotated by the tilt.
             acc[0].push(f * c + s);
             acc[1].push(0.0);
@@ -346,7 +435,15 @@ mod tests {
                 lon.push(f);
             }
         }
-        let ch = |v: Vec<f64>| Channel { name: String::new(), group: None, units: "g".into(), decimals: 2, interpolate: true, times_ms: times.clone(), values: v };
+        let ch = |v: Vec<f64>| Channel {
+            name: String::new(),
+            group: None,
+            units: "g".into(),
+            decimals: 2,
+            interpolate: true,
+            times_ms: times.clone(),
+            values: v,
+        };
         let [ax, ay, az] = acc;
         ([ch(ax), ch(ay), ch(az)], gps, lon)
     }
@@ -367,6 +464,9 @@ mod tests {
     fn nothing_without_a_still_moment() {
         let (acc, mut gps, lon) = drive(30.0);
         gps.speed_kmh.iter_mut().for_each(|s| *s = 40.0);
-        assert_eq!(find_mount([&acc[0], &acc[1], &acc[2]], &gps, &lon), Err(NoMount::NeverStill));
+        assert_eq!(
+            find_mount([&acc[0], &acc[1], &acc[2]], &gps, &lon),
+            Err(NoMount::NeverStill)
+        );
     }
 }

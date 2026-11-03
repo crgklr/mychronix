@@ -10,18 +10,31 @@ pub const RULE: &str = include_str!("../../../packaging/linux/70-mychronix-aim.r
 /// True when an AiM device is plugged in that Mychronix isn't allowed to open.
 #[cfg(target_os = "linux")]
 pub fn blocked() -> bool {
-    let Ok(devices) = std::fs::read_dir("/sys/bus/usb/devices") else { return false };
+    let Ok(devices) = std::fs::read_dir("/sys/bus/usb/devices") else {
+        return false;
+    };
     devices.flatten().any(|d| {
-        let read = |f: &str| std::fs::read_to_string(d.path().join(f)).map(|s| s.trim().to_string()).ok();
+        let read = |f: &str| {
+            std::fs::read_to_string(d.path().join(f))
+                .map(|s| s.trim().to_string())
+                .ok()
+        };
         if read("idVendor").as_deref() != Some("11cc") {
             return false;
         }
-        let (Some(bus), Some(dev)) = (read("busnum").and_then(|b| b.parse::<u32>().ok()), read("devnum").and_then(|d| d.parse::<u32>().ok())) else {
+        let (Some(bus), Some(dev)) = (
+            read("busnum").and_then(|b| b.parse::<u32>().ok()),
+            read("devnum").and_then(|d| d.parse::<u32>().ok()),
+        ) else {
             return false;
         };
         // Opening the device file is how any USB app starts; it changes nothing on the device.
         let node = format!("/dev/bus/usb/{bus:03}/{dev:03}");
-        std::fs::OpenOptions::new().read(true).write(true).open(&node).is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&node)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
     })
 }
 
@@ -40,7 +53,10 @@ pub fn allow() -> Result<(), String> {
     let script = "install -m 644 \"$1\" /etc/udev/rules.d/70-mychronix-aim.rules \
                   && udevadm control --reload-rules \
                   && udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=11cc";
-    let status = std::process::Command::new("pkexec").args(["/bin/sh", "-c", script, "sh"]).arg(&tmp).status();
+    let status = std::process::Command::new("pkexec")
+        .args(["/bin/sh", "-c", script, "sh"])
+        .arg(&tmp)
+        .status();
     let _ = std::fs::remove_file(&tmp);
     match status {
         Ok(s) if s.success() => {
@@ -48,8 +64,13 @@ pub fn allow() -> Result<(), String> {
             Ok(())
         }
         // pkexec: 126 = the password prompt was dismissed, 127 = not authorized.
-        Ok(s) if matches!(s.code(), Some(126) | Some(127)) => Err("Not allowed: the password prompt was closed or refused.".into()),
-        Ok(s) => Err(format!("Installing the rule didn't work (exit {}).", s.code().unwrap_or(-1))),
+        Ok(s) if matches!(s.code(), Some(126) | Some(127)) => {
+            Err("Not allowed: the password prompt was closed or refused.".into())
+        }
+        Ok(s) => Err(format!(
+            "Installing the rule didn't work (exit {}).",
+            s.code().unwrap_or(-1)
+        )),
         Err(e) => Err(format!("Couldn't ask for permission ({e}). {}", manual())),
     }
 }

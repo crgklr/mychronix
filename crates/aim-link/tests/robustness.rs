@@ -3,13 +3,26 @@
 
 /// A small deterministic generator, so failures reproduce.
 fn bytes(seed: u64, len: usize) -> Vec<u8> {
-    let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    (0..len).map(|_| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; (x >> 24) as u8 }).collect()
+    let mut x = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect()
 }
 
 #[test]
 fn listings_and_frames_survive_junk() {
-    let real = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/tkk-listing.bin")).unwrap();
+    let real = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/tkk-listing.bin"
+    ))
+    .unwrap();
     // Every truncation of a real listing.
     for n in 0..real.len() {
         let _ = aim_link::client::parse_listing(&real[..n]);

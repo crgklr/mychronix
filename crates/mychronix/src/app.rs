@@ -10,41 +10,41 @@ use egui_plot::{Line, Plot, PlotPoints, VLine};
 
 mod analysis_ui;
 mod charts_ui;
-mod corners_ui;
-mod map_ui;
-mod sensor_ui;
-mod datakey_ui;
-mod device_ui;
-mod track_pick_ui;
+mod chrome_ui;
 mod compare_drivers_ui;
 mod compare_panel_ui;
+mod corners_ui;
+mod datakey_ui;
+mod device_ui;
 mod events_page;
+mod format;
 mod garage_manage_ui;
 mod garage_ui;
-mod report_ui;
-mod sessions_filter_ui;
-mod setup_ui;
-mod welcome_ui;
-mod settings_ui;
-mod library_load;
-mod chrome_ui;
-mod format;
 mod graphs_ui;
+mod library_load;
+mod map_ui;
+mod report_ui;
+mod sensor_ui;
+mod sessions_filter_ui;
 mod sessions_ui;
+mod settings_ui;
+mod setup_ui;
+mod track_pick_ui;
+mod welcome_ui;
 mod widgets;
 use format::*;
 use graphs_ui::*;
 use sessions_ui::*;
 use widgets::*;
 // Used outside the pages too (the assistant server, reports).
+mod compare_ui;
+mod device_page;
+mod line_pick_ui;
+mod look;
+mod notices;
 mod splits_ui;
 mod tracks_ui;
-mod device_page;
-mod compare_ui;
 mod window_ui;
-mod notices;
-mod look;
-mod line_pick_ui;
 
 pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
 
@@ -52,11 +52,11 @@ use compare_ui::gain_color;
 use device_page::model_from_ssid;
 
 use crate::splits;
-use crate::tracks::{self, Kind, Library};
 use crate::theme::{
     self, DIM, GRID, Icon, ON_TEXT, ROW_HEIGHT, SECONDARY, SERIES, SIDEBAR, SURFACE,
     SURFACE_ACTIVE, SURFACE_HOVER, TEXT, WINDOW, medium, regular, semibold,
 };
+use crate::tracks::{self, Kind, Library};
 
 /// Points drawn per channel; longer series are min/max-decimated to this many buckets.
 const MAX_POINTS: usize = 4000;
@@ -275,8 +275,12 @@ impl App {
                     self.select(i);
                 }
                 // Open on the best lap with the cursor halfway round, as RaceStudio does.
-                self.lap = session.best_lap(MIN_LAP_MS).and_then(|b| session.laps.iter().position(|l| l == b));
-                self.cursor_s = self.lap.map(|i| session.laps[i].duration_ms() as f64 / 1000.0 * 0.5);
+                self.lap = session
+                    .best_lap(MIN_LAP_MS)
+                    .and_then(|b| session.laps.iter().position(|l| l == b));
+                self.cursor_s = self
+                    .lap
+                    .map(|i| session.laps[i].duration_ms() as f64 / 1000.0 * 0.5);
                 self.map_channel = None;
                 self.session = Some(std::sync::Arc::new(session));
                 self.path = Some(path);
@@ -285,7 +289,8 @@ impl App {
             }
             Err(e) => {
                 log::error!("couldn't open {}: {e}", path.display());
-                self.notices.error(format!("Couldn't open {}: {e}", file_name(&path)));
+                self.notices
+                    .error(format!("Couldn't open {}: {e}", file_name(&path)));
                 false
             }
         }
@@ -294,9 +299,15 @@ impl App {
     /// Opens the session on screen again (its laps changed), keeping the
     /// channels graphed.
     pub(super) fn reopen(&mut self, path: PathBuf) {
-        let (selected, order, map_channel, page) = (self.selected.clone(), self.graph_order.clone(), self.map_channel, self.page);
+        let (selected, order, map_channel, page) = (
+            self.selected.clone(),
+            self.graph_order.clone(),
+            self.map_channel,
+            self.page,
+        );
         if self.load(path) {
-            (self.selected, self.graph_order, self.map_channel, self.page) = (selected, order, map_channel, page);
+            (self.selected, self.graph_order, self.map_channel, self.page) =
+                (selected, order, map_channel, page);
         }
     }
 
@@ -306,15 +317,30 @@ impl App {
         // The kart its MyChron was on when it was recorded (for a file opened
         // from elsewhere: the one its MyChron is on, or was last on).
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-        let kart: Option<crate::profiles::Kart> = match lib.sessions.iter().find(|s| s.path == path) {
-            Some(s) => s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id)).cloned(),
-            None => session.info.logger_id.and_then(|id| profiles.kart_on(&id.to_string())).cloned(),
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load);
+        let kart: Option<crate::profiles::Kart> = match lib.sessions.iter().find(|s| s.path == path)
+        {
+            Some(s) => s
+                .kart
+                .and_then(|id| profiles.karts.iter().find(|k| k.id == id))
+                .cloned(),
+            None => session
+                .info
+                .logger_id
+                .and_then(|id| profiles.kart_on(&id.to_string()))
+                .cloned(),
         };
-        let kart_driver = kart.as_ref().and_then(|k| profiles.driver_name(k.driver)).map(str::to_string);
+        let kart_driver = kart
+            .as_ref()
+            .and_then(|k| profiles.driver_name(k.driver))
+            .map(str::to_string);
         // Without GPS, speed from RPM and the session's gearing and tires.
         if let Some(i) = lib.sessions.iter().position(|s| s.path == path) {
-            let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
+            let baselines = self
+                .setup_baselines
+                .get_or_insert_with(crate::setup::Baselines::load);
             crate::setup::add_speed_from_rpm(session, &lib, baselines, i, kart.as_ref());
         }
         seconds_not_ms(session);
@@ -335,7 +361,9 @@ impl App {
                 session.info.session = nonempty(&m.session_type);
             }
         }
-        if let Some(k) = &kart && blank(&session.info.vehicle) {
+        if let Some(k) = &kart
+            && blank(&session.info.vehicle)
+        {
             session.info.vehicle = nonempty(&k.name);
         }
     }
@@ -343,7 +371,9 @@ impl App {
     /// Opens on the best lap with the cursor 40% in, for screenshots.
     pub fn demo(&mut self) {
         let Some(session) = &self.session else { return };
-        let Some(best) = session.best_lap(MIN_LAP_MS).copied() else { return };
+        let Some(best) = session.best_lap(MIN_LAP_MS).copied() else {
+            return;
+        };
         self.lap = session.laps.iter().position(|l| *l == best);
         self.cursor_s = Some(best.duration_ms() as f64 / 1000.0 * 0.4);
     }
@@ -367,8 +397,14 @@ impl App {
     /// The setup in force for a logger after its newest session.
     fn latest_setup(&mut self, logger: &str) -> crate::setup::Setup {
         let lib = self.lib();
-        let baselines = self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load);
-        let kart = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).mounted_on(logger).map(|k| k.id);
+        let baselines = self
+            .setup_baselines
+            .get_or_insert_with(crate::setup::Baselines::load);
+        let kart = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .mounted_on(logger)
+            .map(|k| k.id);
         crate::setup::latest(&lib, baselines, logger, kart)
     }
 
@@ -426,16 +462,32 @@ impl App {
         if let Some(lap) = self.lap.and_then(|i| session.laps.get(i)) {
             return (lap.start_ms, lap.end_ms);
         }
-        let start = session.channels.iter().filter_map(|c| c.times_ms.first()).min();
-        let end = session.channels.iter().filter_map(|c| c.times_ms.last()).max();
+        let start = session
+            .channels
+            .iter()
+            .filter_map(|c| c.times_ms.first())
+            .min();
+        let end = session
+            .channels
+            .iter()
+            .filter_map(|c| c.times_ms.last())
+            .max();
         (start.copied().unwrap_or(0), end.copied().unwrap_or(0))
     }
 
     fn open_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("AiM session", &["xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4"])
+            .add_filter(
+                "AiM session",
+                &[
+                    "xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4",
+                ],
+            )
             .add_filter("MyChron 5/6 (.xrk, .xrz)", &["xrk", "xrz", "XRK", "XRZ"])
-            .add_filter("RaceStudio 2 / MyChron 4 (.drk, .imd, .mc4)", &["drk", "imd", "mc4", "DRK", "IMD", "MC4"])
+            .add_filter(
+                "RaceStudio 2 / MyChron 4 (.drk, .imd, .mc4)",
+                &["drk", "imd", "mc4", "DRK", "IMD", "MC4"],
+            )
             .pick_file()
         {
             let path = self.import_rs2(path);
@@ -497,20 +549,32 @@ impl eframe::App for App {
         self.input_frames += 1;
         // Touch vs mouse: a touchscreen tap also moves the pointer, so remember
         // when we last saw a real touch (hover effects stand down for a while).
-        let touched = raw.events.iter().any(|e| matches!(e, egui::Event::Touch { .. }));
+        let touched = raw
+            .events
+            .iter()
+            .any(|e| matches!(e, egui::Event::Touch { .. }));
         if touched {
             self.last_touch = Some(std::time::Instant::now());
             self.touch_mode = true;
         } else if self.touch_mode
-            && raw.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_)))
-            && self.last_touch.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(1))
+            && raw
+                .events
+                .iter()
+                .any(|e| matches!(e, egui::Event::PointerMoved(_)))
+            && self
+                .last_touch
+                .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(1))
         {
             // The mouse moved on its own: hover effects are back.
             self.touch_mode = false;
         }
-        let Some(spec) = crate::hooks::get().clicks.as_deref() else { return };
+        let Some(spec) = crate::hooks::get().clicks.as_deref() else {
+            return;
+        };
         for item in spec.split(';') {
-            let Some((f, xy)) = item.split_once(':') else { continue };
+            let Some((f, xy)) = item.split_once(':') else {
+                continue;
+            };
             if let Some(text) = xy.strip_prefix("type:") {
                 if f.trim().parse::<u32>().ok() == Some(self.input_frames) {
                     raw.events.push(egui::Event::Text(text.to_string()));
@@ -522,13 +586,27 @@ impl eframe::App for App {
                 None => (xy, None),
             };
             let (xy, to) = match xy.split_once('>') {
-                Some((a, b)) => (a, b.split_once(',').and_then(|(x, y)| Some(pos2(x.trim().parse().ok()?, y.trim().parse().ok()?)))),
+                Some((a, b)) => (
+                    a,
+                    b.split_once(',').and_then(|(x, y)| {
+                        Some(pos2(x.trim().parse().ok()?, y.trim().parse().ok()?))
+                    }),
+                ),
                 None => (xy, None),
             };
-            let (Ok(f), Some((x, y))) = (f.trim().parse::<u32>(), xy.split_once(',')) else { continue };
-            let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>()) else { continue };
+            let (Ok(f), Some((x, y))) = (f.trim().parse::<u32>(), xy.split_once(',')) else {
+                continue;
+            };
+            let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>()) else {
+                continue;
+            };
             let pos = pos2(x, y);
-            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
             if let Some(dy) = scroll {
                 match self.input_frames.checked_sub(f) {
                     Some(0) => raw.events.push(egui::Event::PointerMoved(pos)),
@@ -546,8 +624,15 @@ impl eframe::App for App {
                 match self.input_frames.checked_sub(f) {
                     Some(0) => raw.events.push(egui::Event::PointerMoved(pos)),
                     Some(1) => raw.events.push(button(true)),
-                    Some(2..=4) => raw.events.push(egui::Event::PointerMoved(pos + (to - pos) * (self.input_frames - f - 1) as f32 / 3.0)),
-                    Some(5) => raw.events.push(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }),
+                    Some(2..=4) => raw.events.push(egui::Event::PointerMoved(
+                        pos + (to - pos) * (self.input_frames - f - 1) as f32 / 3.0,
+                    )),
+                    Some(5) => raw.events.push(egui::Event::PointerButton {
+                        pos: to,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    }),
                     _ => {}
                 }
                 continue;
@@ -561,10 +646,16 @@ impl eframe::App for App {
         }
         // MYCHRONIX_DROP="frame:path" drops that file or folder on the window then;
         // MYCHRONIX_DRAG="frame" holds a dragged file over it from then on (for testing).
-        if let Some((f, path)) = &crate::hooks::get().drop && *f == self.input_frames {
-            raw.dropped_files.push(std::sync::Arc::new(TestDrop(path.clone())));
+        if let Some((f, path)) = &crate::hooks::get().drop
+            && *f == self.input_frames
+        {
+            raw.dropped_files
+                .push(std::sync::Arc::new(TestDrop(path.clone())));
         }
-        if crate::hooks::get().drag.is_some_and(|f| self.input_frames >= f) {
+        if crate::hooks::get()
+            .drag
+            .is_some_and(|f| self.input_frames >= f)
+        {
             raw.hovered_files.push(egui::HoveredFile::default());
         }
     }
@@ -575,7 +666,12 @@ impl eframe::App for App {
             let ctx = ui.ctx();
             let (native, inner, outer, monitor) = ctx.input(|i| {
                 let v = i.viewport();
-                (v.native_pixels_per_point, v.inner_rect, v.outer_rect, v.monitor_size)
+                (
+                    v.native_pixels_per_point,
+                    v.inner_rect,
+                    v.outer_rect,
+                    v.monitor_size,
+                )
             });
             eprintln!(
                 "ppp={} native_ppp={:?} screen={:?} inner={:?} outer={:?} monitor={:?} maximized={:?}",
@@ -590,7 +686,8 @@ impl eframe::App for App {
         }
         // Some desktops ignore maximize at creation; ask again once the window is up.
         if self.frames < 2 && self.screenshot_to.is_none() && !crate::hooks::get().windowed {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
         }
         if self.screenshot_to.is_none() {
             self.frames = self.frames.saturating_add(1).min(10);
@@ -627,7 +724,12 @@ impl eframe::App for App {
             .rect;
 
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(WINDOW).inner_margin(Margin { left: 28, right: 28, top: 22, bottom: 16 }))
+            .frame(Frame::new().fill(WINDOW).inner_margin(Margin {
+                left: 28,
+                right: 28,
+                top: 22,
+                bottom: 16,
+            }))
             .show(ui, |ui| match (self.page, &session, window) {
                 (Page::Analysis, Some(s), Some((start, end))) => self.analysis(ui, s, start, end),
                 (Page::Analysis, _, _) => self.session_picker(ui),
@@ -643,8 +745,16 @@ impl eframe::App for App {
         self.window_controls(&ui.ctx().clone());
         // MYCHRONIX_SENSOR_CHECK=<logger id> checks that logger's downloaded sessions
         // as if just downloaded (development only).
-        if self.frames == 3 && let Some(id) = crate::hooks::get().sensor_check.clone() {
-            let paths: Vec<PathBuf> = self.lib().sessions.iter().filter(|s| s.logger == id).map(|s| s.path.clone()).collect();
+        if self.frames == 3
+            && let Some(id) = crate::hooks::get().sensor_check.clone()
+        {
+            let paths: Vec<PathBuf> = self
+                .lib()
+                .sessions
+                .iter()
+                .filter(|s| s.logger == id)
+                .map(|s| s.path.clone())
+                .collect();
             self.check_downloaded(paths, &id, &ui.ctx().clone());
         }
         self.key_poll(&ui.ctx().clone());
@@ -704,19 +814,39 @@ mod tests {
         std::fs::write(outside.join("run 7.rrk"), b"raw").unwrap();
         std::fs::write(outside.join("run 8.rrk"), b"another run").unwrap();
         let mut lib = Library::default();
-        let copy = add_rs2_file(&outside.join("run 7.mc4"), &root, &lib).unwrap().unwrap();
+        let copy = add_rs2_file(&outside.join("run 7.mc4"), &root, &lib)
+            .unwrap()
+            .unwrap();
         assert_eq!(copy, root.join("4242").join("run 7.mc4"));
-        let mut got: Vec<String> = std::fs::read_dir(root.join("4242")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut got: Vec<String> = std::fs::read_dir(root.join("4242"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         got.sort();
         assert_eq!(got, ["run 7.gpk", "run 7.mc4", "run 7.rrk"]);
         // Opened again once it's in the library: the library's copy, nothing copied twice.
         let summary = aim_xrk::mc4::summary(&copy).unwrap();
-        lib.sessions.push(crate::tracks::LocalSession { path: copy.clone(), logger: "4242".into(), summary, track: None, meta: None, setup: None, weather: None, kart: None });
-        assert_eq!(add_rs2_file(&outside.join("run 7.mc4"), &root, &lib).unwrap(), Some(copy.clone()));
+        lib.sessions.push(crate::tracks::LocalSession {
+            path: copy.clone(),
+            logger: "4242".into(),
+            summary,
+            track: None,
+            meta: None,
+            setup: None,
+            weather: None,
+            kart: None,
+        });
+        assert_eq!(
+            add_rs2_file(&outside.join("run 7.mc4"), &root, &lib).unwrap(),
+            Some(copy.clone())
+        );
         assert_eq!(std::fs::read_dir(root.join("4242")).unwrap().count(), 3);
         // Already inside the library, or not a session: left as it is.
         assert_eq!(add_rs2_file(&copy, &root, &lib).unwrap(), None);
-        assert_eq!(add_rs2_file(&outside.join("run 8.rrk"), &root, &lib).unwrap(), None);
+        assert_eq!(
+            add_rs2_file(&outside.join("run 8.rrk"), &root, &lib).unwrap(),
+            None
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 }

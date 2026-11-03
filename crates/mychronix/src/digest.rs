@@ -5,9 +5,9 @@
 //! `session-digests-v5.json` in the cache folder (the version goes up when what a digest holds changes), keyed by path and size.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
-use std::path::{Path, PathBuf};
 
 use aim_xrk::checks::{Issue, IssueKind};
 use serde::{Deserialize, Serialize};
@@ -43,21 +43,47 @@ pub struct Digest {
 impl Digest {
     pub fn of(session: &aim_xrk::Session) -> Self {
         Digest {
-            logger: session.info.logger_id.map(|i| i.to_string()).unwrap_or_default(),
-            laps: aim_xrk::notes::racing_laps(session).iter().map(|l| (l.number, l.duration_ms())).collect(),
+            logger: session
+                .info
+                .logger_id
+                .map(|i| i.to_string())
+                .unwrap_or_default(),
+            laps: aim_xrk::notes::racing_laps(session)
+                .iter()
+                .map(|l| (l.number, l.duration_ms()))
+                .collect(),
             working: aim_xrk::checks::working_sensors(session),
-            issues: aim_xrk::checks::sensor_issues(session).iter().map(|i| (i.channel.clone(), kind_text(i.kind))).collect(),
-            model: session.info.logger_model_id.and_then(aim_xrk::mychron_model).map(str::to_string).unwrap_or_default(),
+            issues: aim_xrk::checks::sensor_issues(session)
+                .iter()
+                .map(|i| (i.channel.clone(), kind_text(i.kind)))
+                .collect(),
+            model: session
+                .info
+                .logger_model_id
+                .and_then(aim_xrk::mychron_model)
+                .map(str::to_string)
+                .unwrap_or_default(),
             laps_from_gps: session.info.laps_from_gps.is_some(),
-            untimed: session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session),
+            untimed: session.info.laps_from_gps.is_none()
+                && aim_xrk::relap::needs_retiming(session),
             lap_count: session.laps.len() as u32,
-            best: session.best_lap(aim_xrk::laps::MIN_LAP_MS).map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
+            best: session
+                .best_lap(aim_xrk::laps::MIN_LAP_MS)
+                .map(|l| (l.number.max(0) as u32, l.duration_ms().max(0) as u64)),
         }
     }
 
     /// The issues back in `aim_xrk` form.
     pub fn issues(&self) -> Vec<Issue> {
-        self.issues.iter().filter_map(|(c, k)| Some(Issue { channel: c.clone(), kind: parse_kind(k)? })).collect()
+        self.issues
+            .iter()
+            .filter_map(|(c, k)| {
+                Some(Issue {
+                    channel: c.clone(),
+                    kind: parse_kind(k)?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -73,7 +99,12 @@ fn parse_kind(s: &str) -> Option<IssueKind> {
     match s {
         "not connected" => Some(IssueKind::NotConnected),
         "no signal" => Some(IssueKind::NoSignal),
-        _ => s.strip_prefix("drop outs ")?.trim_end_matches('%').parse().ok().map(|percent| IssueKind::DropOuts { percent }),
+        _ => s
+            .strip_prefix("drop outs ")?
+            .trim_end_matches('%')
+            .parse()
+            .ok()
+            .map(|percent| IssueKind::DropOuts { percent }),
     }
 }
 
@@ -166,17 +197,26 @@ impl Digests {
 
     /// The model of `logger`, when any of its sessions says.
     pub fn model(&self, logger: &str) -> Option<String> {
-        self.by_key.values().find(|d| d.logger == logger && !d.model.is_empty()).map(|d| d.model.clone())
+        self.by_key
+            .values()
+            .find(|d| d.logger == logger && !d.model.is_empty())
+            .map(|d| d.model.clone())
     }
 
     /// Whether `channel` recorded real readings in any session from `logger`.
     pub fn worked(&self, logger: &str, channel: &str) -> bool {
-        self.by_key.values().any(|d| d.logger == logger && d.working.iter().any(|c| c == channel))
+        self.by_key
+            .values()
+            .any(|d| d.logger == logger && d.working.iter().any(|c| c == channel))
     }
 
     /// The issues in a session worth reporting (see `aim_xrk::checks::worth_reporting`).
     pub fn reportable(&self, digest: &Digest) -> Vec<Issue> {
-        digest.issues().into_iter().filter(|i| aim_xrk::checks::worth_reporting(i, |c| self.worked(&digest.logger, c))).collect()
+        digest
+            .issues()
+            .into_iter()
+            .filter(|i| aim_xrk::checks::worth_reporting(i, |c| self.worked(&digest.logger, c)))
+            .collect()
     }
 }
 
@@ -188,15 +228,24 @@ static FORGOTTEN: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default:
 
 /// The digests worked out by a job that started at `started` (a
 /// [`GENERATION`]) that still hold: not for a session forgotten since.
-fn still_current(fresh: Vec<(String, Digest)>, forgotten: &HashMap<String, u64>, started: u64) -> impl Iterator<Item = (String, Digest)> + '_ {
-    fresh.into_iter().filter(move |(k, _)| forgotten.get(k).is_none_or(|&when| when <= started))
+fn still_current(
+    fresh: Vec<(String, Digest)>,
+    forgotten: &HashMap<String, u64>,
+    started: u64,
+) -> impl Iterator<Item = (String, Digest)> + '_ {
+    fresh
+        .into_iter()
+        .filter(move |(k, _)| forgotten.get(k).is_none_or(|&when| when <= started))
 }
 
 /// Works out the digests of `paths` in the background (cached ones come back
 /// at once), sending each as it's ready, then saves the ones it worked out:
 /// only those, so nothing changed meanwhile is overwritten, and none for a
 /// session forgotten since it started (its track changed while it ran).
-pub fn spawn(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(PathBuf, Digest)> {
+pub fn spawn(
+    paths: Vec<PathBuf>,
+    ctx: eframe::egui::Context,
+) -> std::sync::mpsc::Receiver<(PathBuf, Digest)> {
     let (tx, rx) = std::sync::mpsc::channel();
     crate::jobs::spawn("digests", move || {
         let started = GENERATION.load(Ordering::SeqCst);
@@ -204,7 +253,9 @@ pub fn spawn(paths: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc
         let mut fresh: Vec<(String, Digest)> = Vec::new();
         for (n, path) in paths.into_iter().enumerate() {
             let known = digests.get(&path).is_some();
-            let Some(d) = digests.ensure(&path).cloned() else { continue };
+            let Some(d) = digests.ensure(&path).cloned() else {
+                continue;
+            };
             if !known {
                 fresh.push((key(&path), d.clone()));
             }
@@ -230,17 +281,27 @@ mod tests {
 
     #[test]
     fn issue_kinds_round_trip() {
-        for k in [IssueKind::NotConnected, IssueKind::NoSignal, IssueKind::DropOuts { percent: 30 }] {
+        for k in [
+            IssueKind::NotConnected,
+            IssueKind::NoSignal,
+            IssueKind::DropOuts { percent: 30 },
+        ] {
             assert_eq!(parse_kind(&kind_text(k)), Some(k));
         }
     }
 
     #[test]
     fn a_session_forgotten_while_its_digest_was_worked_out_isnt_saved_back() {
-        let fresh = vec![("a|1".to_string(), Digest::default()), ("b|1".to_string(), Digest::default()), ("c|1".to_string(), Digest::default())];
+        let fresh = vec![
+            ("a|1".to_string(), Digest::default()),
+            ("b|1".to_string(), Digest::default()),
+            ("c|1".to_string(), Digest::default()),
+        ];
         // Started at generation 5: "a" was forgotten before (kept), "b" after (dropped), "c" never.
         let forgotten = HashMap::from([("a|1".to_string(), 4), ("b|1".to_string(), 6)]);
-        let kept: Vec<String> = still_current(fresh, &forgotten, 5).map(|(k, _)| k).collect();
+        let kept: Vec<String> = still_current(fresh, &forgotten, 5)
+            .map(|(k, _)| k)
+            .collect();
         assert_eq!(kept, ["a|1", "c|1"]);
     }
 }

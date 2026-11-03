@@ -79,7 +79,9 @@ impl Hooks {
         let path = |name: &str| std::env::var_os(name).map(PathBuf::from);
         Hooks {
             screenshot: path("MYCHRONIX_SCREENSHOT"),
-            screenshot_frame: text("MYCHRONIX_SCREENSHOT_FRAME").and_then(|v| v.parse().ok()).unwrap_or(20),
+            screenshot_frame: text("MYCHRONIX_SCREENSHOT_FRAME")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(20),
             demo: set("MYCHRONIX_DEMO"),
             windowed: set("MYCHRONIX_WINDOWED"),
             page: text("MYCHRONIX_PAGE"),
@@ -89,7 +91,10 @@ impl Hooks {
             report: set("MYCHRONIX_REPORT"),
             compare: set("MYCHRONIX_COMPARE"),
             clicks: text("MYCHRONIX_CLICKS"),
-            drop: text("MYCHRONIX_DROP").and_then(|v| v.split_once(':').and_then(|(f, p)| Some((f.parse().ok()?, PathBuf::from(p))))),
+            drop: text("MYCHRONIX_DROP").and_then(|v| {
+                v.split_once(':')
+                    .and_then(|(f, p)| Some((f.parse().ok()?, PathBuf::from(p))))
+            }),
             drag: text("MYCHRONIX_DRAG").and_then(|v| v.parse().ok()),
             debug_scale: set("MYCHRONIX_DEBUG_SCALE"),
             sensor_check: text("MYCHRONIX_SENSOR_CHECK"),

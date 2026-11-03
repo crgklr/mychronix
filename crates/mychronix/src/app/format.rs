@@ -4,7 +4,10 @@
 use super::*;
 
 pub(super) fn file_name(path: &std::path::Path) -> String {
-    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// "1 lap", "3 laps".
@@ -26,13 +29,21 @@ pub(super) fn group_thousands(n: usize) -> String {
 
 pub(super) fn format_duration(ms: i64) -> String {
     let s = ms.max(0) / 1000;
-    if s >= 3600 { format!("{}h {:02}m", s / 3600, (s / 60) % 60) } else { format!("{}m {:02}s", s / 60, s % 60) }
+    if s >= 3600 {
+        format!("{}h {:02}m", s / 3600, (s / 60) % 60)
+    } else {
+        format!("{}m {:02}s", s / 60, s % 60)
+    }
 }
 
 pub(super) fn format_delta(ms: i64) -> String {
     let sign = if ms < 0 { "-" } else { "+" };
     let a = ms.unsigned_abs();
-    if a >= 60_000 { format!("{sign}{}", format_lap_time(a as i64)) } else { format!("{sign}{:.3}", a as f64 / 1000.0) }
+    if a >= 60_000 {
+        format!("{sign}{}", format_lap_time(a as i64))
+    } else {
+        format!("{sign}{:.3}", a as f64 / 1000.0)
+    }
 }
 
 pub(super) fn format_value(v: f64, decimals: u8) -> String {
@@ -51,7 +62,10 @@ pub(super) fn pretty_units(units: &str) -> &str {
 
 /// Laps that don't count: not racing laps (see `aim_xrk::laps::racing`).
 pub(crate) fn slow_laps(session: &Session) -> Vec<bool> {
-    aim_xrk::laps::racing(session).into_iter().map(|r| !r).collect()
+    aim_xrk::laps::racing(session)
+        .into_iter()
+        .map(|r| !r)
+        .collect()
 }
 
 /// Lap-timing channels are stored in milliseconds; show them in seconds.
@@ -61,7 +75,11 @@ pub(super) fn seconds_not_ms(session: &mut Session) {
     for c in session.channels.iter_mut() {
         crate::units::convert_channel(c);
     }
-    for c in session.channels.iter_mut().filter(|c| c.units.trim() == "ms") {
+    for c in session
+        .channels
+        .iter_mut()
+        .filter(|c| c.units.trim() == "ms")
+    {
         for v in &mut c.values {
             *v /= 1000.0;
         }
@@ -76,7 +94,13 @@ pub(super) fn is_dead(c: &Channel) -> bool {
 }
 
 /// Sidebar groups, in order.
-pub(super) const CHANNEL_GROUPS: [&str; 5] = ["Engine", "Movement", "Lap timing", "Logger", "More channels"];
+pub(super) const CHANNEL_GROUPS: [&str; 5] = [
+    "Engine",
+    "Movement",
+    "Lap timing",
+    "Logger",
+    "More channels",
+];
 
 /// Which group a channel is listed under. `imu`: the session has the IMU's
 /// corrected channels, which stand in for the GPS's forward acceleration.
@@ -88,11 +112,28 @@ pub(super) fn channel_group(c: &Channel, imu: bool) -> &'static str {
         "More channels"
     } else if n == "forward g" || n == "vertical g" || n == "grip used" {
         "Movement"
-    } else if n.contains("predictive") || n.contains("diff") || n.contains("lap time") || n.contains("split") {
+    } else if n.contains("predictive")
+        || n.contains("diff")
+        || n.contains("lap time")
+        || n.contains("split")
+    {
         "Lap timing"
-    } else if n.contains("rpm") || n.contains("exhaust") || n.contains("egt") || n.contains("water") || n.contains("cht") || n.contains("throttle") || n.contains("lambda") {
+    } else if n.contains("rpm")
+        || n.contains("exhaust")
+        || n.contains("egt")
+        || n.contains("water")
+        || n.contains("cht")
+        || n.contains("throttle")
+        || n.contains("lambda")
+    {
         "Engine"
-    } else if n.contains("speed") || n.contains("acc") || n.contains("gyro") || n.contains("gps") || n.contains("steer") || n.contains("brake") {
+    } else if n.contains("speed")
+        || n.contains("acc")
+        || n.contains("gyro")
+        || n.contains("gps")
+        || n.contains("steer")
+        || n.contains("brake")
+    {
         "Movement"
     } else {
         "Logger"
@@ -102,10 +143,25 @@ pub(super) fn channel_group(c: &Channel, imu: bool) -> &'static str {
 /// Channels shown when a session first opens: ones every MyChron records,
 /// falling back to the first few channels with real data.
 pub(super) fn default_channels(session: &Session) -> Vec<usize> {
-    const PREFERRED: [&str; 9] = ["RPM", "Engine", "GPS Speed", crate::setup::SPEED_FROM_RPM, "Exhaust Temp", "Speed", "WheelSpeed", "Water Temp", "WT"];
+    const PREFERRED: [&str; 9] = [
+        "RPM",
+        "Engine",
+        "GPS Speed",
+        crate::setup::SPEED_FROM_RPM,
+        "Exhaust Temp",
+        "Speed",
+        "WheelSpeed",
+        "Water Temp",
+        "WT",
+    ];
     let mut picks: Vec<usize> = PREFERRED
         .iter()
-        .filter_map(|name| session.channels.iter().position(|c| c.name == *name && !is_dead(c)))
+        .filter_map(|name| {
+            session
+                .channels
+                .iter()
+                .position(|c| c.name == *name && !is_dead(c))
+        })
         .take(3)
         .collect();
     if picks.is_empty() {
@@ -152,7 +208,11 @@ pub(super) fn decimate(c: &Channel, start_ms: i64, end_ms: i64, max: usize) -> V
                 max_i = i;
             }
         }
-        let (first, second) = if min_i <= max_i { (min_i, max_i) } else { (max_i, min_i) };
+        let (first, second) = if min_i <= max_i {
+            (min_i, max_i)
+        } else {
+            (max_i, min_i)
+        };
         out.push(point(first));
         if second != first {
             out.push(point(second));

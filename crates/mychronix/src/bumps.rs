@@ -33,10 +33,23 @@ pub struct Bump {
 
 /// The places `session`'s racing laps (no slower than 15% off `best`) hit most often.
 pub fn recurring(session: &Session, best: &Lap) -> Vec<Bump> {
-    let ch = |n: &str| session.channels.iter().find(|c| c.name == n && c.values.len() > 100);
-    let (Some(x), Some(y), Some(z)) = (ch("AccelerometerX"), ch("AccelerometerY"), ch("AccelerometerZ")) else { return Vec::new() };
+    let ch = |n: &str| {
+        session
+            .channels
+            .iter()
+            .find(|c| c.name == n && c.values.len() > 100)
+    };
+    let (Some(x), Some(y), Some(z)) = (
+        ch("AccelerometerX"),
+        ch("AccelerometerY"),
+        ch("AccelerometerZ"),
+    ) else {
+        return Vec::new();
+    };
     let n = x.values.len().min(y.values.len()).min(z.values.len());
-    let size: Vec<f64> = (0..n).map(|i| (x.values[i].powi(2) + y.values[i].powi(2) + z.values[i].powi(2)).sqrt()).collect();
+    let size: Vec<f64> = (0..n)
+        .map(|i| (x.values[i].powi(2) + y.values[i].powi(2) + z.values[i].powi(2)).sqrt())
+        .collect();
     // Jolt: the size against its average over about a quarter second around it.
     let jolt: Vec<f64> = (0..n)
         .map(|i| {
@@ -44,22 +57,38 @@ pub fn recurring(session: &Session, best: &Lap) -> Vec<Bump> {
             size[i] - size[lo..hi].iter().sum::<f64>() / (hi - lo) as f64
         })
         .collect();
-    let laps: Vec<&Lap> = session.complete_laps().iter().filter(|l| l.duration_ms() as f64 <= best.duration_ms() as f64 * 1.15).collect();
-    let bumps = hits_to_bumps(laps.len(), laps.iter().filter_map(|lap| {
-        let profile = DistanceProfile::from_gps(session, lap)?;
-        let (lo, hi) = (x.times_ms.partition_point(|&t| t < lap.start_ms), x.times_ms.partition_point(|&t| t <= lap.end_ms).min(n));
-        let mut hits = Vec::new();
-        let mut last: Option<i64> = None;
-        for (&t, &j) in x.times_ms[lo..hi].iter().zip(&jolt[lo..hi]) {
-            if j.abs() > HIT_G && last.is_none_or(|l| t - l > DEBOUNCE_MS) {
-                hits.push((profile.dist_at(t as f64) / profile.length(), j.abs()));
-                last = Some(t);
+    let laps: Vec<&Lap> = session
+        .complete_laps()
+        .iter()
+        .filter(|l| l.duration_ms() as f64 <= best.duration_ms() as f64 * 1.15)
+        .collect();
+    let bumps = hits_to_bumps(
+        laps.len(),
+        laps.iter().filter_map(|lap| {
+            let profile = DistanceProfile::from_gps(session, lap)?;
+            let (lo, hi) = (
+                x.times_ms.partition_point(|&t| t < lap.start_ms),
+                x.times_ms.partition_point(|&t| t <= lap.end_ms).min(n),
+            );
+            let mut hits = Vec::new();
+            let mut last: Option<i64> = None;
+            for (&t, &j) in x.times_ms[lo..hi].iter().zip(&jolt[lo..hi]) {
+                if j.abs() > HIT_G && last.is_none_or(|l| t - l > DEBOUNCE_MS) {
+                    hits.push((profile.dist_at(t as f64) / profile.length(), j.abs()));
+                    last = Some(t);
+                }
             }
-        }
-        Some(hits)
-    }));
+            Some(hits)
+        }),
+    );
     for b in &bumps {
-        log::debug!("bump at {:.0}% of the lap: {} of {} laps, up to {:.2} g", b.at * 100.0, b.laps, b.of, b.peak_g);
+        log::debug!(
+            "bump at {:.0}% of the lap: {} of {} laps, up to {:.2} g",
+            b.at * 100.0,
+            b.laps,
+            b.of,
+            b.peak_g
+        );
     }
     bumps
 }
@@ -67,7 +96,10 @@ pub fn recurring(session: &Session, best: &Lap) -> Vec<Bump> {
 /// Groups each lap's hits (share of the lap, g) by place; keeps the places hit
 /// on at least 40% of `laps` (and at least 3).
 fn hits_to_bumps(laps: usize, per_lap: impl Iterator<Item = Vec<(f64, f64)>>) -> Vec<Bump> {
-    let mut all: Vec<(f64, f64, usize)> = per_lap.enumerate().flat_map(|(k, hits)| hits.into_iter().map(move |(at, g)| (at, g, k))).collect();
+    let mut all: Vec<(f64, f64, usize)> = per_lap
+        .enumerate()
+        .flat_map(|(k, hits)| hits.into_iter().map(move |(at, g)| (at, g, k)))
+        .collect();
     all.sort_by(|a, b| a.0.total_cmp(&b.0));
     let need = 3.max((laps as f64 * 0.4).ceil() as usize);
     let mut out = Vec::new();

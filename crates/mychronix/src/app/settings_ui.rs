@@ -3,8 +3,8 @@
 //! this computer can use). Changes are saved to `~/Mychronix/settings.json`
 //! and take effect at once.
 
-use super::*;
 use super::sessions_filter_ui::{section, segments_in, switch_row};
+use super::*;
 
 /// A change to make to the settings, once the page has drawn.
 type Change = Option<Box<dyn FnOnce(&mut crate::settings::Settings)>>;
@@ -22,7 +22,13 @@ impl App {
         let mut change: Change = None;
 
         ui.label(RichText::new("Settings").font(semibold(28.0)).color(TEXT));
-        ui.label(RichText::new("Saved on this computer, in your Mychronix folder. Changes take effect right away.").font(regular(14.5)).color(SECONDARY));
+        ui.label(
+            RichText::new(
+                "Saved on this computer, in your Mychronix folder. Changes take effect right away.",
+            )
+            .font(regular(14.5))
+            .color(SECONDARY),
+        );
         ui.add_space(18.0);
 
         egui::ScrollArea::vertical().id_salt("settings_scroll").auto_shrink([false, false]).show(ui, |ui| {
@@ -96,7 +102,8 @@ impl App {
 
         if let Some(f) = change {
             if let Err(e) = crate::settings::change(f) {
-                self.notices.error(format!("Couldn't save the settings: {e}"));
+                self.notices
+                    .error(format!("Couldn't save the settings: {e}"));
             }
             // Units and the clock show everywhere: draw everything again in them.
             self.reload_library();
@@ -105,10 +112,20 @@ impl App {
     }
 
     fn mcp_section(&mut self, ui: &mut Ui, on: bool, change: &mut Change) {
-        let summary = if on { "On: your AI assistant can read your sessions" } else { "Off" };
+        let summary = if on {
+            "On: your AI assistant can read your sessions"
+        } else {
+            "Off"
+        };
         // (Not "active": the section's Clear link is for filters.)
-        section(ui, Icon::Activity, "Mychronix Performance Engineer (MCP)", summary, false, |ui| {
-            ui.add(
+        section(
+            ui,
+            Icon::Activity,
+            "Mychronix Performance Engineer (MCP)",
+            summary,
+            false,
+            |ui| {
+                ui.add(
                 egui::Label::new(
                     RichText::new(
                         "Let the AI assistant on your computer (Claude Desktop, Codex, or another app that supports MCP) read your Mychronix sessions and coach from them. Ask how a race day went, where the time is in each corner, or what changed since last week. Stop paying a subscription for a dedicated AI racing coach and use your own.",
@@ -118,12 +135,17 @@ impl App {
                 )
                 .wrap(),
             );
-            ui.add_space(6.0);
-            if switch_row(ui, on, "Let my AI assistant read my sessions", "Read-only: it can't change your data or talk to a MyChron") {
-                let v = !on;
-                *change = Some(Box::new(move |s| s.mcp = v));
-            }
-            ui.add(
+                ui.add_space(6.0);
+                if switch_row(
+                    ui,
+                    on,
+                    "Let my AI assistant read my sessions",
+                    "Read-only: it can't change your data or talk to a MyChron",
+                ) {
+                    let v = !on;
+                    *change = Some(Box::new(move |s| s.mcp = v));
+                }
+                ui.add(
                 egui::Label::new(
                     RichText::new("Mychronix answers only the assistant on this computer and sends nothing itself. What the assistant reads goes to the company that runs it (Anthropic for Claude, OpenAI for Codex, and so on), like anything else you share in that chat.")
                         .size(12.5)
@@ -131,13 +153,13 @@ impl App {
                 )
                 .wrap(),
             );
-            if !on {
-                return;
-            }
-            ui.add_space(8.0);
-            let command = mcp_command();
-            ui.label(RichText::new("Connect it").font(medium(14.5)).color(TEXT));
-            ui.horizontal_wrapped(|ui| {
+                if !on {
+                    return;
+                }
+                ui.add_space(8.0);
+                let command = mcp_command();
+                ui.label(RichText::new("Connect it").font(medium(14.5)).color(TEXT));
+                ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if button(ui, Some(Icon::Plus), "Add to Claude Desktop", true).on_hover_text("Adds Mychronix to Claude Desktop's settings, keeping everything else in them").clicked() {
                     match add_to_claude(&command) {
@@ -156,8 +178,18 @@ impl App {
                     self.notices.success("Copied. In your assistant app, add an MCP server (\"stdio\" or \"command\") that runs it.");
                 }
             });
-            ui.add(egui::Label::new(RichText::new(format!("Other apps: add an MCP server that runs  {command}")).size(12.5).color(DIM)).wrap());
-        });
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!(
+                            "Other apps: add an MCP server that runs  {command}"
+                        ))
+                        .size(12.5)
+                        .color(DIM),
+                    )
+                    .wrap(),
+                );
+            },
+        );
     }
 }
 
@@ -168,7 +200,11 @@ fn mcp_command() -> String {
     let exe = std::env::var("APPIMAGE")
         .ok()
         .filter(|p| !p.is_empty())
-        .or_else(|| std::env::current_exe().ok().map(|p| p.display().to_string()))
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .map(|p| p.display().to_string())
+        })
         .unwrap_or_else(|| "mychronix".into());
     format!("{exe} --mcp")
 }
@@ -185,17 +221,29 @@ pub(crate) fn repair_assistants() {
     let claude_cmd = claude_config()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v["mcpServers"]["mychronix"]["command"].as_str().map(str::to_string));
+        .and_then(|v| {
+            v["mcpServers"]["mychronix"]["command"]
+                .as_str()
+                .map(str::to_string)
+        });
     if claude_cmd.as_deref().is_some_and(gone) {
         match add_to_claude(&command) {
-            Ok(_) => log::info!("Claude Desktop ran {:?}, which is gone: now {command}", claude_cmd.unwrap_or_default()),
+            Ok(_) => log::info!(
+                "Claude Desktop ran {:?}, which is gone: now {command}",
+                claude_cmd.unwrap_or_default()
+            ),
             Err(e) => log::warn!("couldn't update Claude Desktop's Mychronix entry: {e}"),
         }
     }
-    let codex_cmd = codex_config().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| codex_command(&t));
+    let codex_cmd = codex_config()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| codex_command(&t));
     if codex_cmd.as_deref().is_some_and(gone) {
         match add_to_codex(&command) {
-            Ok(_) => log::info!("Codex ran {:?}, which is gone: now {command}", codex_cmd.unwrap_or_default()),
+            Ok(_) => log::info!(
+                "Codex ran {:?}, which is gone: now {command}",
+                codex_cmd.unwrap_or_default()
+            ),
             Err(e) => log::warn!("couldn't update Codex's Mychronix entry: {e}"),
         }
     }
@@ -208,9 +256,17 @@ fn codex_command(config: &str) -> Option<String> {
         let t = line.trim();
         if t.starts_with('[') {
             inside = t == "[mcp_servers.mychronix]";
-        } else if inside && let Some(v) = t.strip_prefix("command").map(str::trim_start).and_then(|r| r.strip_prefix('=')) {
+        } else if inside
+            && let Some(v) = t
+                .strip_prefix("command")
+                .map(str::trim_start)
+                .and_then(|r| r.strip_prefix('='))
+        {
             let v = v.trim();
-            return v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).map(|v| v.replace("\\\"", "\"").replace("\\\\", "\\"));
+            return v
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .map(|v| v.replace("\\\"", "\"").replace("\\\\", "\\"));
         }
     }
     None
@@ -218,7 +274,10 @@ fn codex_command(config: &str) -> Option<String> {
 
 /// Codex's settings file: `$CODEX_HOME/config.toml`, else `~/.codex/config.toml`.
 fn codex_config() -> Option<PathBuf> {
-    let dir = std::env::var_os("CODEX_HOME").filter(|d| !d.is_empty()).map(PathBuf::from).or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".codex")))?;
+    let dir = std::env::var_os("CODEX_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".codex")))?;
     Some(dir.join("config.toml"))
 }
 
@@ -235,10 +294,16 @@ fn add_to_codex(command: &str) -> Result<PathBuf, String> {
         Err(e) => return Err(format!("Couldn't read {}: {e}", path.display())),
     };
     if path.exists() {
-        std::fs::copy(&path, path.with_extension("toml.before-mychronix")).map_err(|e| format!("Couldn't back up {}: {e}. Nothing was changed.", path.display()))?;
+        std::fs::copy(&path, path.with_extension("toml.before-mychronix")).map_err(|e| {
+            format!(
+                "Couldn't back up {}: {e}. Nothing was changed.",
+                path.display()
+            )
+        })?;
     }
     let (program, _) = command.rsplit_once(" --mcp").unwrap_or((command, ""));
-    crate::storage::write_atomic(&path, with_codex_server(&text, program).as_bytes()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    crate::storage::write_atomic(&path, with_codex_server(&text, program).as_bytes())
+        .map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
     log::info!("added the Mychronix MCP server to {}", path.display());
     Ok(path)
 }
@@ -280,7 +345,11 @@ fn with_codex_server(config: &str, program: &str) -> String {
 /// Claude Desktop's settings file on this system.
 fn claude_config() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    Some(if cfg!(target_os = "macos") { home.join("Library/Application Support/Claude/claude_desktop_config.json") } else { home.join(".config/Claude/claude_desktop_config.json") })
+    Some(if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Claude/claude_desktop_config.json")
+    } else {
+        home.join(".config/Claude/claude_desktop_config.json")
+    })
 }
 
 /// Adds Mychronix to Claude Desktop's MCP servers, keeping everything else,
@@ -288,7 +357,12 @@ fn claude_config() -> Option<PathBuf> {
 fn add_to_claude(command: &str) -> Result<PathBuf, String> {
     let path = claude_config().ok_or("No home folder")?;
     let mut config: serde_json::Value = match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("Claude Desktop's settings ({}) couldn't be read: {e}. Nothing was changed.", path.display()))?,
+        Ok(text) => serde_json::from_str(&text).map_err(|e| {
+            format!(
+                "Claude Desktop's settings ({}) couldn't be read: {e}. Nothing was changed.",
+                path.display()
+            )
+        })?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if !path.parent().is_some_and(|d| d.exists()) {
                 return Err("Claude Desktop doesn't seem to be installed here (its settings folder isn't there). Install it, open it once, then try again.".into());
@@ -299,14 +373,29 @@ fn add_to_claude(command: &str) -> Result<PathBuf, String> {
     };
     if path.exists() {
         let backup = path.with_extension("json.before-mychronix");
-        std::fs::copy(&path, &backup).map_err(|e| format!("Couldn't back up {}: {e}. Nothing was changed.", path.display()))?;
+        std::fs::copy(&path, &backup).map_err(|e| {
+            format!(
+                "Couldn't back up {}: {e}. Nothing was changed.",
+                path.display()
+            )
+        })?;
     }
     let (program, _) = command.rsplit_once(" --mcp").unwrap_or((command, ""));
-    let servers = config.as_object_mut().ok_or("Claude Desktop's settings aren't what Mychronix expects. Nothing was changed.")?.entry("mcpServers").or_insert_with(|| serde_json::json!({}));
-    let servers = servers.as_object_mut().ok_or("Claude Desktop's settings aren't what Mychronix expects. Nothing was changed.")?;
-    servers.insert("mychronix".into(), serde_json::json!({ "command": program, "args": ["--mcp"] }));
+    let servers = config
+        .as_object_mut()
+        .ok_or("Claude Desktop's settings aren't what Mychronix expects. Nothing was changed.")?
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let servers = servers
+        .as_object_mut()
+        .ok_or("Claude Desktop's settings aren't what Mychronix expects. Nothing was changed.")?;
+    servers.insert(
+        "mychronix".into(),
+        serde_json::json!({ "command": program, "args": ["--mcp"] }),
+    );
     let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    crate::storage::write_atomic(&path, text.as_bytes()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    crate::storage::write_atomic(&path, text.as_bytes())
+        .map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
     log::info!("added the Mychronix MCP server to {}", path.display());
     Ok(path)
 }
@@ -319,13 +408,28 @@ mod tests {
     fn codex_settings_keep_everything_else() {
         let before = "model = \"gpt-5\"\n\n[mcp_servers.other]\ncommand = \"npx\"\n";
         let after = with_codex_server(before, "/opt/Mychronix/mychronix");
-        assert_eq!(codex_command(&after).as_deref(), Some("/opt/Mychronix/mychronix"));
-        assert_eq!(codex_command("[mcp_servers.other]\ncommand = \"x\"\n"), None);
+        assert_eq!(
+            codex_command(&after).as_deref(),
+            Some("/opt/Mychronix/mychronix")
+        );
+        assert_eq!(
+            codex_command("[mcp_servers.other]\ncommand = \"x\"\n"),
+            None
+        );
         assert!(after.starts_with(before));
-        assert!(after.ends_with("[mcp_servers.mychronix]\ncommand = \"/opt/Mychronix/mychronix\"\nargs = [\"--mcp\"]\n"));
+        assert!(after.ends_with(
+            "[mcp_servers.mychronix]\ncommand = \"/opt/Mychronix/mychronix\"\nargs = [\"--mcp\"]\n"
+        ));
         // Added again: replaced in place, not duplicated, and what follows survives.
-        let again = with_codex_server("[mcp_servers.mychronix]\ncommand = \"/old\"\nargs = []\n\n[x]\ny = 1\n", "/new");
+        let again = with_codex_server(
+            "[mcp_servers.mychronix]\ncommand = \"/old\"\nargs = []\n\n[x]\ny = 1\n",
+            "/new",
+        );
         assert_eq!(again.matches("[mcp_servers.mychronix]").count(), 1);
-        assert!(again.contains("command = \"/new\"") && !again.contains("/old") && again.contains("[x]\ny = 1"));
+        assert!(
+            again.contains("command = \"/new\"")
+                && !again.contains("/old")
+                && again.contains("[x]\ny = 1")
+        );
     }
 }

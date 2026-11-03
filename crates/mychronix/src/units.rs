@@ -23,7 +23,14 @@ pub fn set(units: Option<&str>) {
         Some("metric") => false,
         // The countries that use miles per hour and Fahrenheit day to day. The
         // measurement locale wins when set (e.g. US English with metric units).
-        _ => mac_imperial().unwrap_or_else(|| matches!(measurement_country().or_else(crate::countries::system_country).as_deref(), Some("US") | Some("LR") | Some("MM"))),
+        _ => mac_imperial().unwrap_or_else(|| {
+            matches!(
+                measurement_country()
+                    .or_else(crate::countries::system_country)
+                    .as_deref(),
+                Some("US") | Some("LR") | Some("MM")
+            )
+        }),
     };
     IMPERIAL.store(imperial, Ordering::Relaxed);
 }
@@ -38,7 +45,8 @@ fn mac_imperial() -> Option<bool> {
 fn measurement_country() -> Option<String> {
     let value = std::env::var("LC_MEASUREMENT").ok()?;
     let region = value.split(['.', '@']).next()?.split('_').nth(1)?;
-    (region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic())).then(|| region.to_ascii_uppercase())
+    (region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic()))
+        .then(|| region.to_ascii_uppercase())
 }
 
 pub fn imperial() -> bool {
@@ -63,7 +71,11 @@ pub fn distance_unit() -> &'static str {
 }
 
 pub fn temp(celsius: f64) -> f64 {
-    if imperial() { celsius * 9.0 / 5.0 + 32.0 } else { celsius }
+    if imperial() {
+        celsius * 9.0 / 5.0 + 32.0
+    } else {
+        celsius
+    }
 }
 
 pub fn temp_unit() -> &'static str {

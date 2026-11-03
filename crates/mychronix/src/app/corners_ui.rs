@@ -6,7 +6,7 @@
 //! "what stands out" sit beside it; the selected corner is drawn up close below.
 
 use super::*;
-use crate::corner_model::{CornerModel, Slowing, Tone, STEP_M};
+use crate::corner_model::{CornerModel, STEP_M, Slowing, Tone};
 
 const BRAKE: Color32 = theme::LOSE;
 const TRAIL: Color32 = theme::TRAIL;
@@ -44,13 +44,27 @@ pub(super) struct CornersState {
 impl App {
     /// The session's corners (see `corner_model`), built once per session and
     /// best lap, for Corners, Laps and Map. None without GPS or a best lap.
-    pub(super) fn corner_model(&mut self, session: &std::sync::Arc<Session>) -> Option<std::sync::Arc<CornerModel>> {
+    pub(super) fn corner_model(
+        &mut self,
+        session: &std::sync::Arc<Session>,
+    ) -> Option<std::sync::Arc<CornerModel>> {
         // The fastest lap recorded in full: a gap in the best lap would stand in for the track.
-        let best = session.reference_lap(MIN_LAP_MS, &self.recording_gaps).copied()?;
+        let best = session
+            .reference_lap(MIN_LAP_MS, &self.recording_gaps)
+            .copied()?;
         let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
-        if self.corners.model.as_ref().is_none_or(|m| (m.0, m.1) != key) {
+        if self
+            .corners
+            .model
+            .as_ref()
+            .is_none_or(|m| (m.0, m.1) != key)
+        {
             // A lap with a stretch the logger missed has no true time for the corners in it.
-            let counts: Vec<bool> = slow_laps(session).into_iter().zip(&session.laps).map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.recording_gaps)).collect();
+            let counts: Vec<bool> = slow_laps(session)
+                .into_iter()
+                .zip(&session.laps)
+                .map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.recording_gaps))
+                .collect();
             let started = std::time::Instant::now();
             let model = CornerModel::build(session, &best, &counts);
             log::debug!("corners: model built in {:?}", started.elapsed());
@@ -72,7 +86,10 @@ impl App {
         }
         let Some(model) = self.corner_model(session) else {
             card(ui, |ui| {
-                ui.label(RichText::new("Corners need GPS for the lap, and a corner to brake for.").color(SECONDARY));
+                ui.label(
+                    RichText::new("Corners need GPS for the lap, and a corner to brake for.")
+                        .color(SECONDARY),
+                );
             });
             return;
         };
@@ -94,51 +111,75 @@ impl App {
             _ => model.worst(trace),
         };
         self.corners.selected = Some((trace, corner));
-        let bumps = self.corners.bumps.as_ref().map(|b| b.2.clone()).unwrap_or_default();
+        let bumps = self
+            .corners
+            .bumps
+            .as_ref()
+            .map(|b| b.2.clone())
+            .unwrap_or_default();
 
         let mut pick = None;
         let mut measured: (Option<f32>, Option<f32>) = (None, None);
-        egui::ScrollArea::vertical().id_salt("corners_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            let gap = 14.0;
-            let side_w = (ui.available_width() * 0.34).clamp(320.0, 560.0);
-            let table_w = ui.available_width() - side_w - gap;
-            // Both cards end at the same height: the taller of the map at least
-            // square (a small track has to read too) and the table at its
-            // natural row height. The other grows to match: the table's rows,
-            // or the map. What each card adds around its content is measured
-            // on the frame before, so they match exactly.
-            let (map_extra, table_extra) = (self.corners.map_extra_h.unwrap_or(80.0), self.corners.table_extra_h.unwrap_or(178.0));
-            let n = model.segments.len() as f32;
-            let card_h = ((side_w - 32.0) + map_extra).max(table_extra + ROW_H * n);
-            let map_h = card_h - map_extra;
-            let row_h = (card_h - table_extra) / n;
-            let table_h = card_h;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                let column = Layout::top_down(Align::Min);
-                ui.allocate_ui_with_layout(vec2(table_w, table_h), column, |ui| {
-                    ui.set_width(table_w);
-                    let (k, card_h) = self.corners_table(ui, session, &model, trace, corner, row_h);
-                    pick = pick.or(k);
-                    measured.0 = Some(card_h - row_h * n);
+        egui::ScrollArea::vertical()
+            .id_salt("corners_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let gap = 14.0;
+                let side_w = (ui.available_width() * 0.34).clamp(320.0, 560.0);
+                let table_w = ui.available_width() - side_w - gap;
+                // Both cards end at the same height: the taller of the map at least
+                // square (a small track has to read too) and the table at its
+                // natural row height. The other grows to match: the table's rows,
+                // or the map. What each card adds around its content is measured
+                // on the frame before, so they match exactly.
+                let (map_extra, table_extra) = (
+                    self.corners.map_extra_h.unwrap_or(80.0),
+                    self.corners.table_extra_h.unwrap_or(178.0),
+                );
+                let n = model.segments.len() as f32;
+                let card_h = ((side_w - 32.0) + map_extra).max(table_extra + ROW_H * n);
+                let map_h = card_h - map_extra;
+                let row_h = (card_h - table_extra) / n;
+                let table_h = card_h;
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let column = Layout::top_down(Align::Min);
+                    ui.allocate_ui_with_layout(vec2(table_w, table_h), column, |ui| {
+                        ui.set_width(table_w);
+                        let (k, card_h) =
+                            self.corners_table(ui, session, &model, trace, corner, row_h);
+                        pick = pick.or(k);
+                        measured.0 = Some(card_h - row_h * n);
+                    });
+                    // The map has the column to itself, its card as tall as the table's.
+                    ui.allocate_ui_with_layout(vec2(side_w, table_h), column, |ui| {
+                        ui.set_width(side_w);
+                        let (k, card_h) = corners_map(
+                            ui,
+                            &model,
+                            trace,
+                            corner,
+                            self.corners.hovered,
+                            &bumps,
+                            map_h,
+                        );
+                        pick = pick.or(k);
+                        measured.1 = Some(card_h - map_h);
+                    });
                 });
-                // The map has the column to itself, its card as tall as the table's.
-                ui.allocate_ui_with_layout(vec2(side_w, table_h), column, |ui| {
-                    ui.set_width(side_w);
-                    let (k, card_h) = corners_map(ui, &model, trace, corner, self.corners.hovered, &bumps, map_h);
-                    pick = pick.or(k);
-                    measured.1 = Some(card_h - map_h);
-                });
+                ui.add_space(gap);
+                up_close(ui, &model, trace, corner);
             });
-            ui.add_space(gap);
-            up_close(ui, &model, trace, corner);
-        });
         if let Some(k) = pick {
             self.corners.selected = Some((trace, k));
         }
         // A changed measurement: draw again at once with the right row height.
-        let changed = |old: Option<f32>, new: Option<f32>| new.is_some_and(|n| old.is_none_or(|o| (o - n).abs() > 0.5));
-        if changed(self.corners.table_extra_h, measured.0) || changed(self.corners.map_extra_h, measured.1) {
+        let changed = |old: Option<f32>, new: Option<f32>| {
+            new.is_some_and(|n| old.is_none_or(|o| (o - n).abs() > 0.5))
+        };
+        if changed(self.corners.table_extra_h, measured.0)
+            || changed(self.corners.map_extra_h, measured.1)
+        {
             ui.ctx().request_repaint();
         }
         self.corners.table_extra_h = measured.0.or(self.corners.table_extra_h);
@@ -146,7 +187,15 @@ impl App {
     }
 
     /// The table: one row per corner. Returns a corner clicked, and the card's height.
-    fn corners_table(&mut self, ui: &mut Ui, session: &Session, model: &CornerModel, trace: usize, selected: usize, row_h: f32) -> (Option<usize>, f32) {
+    fn corners_table(
+        &mut self,
+        ui: &mut Ui,
+        session: &Session,
+        model: &CornerModel,
+        trace: usize,
+        selected: usize,
+        row_h: f32,
+    ) -> (Option<usize>, f32) {
         let gaps = self.recording_gaps.clone();
         let mut clicked = None;
         let mut hovered = None;
@@ -324,7 +373,15 @@ impl App {
 /// The best lap's line split into corners: the selected one bright with this
 /// lap's slowing drawn over it, the hovered one lit, numbers at the apexes,
 /// bumps as diamonds. Returns a corner clicked, and the card's height.
-fn corners_map(ui: &mut Ui, model: &CornerModel, trace: usize, selected: usize, hovered: Option<usize>, bumps: &[crate::bumps::Bump], height: f32) -> (Option<usize>, f32) {
+fn corners_map(
+    ui: &mut Ui,
+    model: &CornerModel,
+    trace: usize,
+    selected: usize,
+    hovered: Option<usize>,
+    bumps: &[crate::bumps::Bump],
+    height: f32,
+) -> (Option<usize>, f32) {
     let mut clicked = None;
     let card = Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 12 }).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -499,9 +556,19 @@ fn speed_chart(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, wi
     let idx = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(last);
     let ks: Vec<usize> = (idx(from)..=idx(seg.to)).collect();
     // The laps that count, plus this one: slow laps would only squash the scale.
-    let shown: Vec<usize> = (0..model.traces.len()).filter(|&i| model.counts[i] || i == trace).collect();
-    let speeds = || shown.iter().flat_map(|&i| ks.iter().map(move |&k| crate::units::speed(model.traces[i].kmh[k])));
-    let (v_lo, v_hi) = ((speeds().fold(f64::MAX, f64::min) / 5.0).floor() * 5.0, (speeds().fold(f64::MIN, f64::max) / 5.0).ceil() * 5.0);
+    let shown: Vec<usize> = (0..model.traces.len())
+        .filter(|&i| model.counts[i] || i == trace)
+        .collect();
+    let speeds = || {
+        shown.iter().flat_map(|&i| {
+            ks.iter()
+                .map(move |&k| crate::units::speed(model.traces[i].kmh[k]))
+        })
+    };
+    let (v_lo, v_hi) = (
+        (speeds().fold(f64::MAX, f64::min) / 5.0).floor() * 5.0,
+        (speeds().fold(f64::MIN, f64::max) / 5.0).ceil() * 5.0,
+    );
     let (rect, _) = ui.allocate_exact_size(vec2(width, 250.0), Sense::hover());
     let plot = Rect::from_min_max(rect.min + vec2(40.0, 6.0), rect.max - vec2(8.0, 24.0));
     let x = |m: f64| plot.left() + ((m - from) / (seg.to - from).max(1.0)) as f32 * plot.width();
@@ -510,14 +577,38 @@ fn speed_chart(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, wi
     let mut v = v_lo;
     while v <= v_hi + 0.1 {
         p.hline(plot.x_range(), y(v), Stroke::new(1.0, GRID));
-        p.text(pos2(plot.left() - 8.0, y(v)), egui::Align2::RIGHT_CENTER, format!("{v:.0}"), regular(11.0), DIM);
+        p.text(
+            pos2(plot.left() - 8.0, y(v)),
+            egui::Align2::RIGHT_CENTER,
+            format!("{v:.0}"),
+            regular(11.0),
+            DIM,
+        );
         v += 5.0;
     }
-    p.text(pos2(plot.left() + 6.0, plot.top() + 8.0), egui::Align2::LEFT_CENTER, crate::units::speed_unit(), regular(11.0), DIM);
+    p.text(
+        pos2(plot.left() + 6.0, plot.top() + 8.0),
+        egui::Align2::LEFT_CENTER,
+        crate::units::speed_unit(),
+        regular(11.0),
+        DIM,
+    );
     // This lap's slowing, shaded.
-    p.rect_filled(Rect::from_x_y_ranges(x(a.brake_m)..=x(a.min_m).max(x(a.brake_m)), plot.y_range()), CornerRadius::ZERO, BRAKE.gamma_multiply(0.07));
+    p.rect_filled(
+        Rect::from_x_y_ranges(x(a.brake_m)..=x(a.min_m).max(x(a.brake_m)), plot.y_range()),
+        CornerRadius::ZERO,
+        BRAKE.gamma_multiply(0.07),
+    );
     let line = |i: usize, color: Color32, w: f32| {
-        let pts: Vec<egui::Pos2> = ks.iter().map(|&k| pos2(x(k as f64 * STEP_M), y(crate::units::speed(model.traces[i].kmh[k])))).collect();
+        let pts: Vec<egui::Pos2> = ks
+            .iter()
+            .map(|&k| {
+                pos2(
+                    x(k as f64 * STEP_M),
+                    y(crate::units::speed(model.traces[i].kmh[k])),
+                )
+            })
+            .collect();
         p.add(egui::Shape::line(pts, Stroke::new(w, color)));
     };
     for &i in &shown {
@@ -531,10 +622,27 @@ fn speed_chart(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, wi
     line(trace, if bi == trace { theme::GOOD } else { THIS_LAP }, 2.8);
     // Where this lap brakes and reaches the apex.
     for (m, label) in [(a.brake_m, "braking"), (a.min_m, "apex")] {
-        p.extend(egui::Shape::dashed_line(&[pos2(x(m), plot.top()), pos2(x(m), plot.bottom())], Stroke::new(1.0, DIM), 3.0, 4.0));
-        p.text(pos2(x(m) + 4.0, plot.bottom() + 12.0), egui::Align2::LEFT_CENTER, label, regular(11.0), DIM);
+        p.extend(egui::Shape::dashed_line(
+            &[pos2(x(m), plot.top()), pos2(x(m), plot.bottom())],
+            Stroke::new(1.0, DIM),
+            3.0,
+            4.0,
+        ));
+        p.text(
+            pos2(x(m) + 4.0, plot.bottom() + 12.0),
+            egui::Align2::LEFT_CENTER,
+            label,
+            regular(11.0),
+            DIM,
+        );
     }
-    p.text(pos2(plot.right(), plot.bottom() + 12.0), egui::Align2::RIGHT_CENTER, "next corner's braking point", regular(11.0), DIM);
+    p.text(
+        pos2(plot.right(), plot.bottom() + 12.0),
+        egui::Align2::RIGHT_CENTER,
+        "next corner's braking point",
+        regular(11.0),
+        DIM,
+    );
 }
 
 /// Time behind the best of the corner, building up along the way.
@@ -547,29 +655,76 @@ fn gap_chart(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, widt
     let idx = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(last);
     let k0 = idx(seg.from);
     let ks: Vec<usize> = (idx(from)..=idx(seg.to)).collect();
-    let gaps: Vec<f64> = ks.iter().map(|&k| (this.t[k] - this.t[k0]) - (best.t[k] - best.t[k0])).collect();
+    let gaps: Vec<f64> = ks
+        .iter()
+        .map(|&k| (this.t[k] - this.t[k0]) - (best.t[k] - best.t[k0]))
+        .collect();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 96.0), Sense::hover());
     let plot = Rect::from_min_max(rect.min + vec2(40.0, 18.0), rect.max - vec2(8.0, 6.0));
     let scale = gaps.iter().fold(0.05f64, |m, g| m.max(g.abs()));
     let x = |m: f64| plot.left() + ((m - from) / (seg.to - from).max(1.0)) as f32 * plot.width();
     let y = |g: f64| plot.center().y - (g / scale) as f32 * plot.height() / 2.0;
     let p = ui.painter_at(rect);
-    let label = if bi == trace { "Time gap: none, this is the best" } else { "Time behind the best of this corner, building up along the way" };
-    p.text(pos2(plot.left(), rect.top() + 7.0), egui::Align2::LEFT_CENTER, label, regular(11.5), DIM);
+    let label = if bi == trace {
+        "Time gap: none, this is the best"
+    } else {
+        "Time behind the best of this corner, building up along the way"
+    };
+    p.text(
+        pos2(plot.left(), rect.top() + 7.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        regular(11.5),
+        DIM,
+    );
     p.hline(plot.x_range(), y(0.0), Stroke::new(1.0, GRID));
-    p.text(pos2(plot.left() - 8.0, y(0.0)), egui::Align2::RIGHT_CENTER, "0 s", regular(11.0), DIM);
-    let pts: Vec<egui::Pos2> = ks.iter().zip(&gaps).map(|(&k, &g)| pos2(x(k as f64 * STEP_M), y(g))).collect();
+    p.text(
+        pos2(plot.left() - 8.0, y(0.0)),
+        egui::Align2::RIGHT_CENTER,
+        "0 s",
+        regular(11.0),
+        DIM,
+    );
+    let pts: Vec<egui::Pos2> = ks
+        .iter()
+        .zip(&gaps)
+        .map(|(&k, &g)| pos2(x(k as f64 * STEP_M), y(g)))
+        .collect();
     // Behind the best (above the line) in red, ahead of it in green.
     let base = y(0.0);
     for (w, g) in pts.windows(2).zip(gaps.windows(2)) {
-        let color = if g[0] + g[1] > 0.0 { BRAKE } else { theme::GOOD };
+        let color = if g[0] + g[1] > 0.0 {
+            BRAKE
+        } else {
+            theme::GOOD
+        };
         let quad = vec![w[0], w[1], pos2(w[1].x, base), pos2(w[0].x, base)];
-        p.add(egui::Shape::convex_polygon(quad, color.gamma_multiply(0.22), Stroke::NONE));
-        p.line_segment([w[0], w[1]], Stroke::new(2.0, if g[1] > 0.0 { theme::LOSE_TEXT } else { theme::GOOD }));
+        p.add(egui::Shape::convex_polygon(
+            quad,
+            color.gamma_multiply(0.22),
+            Stroke::NONE,
+        ));
+        p.line_segment(
+            [w[0], w[1]],
+            Stroke::new(
+                2.0,
+                if g[1] > 0.0 {
+                    theme::LOSE_TEXT
+                } else {
+                    theme::GOOD
+                },
+            ),
+        );
     }
     if let (Some(end), Some(g)) = (pts.last(), gaps.last()) {
         // Beside the end of the line, kept inside the chart.
         let y = (end.y - 12.0).clamp(rect.top() + 10.0, rect.bottom() - 10.0);
-        p.text(pos2(end.x, y), egui::Align2::RIGHT_CENTER, format!("{g:+.2} s"), medium(12.0), TEXT);
+        p.text(
+            pos2(end.x, y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{g:+.2} s"),
+            medium(12.0),
+            TEXT,
+        );
     }
 }

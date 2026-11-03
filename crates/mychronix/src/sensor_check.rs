@@ -33,7 +33,9 @@ impl Ignored {
     }
 
     pub fn contains(&self, logger: &str, channel: &str) -> bool {
-        self.loggers.get(logger).is_some_and(|c| c.contains(channel))
+        self.loggers
+            .get(logger)
+            .is_some_and(|c| c.contains(channel))
     }
 
     pub fn set(&mut self, logger: &str, channel: &str, ignore: bool) {
@@ -72,9 +74,16 @@ pub fn problems(checked: &[Checked], ignored: &Ignored) -> Vec<Problem> {
             if ignored.contains(&c.logger, &i.channel) {
                 continue;
             }
-            match out.iter_mut().find(|p| p.logger == c.logger && p.channel == i.channel) {
+            match out
+                .iter_mut()
+                .find(|p| p.logger == c.logger && p.channel == i.channel)
+            {
                 Some(p) => p.sessions.push((c.number, i.kind)),
-                None => out.push(Problem { logger: c.logger.clone(), channel: i.channel.clone(), sessions: vec![(c.number, i.kind)] }),
+                None => out.push(Problem {
+                    logger: c.logger.clone(),
+                    channel: i.channel.clone(),
+                    sessions: vec![(c.number, i.kind)],
+                }),
             }
         }
     }
@@ -89,9 +98,19 @@ pub fn summary(p: &Problem) -> String {
     let list = |ns: Vec<String>| match ns.len() {
         0 => String::new(),
         1 => format!("session {}", ns[0]),
-        _ => format!("sessions {} and {}", ns[..ns.len() - 1].join(", "), ns[ns.len() - 1]),
+        _ => format!(
+            "sessions {} and {}",
+            ns[..ns.len() - 1].join(", "),
+            ns[ns.len() - 1]
+        ),
     };
-    let numbers = |f: &dyn Fn(&IssueKind) -> bool| p.sessions.iter().filter(|s| f(&s.1)).map(|s| s.0.map(|n| n.to_string()).unwrap_or_else(|| "?".into())).collect::<Vec<_>>();
+    let numbers = |f: &dyn Fn(&IssueKind) -> bool| {
+        p.sessions
+            .iter()
+            .filter(|s| f(&s.1))
+            .map(|s| s.0.map(|n| n.to_string()).unwrap_or_else(|| "?".into()))
+            .collect::<Vec<_>>()
+    };
     let mut parts = Vec::new();
     let nc = numbers(&|k| *k == IssueKind::NotConnected);
     if !nc.is_empty() {
@@ -105,7 +124,11 @@ pub fn summary(p: &Problem) -> String {
         .sessions
         .iter()
         .filter_map(|s| match s.1 {
-            IssueKind::DropOuts { percent } => Some(format!("{}% of session {}", percent, s.0.map(|n| n.to_string()).unwrap_or_else(|| "?".into()))),
+            IssueKind::DropOuts { percent } => Some(format!(
+                "{}% of session {}",
+                percent,
+                s.0.map(|n| n.to_string()).unwrap_or_else(|| "?".into())
+            )),
             _ => None,
         })
         .collect();
@@ -114,14 +137,20 @@ pub fn summary(p: &Problem) -> String {
     }
     let s = parts.join("; ");
     let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
 }
 
 /// Checks `paths` in the background, learning first which sensors have worked
 /// in `known` (the same loggers' other sessions; digests already cached aren't
 /// worked out again). The result arrives once, with the sessions that have an
 /// issue worth reporting.
-pub fn spawn(paths: Vec<PathBuf>, known: Vec<PathBuf>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<Vec<Checked>> {
+pub fn spawn(
+    paths: Vec<PathBuf>,
+    known: Vec<PathBuf>,
+    ctx: eframe::egui::Context,
+) -> std::sync::mpsc::Receiver<Vec<Checked>> {
     let (tx, rx) = std::sync::mpsc::channel();
     crate::jobs::spawn("sensor-check", move || {
         let mut digests = crate::digest::Digests::load();
@@ -131,14 +160,30 @@ pub fn spawn(paths: Vec<PathBuf>, known: Vec<PathBuf>, ctx: eframe::egui::Contex
         digests.save();
         let mut out = Vec::new();
         for path in paths {
-            let Some(d) = digests.get(&path) else { continue };
+            let Some(d) = digests.get(&path) else {
+                continue;
+            };
             let issues = digests.reportable(d);
             if issues.is_empty() {
                 continue;
             }
-            let number = path.file_name().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
-            log::info!("sensor check {}: {}", path.display(), issues.iter().map(|i| format!("{} {:?}", i.channel, i.kind)).collect::<Vec<_>>().join(", "));
-            out.push(Checked { logger: d.logger.clone(), number, issues });
+            let number = path
+                .file_name()
+                .and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+            log::info!(
+                "sensor check {}: {}",
+                path.display(),
+                issues
+                    .iter()
+                    .map(|i| format!("{} {:?}", i.channel, i.kind))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            out.push(Checked {
+                logger: d.logger.clone(),
+                number,
+                issues,
+            });
         }
         let _ = tx.send(out);
         ctx.request_repaint();
@@ -151,20 +196,41 @@ mod tests {
     use super::*;
 
     fn issue(channel: &str, kind: IssueKind) -> Issue {
-        Issue { channel: channel.into(), kind }
+        Issue {
+            channel: channel.into(),
+            kind,
+        }
     }
 
     #[test]
     fn grouped_by_channel_and_ignored_left_out() {
         let checked = vec![
-            Checked { logger: "1".into(), number: Some(9), issues: vec![issue("RPM", IssueKind::NoSignal), issue("WheelSpeed", IssueKind::NoSignal)] },
-            Checked { logger: "1".into(), number: Some(8), issues: vec![issue("RPM", IssueKind::NoSignal)] },
-            Checked { logger: "1".into(), number: Some(25), issues: vec![issue("RPM", IssueKind::DropOuts { percent: 30 })] },
+            Checked {
+                logger: "1".into(),
+                number: Some(9),
+                issues: vec![
+                    issue("RPM", IssueKind::NoSignal),
+                    issue("WheelSpeed", IssueKind::NoSignal),
+                ],
+            },
+            Checked {
+                logger: "1".into(),
+                number: Some(8),
+                issues: vec![issue("RPM", IssueKind::NoSignal)],
+            },
+            Checked {
+                logger: "1".into(),
+                number: Some(25),
+                issues: vec![issue("RPM", IssueKind::DropOuts { percent: 30 })],
+            },
         ];
         let mut ignored = Ignored::default();
         ignored.set("1", "WheelSpeed", true);
         let p = problems(&checked, &ignored);
         assert_eq!(p.len(), 1);
-        assert_eq!(summary(&p[0]), "No signal on track in sessions 8 and 9; dropped to zero on track for 30% of session 25");
+        assert_eq!(
+            summary(&p[0]),
+            "No signal on track in sessions 8 and 9; dropped to zero on track for 30% of session 25"
+        );
     }
 }

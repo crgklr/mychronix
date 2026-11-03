@@ -34,7 +34,10 @@ pub struct LatLon {
 
 impl LatLon {
     fn from_e7(lat: i32, lon: i32) -> Option<Self> {
-        (lat != 0 || lon != 0).then_some(Self { lat: lat as f64 * 1e-7, lon: lon as f64 * 1e-7 })
+        (lat != 0 || lon != 0).then_some(Self {
+            lat: lat as f64 * 1e-7,
+            lon: lon as f64 * 1e-7,
+        })
     }
 
     /// Great-circle distance in meters.
@@ -68,15 +71,22 @@ pub struct TrackRecord {
 /// Parses a whole `.ria` database.
 pub fn parse_ria(buf: &[u8]) -> Result<Vec<TrackRecord>, Error> {
     if !buf.len().is_multiple_of(RIA_RECORD) {
-        return Err(Error::Format(format!("{} bytes is not a whole number of {RIA_RECORD}-byte records", buf.len())));
+        return Err(Error::Format(format!(
+            "{} bytes is not a whole number of {RIA_RECORD}-byte records",
+            buf.len()
+        )));
     }
-    Ok(buf.as_chunks::<RIA_RECORD>().0.iter().filter_map(|r| parse_ria_record(r)).collect())
+    Ok(buf
+        .as_chunks::<RIA_RECORD>()
+        .0
+        .iter()
+        .filter_map(|r| parse_ria_record(r))
+        .collect())
 }
 
 pub fn read_ria(path: impl AsRef<Path>) -> Result<Vec<TrackRecord>, Error> {
     parse_ria(&std::fs::read(path)?)
 }
-
 
 fn parse_ria_record(r: &[u8]) -> Option<TrackRecord> {
     let name = c_str(&r[0..28]);
@@ -89,7 +99,8 @@ fn parse_ria_record(r: &[u8]) -> Option<TrackRecord> {
         country: c_str(&r[28..32]),
         region: c_str(&r[32..36]),
         center: LatLon::from_e7(i32_at(36), i32_at(40)),
-        length_m: Some(f32::from_le_bytes(r[48..52].try_into().unwrap())).filter(|l| l.is_finite() && *l > 0.0),
+        length_m: Some(f32::from_le_bytes(r[48..52].try_into().unwrap()))
+            .filter(|l| l.is_finite() && *l > 0.0),
         id: c_str(&r[56..64]),
         guid: hex(&r[64..72]),
     })
@@ -188,12 +199,25 @@ impl TrackKind {
 
 pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
     let frames = frame::parse_all(buf).map_err(|e| Error::Format(e.to_string()))?;
-    let find = |tag: &str| frames.iter().find(|f| f.tag_str() == tag).map(|f| f.payload.as_slice());
+    let find = |tag: &str| {
+        frames
+            .iter()
+            .find(|f| f.tag_str() == tag)
+            .map(|f| f.payload.as_slice())
+    };
 
     let header = find("Ptkk").ok_or_else(|| Error::Format("no Ptkk record".into()))?;
     let mut t = TrackFile {
-        full_name: c_str(header.get(4..header.len().saturating_sub(8)).unwrap_or_default()),
-        id: c_str(header.get(header.len().saturating_sub(8)..).unwrap_or_default()),
+        full_name: c_str(
+            header
+                .get(4..header.len().saturating_sub(8))
+                .unwrap_or_default(),
+        ),
+        id: c_str(
+            header
+                .get(header.len().saturating_sub(8)..)
+                .unwrap_or_default(),
+        ),
         ..Default::default()
     };
 
@@ -202,16 +226,29 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
     // 8 bytes. The start/finish matches what loggers record in sessions at
     // the track (verified on NKA and on a custom track, Oct 24, 2026).
     if let Some(v) = find("Vnfo") {
-        let u32_at = |o: usize| v.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+        let u32_at = |o: usize| {
+            v.get(o..o + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        };
         t.name = c_str(v.get(0..28).unwrap_or_default());
         t.country = c_str(v.get(28..32).unwrap_or_default());
         t.region = c_str(v.get(32..36).unwrap_or_default());
-        t.length_m = u32_at(44).map(f32::from_bits).filter(|l| l.is_finite() && *l > 0.0);
-        let point = |o: usize| u32_at(o).zip(u32_at(o + 4)).and_then(|(a, b)| LatLon::from_e7(a as i32, b as i32));
+        t.length_m = u32_at(44)
+            .map(f32::from_bits)
+            .filter(|l| l.is_finite() && *l > 0.0);
+        let point = |o: usize| {
+            u32_at(o)
+                .zip(u32_at(o + 4))
+                .and_then(|(a, b)| LatLon::from_e7(a as i32, b as i32))
+        };
         t.center = point(48);
         t.start_finish = point(80);
         t.kind = u32_at(72).map(TrackKind::from_code).unwrap_or_default();
-        t.guid = v.len().checked_sub(8).map(|o| hex(&v[o..])).filter(|g| g != "0000000000000000");
+        t.guid = v
+            .len()
+            .checked_sub(8)
+            .map(|o| hex(&v[o..]))
+            .filter(|g| g != "0000000000000000");
     }
     if t.name.is_empty() {
         t.name = t.full_name.clone();
@@ -229,18 +266,30 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
                 elevation.push(at(8) as f32 / 1000.0);
             }
         }
-        if elevation.iter().all(|e| (-500.0..9000.0).contains(e)) && elevation.iter().any(|e| *e != 0.0) {
+        if elevation.iter().all(|e| (-500.0..9000.0).contains(e))
+            && elevation.iter().any(|e| *e != 0.0)
+        {
             fill_missing_heights(&mut elevation);
             t.elevation_m = elevation;
         }
     }
 
     // srfs: one bit per surface, in RaceStudio's label order.
-    if let Some(bits) = find("srfs").and_then(|b| b.get(0..4)).map(|b| u32::from_le_bytes(b.try_into().unwrap())) {
+    if let Some(bits) = find("srfs")
+        .and_then(|b| b.get(0..4))
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+    {
         const SURFACES: [&str; 5] = ["Paved", "Dirt", "Ice", "Water", "Combo"];
-        t.surface = SURFACES.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, s)| *s).collect();
+        t.surface = SURFACES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| bits & (1 << i) != 0)
+            .map(|(_, s)| *s)
+            .collect();
     }
-    t.timezone = find("zots").map(|z| c_str(z.get(0..64).unwrap_or(z))).filter(|z| !z.is_empty());
+    t.timezone = find("zots")
+        .map(|z| c_str(z.get(0..64).unwrap_or(z)))
+        .filter(|z| !z.is_empty());
     // lgo: "<id>.png\0" followed by the PNG.
     t.logo_png = find("lgo").and_then(|l| {
         let at = l.windows(4).position(|w| w == b"\x89PNG")?;
@@ -256,13 +305,18 @@ pub fn parse_tkk(buf: &[u8]) -> Result<TrackFile, Error> {
 /// sometimes runs in between). Fill those from the nearest heights either side.
 fn fill_missing_heights(h: &mut [f32]) {
     let known: Vec<usize> = (0..h.len()).filter(|&i| h[i] != 0.0).collect();
-    let (Some(&first), Some(&last)) = (known.first(), known.last()) else { return };
+    let (Some(&first), Some(&last)) = (known.first(), known.last()) else {
+        return;
+    };
     for i in 0..h.len() {
         if h[i] != 0.0 {
             continue;
         }
         let after = known.partition_point(|&k| k < i);
-        h[i] = match (after.checked_sub(1).map(|j| known[j]), known.get(after).copied()) {
+        h[i] = match (
+            after.checked_sub(1).map(|j| known[j]),
+            known.get(after).copied(),
+        ) {
             (Some(a), Some(b)) => h[a] + (h[b] - h[a]) * (i - a) as f32 / (b - a) as f32,
             (None, _) => h[first],
             (_, None) => h[last],
@@ -274,8 +328,12 @@ fn fill_missing_heights(h: &mut [f32]) {
 fn parse_plus(xml: &str) -> TrackInfo {
     let mut info = TrackInfo::default();
     for part in xml.split("<p n=\"").skip(1) {
-        let Some((key, rest)) = part.split_once("\">") else { continue };
-        let Some((value, _)) = rest.split_once("</p>") else { continue };
+        let Some((key, rest)) = part.split_once("\">") else {
+            continue;
+        };
+        let Some((value, _)) = rest.split_once("</p>") else {
+            continue;
+        };
         let value = unescape(value.trim());
         if value.is_empty() {
             continue;
@@ -295,7 +353,11 @@ fn parse_plus(xml: &str) -> TrackInfo {
 }
 
 fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// A track length the way it's usually quoted: ovals as the nearest
@@ -304,10 +366,27 @@ fn unescape(s: &str) -> String {
 pub fn length_label(length_m: f32, kind: TrackKind, us_units: bool) -> String {
     const MILE: f32 = 1609.344;
     const OVALS: [(&str, f32); 21] = [
-        ("1/20", 0.05), ("1/10", 0.1), ("1/9", 1.0 / 9.0), ("1/8", 0.125), ("1/7", 1.0 / 7.0), ("1/6", 1.0 / 6.0),
-        ("1/5", 0.2), ("1/4", 0.25), ("3/10", 0.3), ("5/16", 0.3125), ("1/3", 1.0 / 3.0), ("3/8", 0.375),
-        ("4/10", 0.4), ("1/2", 0.5), ("5/8", 0.625), ("6/10", 0.6), ("7/10", 0.7), ("3/4", 0.75), ("8/10", 0.8),
-        ("1", 1.0), ("2", 2.0),
+        ("1/20", 0.05),
+        ("1/10", 0.1),
+        ("1/9", 1.0 / 9.0),
+        ("1/8", 0.125),
+        ("1/7", 1.0 / 7.0),
+        ("1/6", 1.0 / 6.0),
+        ("1/5", 0.2),
+        ("1/4", 0.25),
+        ("3/10", 0.3),
+        ("5/16", 0.3125),
+        ("1/3", 1.0 / 3.0),
+        ("3/8", 0.375),
+        ("4/10", 0.4),
+        ("1/2", 0.5),
+        ("5/8", 0.625),
+        ("6/10", 0.6),
+        ("7/10", 0.7),
+        ("3/4", 0.75),
+        ("8/10", 0.8),
+        ("1", 1.0),
+        ("2", 2.0),
     ];
     if kind == TrackKind::Oval {
         let miles = length_m / MILE;
@@ -323,11 +402,19 @@ pub fn length_label(length_m: f32, kind: TrackKind, us_units: bool) -> String {
     if us_units {
         if length_m < MILE {
             let feet = (length_m * 3.280_84).round() as u32;
-            return if feet >= 1000 { format!("{},{:03} ft", feet / 1000, feet % 1000) } else { format!("{feet} ft") };
+            return if feet >= 1000 {
+                format!("{},{:03} ft", feet / 1000, feet % 1000)
+            } else {
+                format!("{feet} ft")
+            };
         }
         return format!("{:.2} mi", length_m / MILE);
     }
-    if length_m < 1000.0 { format!("{length_m:.0} m") } else { format!("{:.2} km", length_m / 1000.0) }
+    if length_m < 1000.0 {
+        format!("{length_m:.0} m")
+    } else {
+        format!("{:.2} km", length_m / 1000.0)
+    }
 }
 
 pub fn read_tkk(path: impl AsRef<Path>) -> Result<TrackFile, Error> {
@@ -347,7 +434,15 @@ fn hex(b: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    fn record(name: &str, country: &str, region: &str, lat: i32, lon: i32, id: &str, guid: u64) -> Vec<u8> {
+    fn record(
+        name: &str,
+        country: &str,
+        region: &str,
+        lat: i32,
+        lon: i32,
+        id: &str,
+        guid: u64,
+    ) -> Vec<u8> {
         let mut r = vec![0u8; RIA_RECORD];
         r[..name.len()].copy_from_slice(name.as_bytes());
         r[28..28 + country.len()].copy_from_slice(country.as_bytes());
@@ -361,12 +456,31 @@ mod tests {
 
     #[test]
     fn parses_ria_records() {
-        let mut db = record("10 Mile", "US", "LA", 309_553_461, -928_034_725, "0s5jo9ob", 0x0e44_e32d_0d53);
-        db.extend(record("Test Ring", "IT", "", 451_234_567, 91_234_567, "abcd1234", 1));
+        let mut db = record(
+            "10 Mile",
+            "US",
+            "LA",
+            309_553_461,
+            -928_034_725,
+            "0s5jo9ob",
+            0x0e44_e32d_0d53,
+        );
+        db.extend(record(
+            "Test Ring",
+            "IT",
+            "",
+            451_234_567,
+            91_234_567,
+            "abcd1234",
+            1,
+        ));
         let tracks = parse_ria(&db).unwrap();
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].name, "10 Mile");
-        assert_eq!((tracks[0].country.as_str(), tracks[0].region.as_str()), ("US", "LA"));
+        assert_eq!(
+            (tracks[0].country.as_str(), tracks[0].region.as_str()),
+            ("US", "LA")
+        );
         let c = tracks[0].center.unwrap();
         assert!((c.lat - 30.9553461).abs() < 1e-9 && (c.lon + 92.8034725).abs() < 1e-9);
         assert_eq!(tracks[0].id, "0s5jo9ob");
@@ -414,8 +528,14 @@ mod tests {
         buf.extend(frame::Frame::new(b"plus", plus.as_bytes().to_vec()).encode());
 
         let t = parse_tkk(&buf).unwrap();
-        assert_eq!((t.name.as_str(), t.full_name.as_str(), t.id.as_str()), ("Ring", "Test Ring Circus", "ring0001"));
-        assert_eq!((t.country.as_str(), t.length_m, t.kind), ("IT", Some(1234.5), TrackKind::KartTrack));
+        assert_eq!(
+            (t.name.as_str(), t.full_name.as_str(), t.id.as_str()),
+            ("Ring", "Test Ring Circus", "ring0001")
+        );
+        assert_eq!(
+            (t.country.as_str(), t.length_m, t.kind),
+            ("IT", Some(1234.5), TrackKind::KartTrack)
+        );
         assert_eq!(t.timezone.as_deref(), Some("Europe/Rome"));
         assert_eq!(t.surface, ["Paved", "Combo"]);
         assert_eq!(t.logo_png.as_deref(), Some(&b"\x89PNGrest"[..]));
@@ -436,7 +556,10 @@ mod tests {
         header2[4..8].copy_from_slice(b"Ring");
         let mut buf2 = frame::Frame::new(b"Ptkk", header2).encode();
         buf2.extend(frame::Frame::new(b"pts\0", zero_first).encode());
-        assert_eq!(parse_tkk(&buf2).unwrap().elevation_m, [265.0, 265.0, 266.0, 267.0, 267.0]);
+        assert_eq!(
+            parse_tkk(&buf2).unwrap().elevation_m,
+            [265.0, 265.0, 266.0, 267.0, 267.0]
+        );
         assert!((t.center.unwrap().lat - 45.1234567).abs() < 1e-9);
         let sf = t.start_finish.unwrap();
         assert!((sf.lat - 45.1239999).abs() < 1e-9 && (sf.lon + 9.123).abs() < 1e-9);
@@ -457,8 +580,14 @@ mod tests {
     #[test]
     fn distance() {
         // One thousandth of a degree of latitude is about 111 m anywhere.
-        let a = LatLon { lat: 45.0, lon: 9.0 };
-        let b = LatLon { lat: 45.001, lon: 9.0 };
+        let a = LatLon {
+            lat: 45.0,
+            lon: 9.0,
+        };
+        let b = LatLon {
+            lat: 45.001,
+            lon: 9.0,
+        };
         assert!((a.distance_m(&b) - 111.2).abs() < 0.5);
     }
 }

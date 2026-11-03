@@ -25,14 +25,29 @@ fn main() {
             match aim_track::read_tkk(&arg) {
                 Ok(t) => println!(
                     "{arg}: {:?} ({:?}) id {} {} {}/{} {:?} m, {}, {} outline points, tz {:?}, logo {} bytes\n    {:?}",
-                    t.name, t.full_name, t.id, t.guid.as_deref().unwrap_or("-"), t.region, t.country, t.length_m,
-                    t.kind.label(), t.outline.len(), t.timezone, t.logo_png.as_ref().map_or(0, Vec::len), t.info.fields
+                    t.name,
+                    t.full_name,
+                    t.id,
+                    t.guid.as_deref().unwrap_or("-"),
+                    t.region,
+                    t.country,
+                    t.length_m,
+                    t.kind.label(),
+                    t.outline.len(),
+                    t.timezone,
+                    t.logo_png.as_ref().map_or(0, Vec::len),
+                    t.info.fields
                 ),
                 Err(e) => println!("{arg}: {e}"),
             }
         } else {
             match aim_track::read_ria(&arg) {
-                Ok(t) => println!("{arg}: {} tracks; first {:?} {:?} m", t.len(), t.first().map(|r| &r.name), t.first().and_then(|r| r.length_m)),
+                Ok(t) => println!(
+                    "{arg}: {} tracks; first {:?} {:?} m",
+                    t.len(),
+                    t.first().map(|r| &r.name),
+                    t.first().and_then(|r| r.length_m)
+                ),
                 Err(e) => println!("{arg}: {e}"),
             }
         }

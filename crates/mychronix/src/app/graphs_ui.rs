@@ -4,7 +4,6 @@
 use super::*;
 
 impl App {
-
     pub(super) fn channel_list(&mut self, ui: &mut Ui, session: &Session, start_ms: i64) {
         if !self.collapsed_init {
             self.collapsed_init = true;
@@ -16,7 +15,11 @@ impl App {
             }
         }
         let live = session.channels.iter().filter(|c| !is_dead(c)).count();
-        section_header(ui, "Channels", &format!("{} graphed · {live}", self.selected.len()));
+        section_header(
+            ui,
+            "Channels",
+            &format!("{} graphed · {live}", self.selected.len()),
+        );
         search_field(ui, &mut self.filter, "Search channels");
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -33,78 +36,118 @@ impl App {
         let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
         let full = self.selected.len() >= SERIES.len();
 
-        egui::ScrollArea::vertical().id_salt("channels").show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            let mut toggle_group = None;
-            for group in CHANNEL_GROUPS {
-                let members: Vec<usize> = session
-                    .channels
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| channel_group(c, session.info.imu_mount.is_some()) == group && !is_dead(c))
-                    .filter(|(_, c)| needle.is_empty() || c.name.to_lowercase().contains(&needle))
-                    .filter(|(i, _)| self.channel_view != ChannelView::Graphed || self.selected.contains_key(i))
-                    .map(|(i, _)| i)
-                    .collect();
-                if members.is_empty() {
-                    continue;
-                }
-                // Searching or showing graphed channels opens every group.
-                let open = !needle.is_empty() || self.channel_view == ChannelView::Graphed || !self.collapsed_groups.contains(group);
-                let graphed = members.iter().filter(|i| self.selected.contains_key(i)).count();
-                let header = ui.horizontal(|ui| {
-                    ui.add((if open { Icon::ChevronDown } else { Icon::ChevronRight }).image(DIM, 13.0));
-                    ui.label(RichText::new(group).font(medium(13.0)).color(SECONDARY));
-                    let detail = if graphed > 0 { format!("{graphed} of {} graphed", members.len()) } else { members.len().to_string() };
-                    ui.label(RichText::new(detail).size(12.0).color(DIM));
-                });
-                let header = ui.interact(header.response.rect, ui.id().with(("group", group)), Sense::click());
-                if header.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if header.clicked() {
-                    toggle_group = Some(group);
-                }
-                if !open {
-                    ui.add_space(4.0);
-                    continue;
-                }
-                for i in members {
-                    let c = &session.channels[i];
-                    let slot = self.selected.get(&i).copied();
-                    let response = row(ui, false, |ui| {
-                        swatch(ui, slot.map(|s| SERIES[s]));
-                        ui.add_space(2.0);
-                        let name_color = if slot.is_some() { TEXT } else { SECONDARY };
-                        ui.label(RichText::new(&c.name).color(name_color));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let units = pretty_units(&c.units);
-                            if !units.is_empty() {
-                                ui.label(RichText::new(units).size(12.0).color(DIM));
-                            }
-                            if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
-                                ui.label(RichText::new(format_value(v, c.decimals)).font(medium(13.5)).color(TEXT));
-                            }
-                        });
+        egui::ScrollArea::vertical()
+            .id_salt("channels")
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let mut toggle_group = None;
+                for group in CHANNEL_GROUPS {
+                    let members: Vec<usize> = session
+                        .channels
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| {
+                            channel_group(c, session.info.imu_mount.is_some()) == group
+                                && !is_dead(c)
+                        })
+                        .filter(|(_, c)| {
+                            needle.is_empty() || c.name.to_lowercase().contains(&needle)
+                        })
+                        .filter(|(i, _)| {
+                            self.channel_view != ChannelView::Graphed
+                                || self.selected.contains_key(i)
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if members.is_empty() {
+                        continue;
+                    }
+                    // Searching or showing graphed channels opens every group.
+                    let open = !needle.is_empty()
+                        || self.channel_view == ChannelView::Graphed
+                        || !self.collapsed_groups.contains(group);
+                    let graphed = members
+                        .iter()
+                        .filter(|i| self.selected.contains_key(i))
+                        .count();
+                    let header = ui.horizontal(|ui| {
+                        ui.add(
+                            (if open {
+                                Icon::ChevronDown
+                            } else {
+                                Icon::ChevronRight
+                            })
+                            .image(DIM, 13.0),
+                        );
+                        ui.label(RichText::new(group).font(medium(13.0)).color(SECONDARY));
+                        let detail = if graphed > 0 {
+                            format!("{graphed} of {} graphed", members.len())
+                        } else {
+                            members.len().to_string()
+                        };
+                        ui.label(RichText::new(detail).size(12.0).color(DIM));
                     });
-                    let response = response.on_hover_text(if slot.is_some() { "Click to remove its graph" } else { "Click to graph" });
-                    if response.clicked() {
-                        if slot.is_some() {
-                            self.selected.remove(&i);
-                            self.graph_order.retain(|&c| c != i);
-                        } else if !full {
-                            self.select(i);
-                            // Show the new graph, which goes at the bottom of the stack.
-                            self.scroll_to_graph = Some(i);
+                    let header = ui.interact(
+                        header.response.rect,
+                        ui.id().with(("group", group)),
+                        Sense::click(),
+                    );
+                    if header.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if header.clicked() {
+                        toggle_group = Some(group);
+                    }
+                    if !open {
+                        ui.add_space(4.0);
+                        continue;
+                    }
+                    for i in members {
+                        let c = &session.channels[i];
+                        let slot = self.selected.get(&i).copied();
+                        let response = row(ui, false, |ui| {
+                            swatch(ui, slot.map(|s| SERIES[s]));
+                            ui.add_space(2.0);
+                            let name_color = if slot.is_some() { TEXT } else { SECONDARY };
+                            ui.label(RichText::new(&c.name).color(name_color));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let units = pretty_units(&c.units);
+                                if !units.is_empty() {
+                                    ui.label(RichText::new(units).size(12.0).color(DIM));
+                                }
+                                if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
+                                    ui.label(
+                                        RichText::new(format_value(v, c.decimals))
+                                            .font(medium(13.5))
+                                            .color(TEXT),
+                                    );
+                                }
+                            });
+                        });
+                        let response = response.on_hover_text(if slot.is_some() {
+                            "Click to remove its graph"
+                        } else {
+                            "Click to graph"
+                        });
+                        if response.clicked() {
+                            if slot.is_some() {
+                                self.selected.remove(&i);
+                                self.graph_order.retain(|&c| c != i);
+                            } else if !full {
+                                self.select(i);
+                                // Show the new graph, which goes at the bottom of the stack.
+                                self.scroll_to_graph = Some(i);
+                            }
                         }
                     }
+                    ui.add_space(6.0);
                 }
-                ui.add_space(6.0);
-            }
-            if let Some(g) = toggle_group && !self.collapsed_groups.remove(g) {
-                self.collapsed_groups.insert(g);
-            }
-        });
+                if let Some(g) = toggle_group
+                    && !self.collapsed_groups.remove(g)
+                {
+                    self.collapsed_groups.insert(g);
+                }
+            });
     }
 }
 
@@ -112,14 +155,26 @@ impl App {
 // Analysis page
 
 impl App {
-    pub(super) fn analysis(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
+    pub(super) fn analysis(
+        &mut self,
+        ui: &mut Ui,
+        session: &std::sync::Arc<Session>,
+        start_ms: i64,
+        end_ms: i64,
+    ) {
         // A view that can't work for this session (no GPS) falls back to Graphs.
         if analysis_ui::view_unavailable(session, self.analysis_view.rail_item()).is_some() {
             self.analysis_view = AnalysisView::Session;
         }
         let pill = self.session_pill(ui, session);
         self.pill_rect = Some(pill);
-        if let Some(i) = self.path.as_ref().and_then(|p| self.library.as_ref()?.sessions.iter().position(|s| &s.path == p)) {
+        if let Some(i) = self.path.as_ref().and_then(|p| {
+            self.library
+                .as_ref()?
+                .sessions
+                .iter()
+                .position(|s| &s.path == p)
+        }) {
             self.want_weather(&[i], &ui.ctx().clone());
         }
         ui.add_space(14.0);
@@ -141,7 +196,13 @@ impl App {
         self.setup_dialog(ui.ctx());
     }
 
-    pub(super) fn analysis_view_body(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>, start_ms: i64, end_ms: i64) {
+    pub(super) fn analysis_view_body(
+        &mut self,
+        ui: &mut Ui,
+        session: &std::sync::Arc<Session>,
+        start_ms: i64,
+        end_ms: i64,
+    ) {
         match self.analysis_view {
             AnalysisView::Map => {
                 self.map_view(ui, session);
@@ -178,7 +239,11 @@ impl App {
 
         let gap = 12.0;
         let height = ui.available_height();
-        let map_w = if session.gps.is_some() { (ui.available_width() * 0.4).clamp(280.0, 560.0) } else { 0.0 };
+        let map_w = if session.gps.is_some() {
+            (ui.available_width() * 0.4).clamp(280.0, 560.0)
+        } else {
+            0.0
+        };
         let graphs_w = ui.available_width() - if map_w > 0.0 { map_w + gap } else { 0.0 };
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -187,7 +252,9 @@ impl App {
                 ui.set_width(graphs_w);
                 // Leave room for "+ Add channel" under the graphs.
                 let graphs_h = ui.available_height() - 44.0;
-                ui.allocate_ui_with_layout(vec2(graphs_w, graphs_h), column, |ui| self.graphs(ui, session, start_ms, end_ms));
+                ui.allocate_ui_with_layout(vec2(graphs_w, graphs_h), column, |ui| {
+                    self.graphs(ui, session, start_ms, end_ms)
+                });
                 ui.add_space(8.0);
                 self.channel_picker(ui, session, start_ms);
             });
@@ -199,7 +266,6 @@ impl App {
             }
         });
     }
-
 
     pub(super) fn graphs(&mut self, ui: &mut Ui, session: &Session, start_ms: i64, end_ms: i64) {
         if self.selected.is_empty() {
@@ -213,20 +279,35 @@ impl App {
         }
 
         // In the order they were added; newest at the bottom.
-        let selected: Vec<(usize, usize)> = self.graph_order.iter().filter_map(|c| self.selected.get(c).map(|&s| (*c, s))).collect();
+        let selected: Vec<(usize, usize)> = self
+            .graph_order
+            .iter()
+            .filter_map(|c| self.selected.get(c).map(|&s| (*c, s)))
+            .collect();
         let gap = 10.0;
         // RaceStudio's Time Compare: time gained or lost against the best lap,
         // along this lap (shown when a lap other than the best is open).
         let reference = self.time_compare_reference(session, start_ms);
         let compare_h = 120.0;
         let n = selected.len() as f32;
-        let reserved = if reference.is_some() { compare_h + gap } else { 0.0 };
+        let reserved = if reference.is_some() {
+            compare_h + gap
+        } else {
+            0.0
+        };
         let card_h = ((ui.available_height() - reserved - gap * (n - 1.0)) / n).max(110.0);
         let scroll_to = self.scroll_to_graph.take();
         let mut remove = None;
         // Distance mode: meters along the lap from GPS speed (time mode without GPS).
         let profile = if self.graph_distance {
-            crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })
+            crate::compare::DistanceProfile::from_gps(
+                session,
+                &aim_xrk::Lap {
+                    number: 0,
+                    start_ms,
+                    end_ms,
+                },
+            )
         } else {
             None
         };
@@ -234,12 +315,25 @@ impl App {
             Some(p) => p.dist_at(t_ms),
             None => (t_ms - start_ms as f64) / 1000.0,
         };
-        let x_max = profile.as_ref().map(|p| p.length()).unwrap_or((end_ms - start_ms) as f64 / 1000.0).max(0.001);
+        let x_max = profile
+            .as_ref()
+            .map(|p| p.length())
+            .unwrap_or((end_ms - start_ms) as f64 / 1000.0)
+            .max(0.001);
         // Seconds behind the best lap at each point of this one, on this graph's x axis.
         let time_compare: Option<(aim_xrk::Lap, Vec<[f64; 2]>)> = reference.and_then(|best| {
             let points = time_compare_curve(session, best, start_ms, end_ms)?
                 .into_iter()
-                .map(|(t_ms, d, gap_s)| [if profile.is_some() { d } else { (t_ms - start_ms as f64) / 1000.0 }, gap_s])
+                .map(|(t_ms, d, gap_s)| {
+                    [
+                        if profile.is_some() {
+                            d
+                        } else {
+                            (t_ms - start_ms as f64) / 1000.0
+                        },
+                        gap_s,
+                    ]
+                })
                 .collect();
             Some((best, points))
         });
@@ -422,15 +516,31 @@ impl App {
 
 /// Along the lap from `start_ms` to `end_ms`: (logger time ms, meters into
 /// the lap, seconds behind `best` there).
-pub(super) fn time_compare_curve(session: &Session, best: aim_xrk::Lap, start_ms: i64, end_ms: i64) -> Option<Vec<(f64, f64, f64)>> {
-    let lap = crate::compare::DistanceProfile::from_gps(session, &aim_xrk::Lap { number: 0, start_ms, end_ms })?;
+pub(super) fn time_compare_curve(
+    session: &Session,
+    best: aim_xrk::Lap,
+    start_ms: i64,
+    end_ms: i64,
+) -> Option<Vec<(f64, f64, f64)>> {
+    let lap = crate::compare::DistanceProfile::from_gps(
+        session,
+        &aim_xrk::Lap {
+            number: 0,
+            start_ms,
+            end_ms,
+        },
+    )?;
     let reference = crate::compare::DistanceProfile::from_gps(session, &best)?;
     Some(crate::compare::gap_along(&lap, &reference, 600))
 }
 
 impl App {
     /// The best lap, when the open lap is another one (what Time Compare measures against).
-    pub(super) fn time_compare_reference(&self, session: &Session, start_ms: i64) -> Option<aim_xrk::Lap> {
+    pub(super) fn time_compare_reference(
+        &self,
+        session: &Session,
+        start_ms: i64,
+    ) -> Option<aim_xrk::Lap> {
         let best = session.best_lap(MIN_LAP_MS).copied();
         self.lap
             .and_then(|i| session.laps.get(i))
@@ -447,20 +557,36 @@ impl App {
         let lo = gps.times_ms.partition_point(|&t| t < start_ms);
         let hi = gps.times_ms.partition_point(|&t| t <= end_ms);
         // RPM by default, or speed when the session has no RPM recorded.
-        let default = ["RPM", "GPS Speed"].iter().find_map(|n| session.channels.iter().position(|c| c.name == *n && !is_dead(c)));
-        let color_ch = self.map_channel.filter(|&i| session.channels.get(i).is_some_and(|c| !is_dead(c))).or(default).or_else(|| self.selected.keys().next().copied());
+        let default = ["RPM", "GPS Speed"].iter().find_map(|n| {
+            session
+                .channels
+                .iter()
+                .position(|c| c.name == *n && !is_dead(c))
+        });
+        let color_ch = self
+            .map_channel
+            .filter(|&i| session.channels.get(i).is_some_and(|c| !is_dead(c)))
+            .or(default)
+            .or_else(|| self.selected.keys().next().copied());
         let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
         // Time compare coloring: how fast the gap to the best lap grows (losing)
         // or shrinks (gaining), per meter, at each point.
         let reference = self.time_compare_reference(session, start_ms);
-        let gap_curve = reference.filter(|_| self.map_time_compare).and_then(|best| time_compare_curve(session, best, start_ms, end_ms));
+        let gap_curve = reference
+            .filter(|_| self.map_time_compare)
+            .and_then(|best| time_compare_curve(session, best, start_ms, end_ms));
         let gain = gap_curve.as_ref().map(|c| {
             let rate = |k: usize| {
                 let (a, b) = (c[k.saturating_sub(1)], c[(k + 1).min(c.len() - 1)]);
                 (b.2 - a.2) / (b.1 - a.1).max(1e-6)
             };
             let rates: Vec<(f64, f64)> = (0..c.len()).map(|k| (c[k].0, rate(k))).collect();
-            let scale = rates.iter().map(|r| r.1.abs()).fold(0.0_f64, f64::max).max(1e-9) * 0.6;
+            let scale = rates
+                .iter()
+                .map(|r| r.1.abs())
+                .fold(0.0_f64, f64::max)
+                .max(1e-9)
+                * 0.6;
             (rates, scale)
         });
 
@@ -643,7 +769,11 @@ pub(super) fn robust_range(values: impl Iterator<Item = f64>) -> (f64, f64) {
     v.sort_by(f64::total_cmp);
     let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
     let (lo, hi) = (at(0.02), at(0.98));
-    if hi > lo { (lo, hi) } else { (v[0], v[v.len() - 1].max(v[0] + 1.0)) }
+    if hi > lo {
+        (lo, hi)
+    } else {
+        (v[0], v[v.len() - 1].max(v[0] + 1.0))
+    }
 }
 
 /// Linear blend from `a` (t = 0) to `b` (t = 1).

@@ -17,16 +17,28 @@ pub(super) struct DriverPick {
     /// None: all race days at this track.
     pub day: Option<aim_xrk::summary::Date>,
     /// What the compare list was last built from, to rebuild on change.
-    built: Option<(String, String, Option<aim_xrk::summary::Date>, Option<usize>)>,
+    built: Option<(
+        String,
+        String,
+        Option<aim_xrk::summary::Date>,
+        Option<usize>,
+    )>,
 }
-
 
 impl App {
     /// The drivers with sessions in the library.
     pub(super) fn compare_driver_names(&mut self) -> Vec<String> {
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let mut names: Vec<String> = lib.sessions.iter().map(|s| s.driver(&profiles)).filter(|n| !n.is_empty()).collect();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
+        let mut names: Vec<String> = lib
+            .sessions
+            .iter()
+            .map(|s| s.driver(&profiles))
+            .filter(|n| !n.is_empty())
+            .collect();
         names.sort();
         names.dedup();
         names
@@ -40,8 +52,13 @@ impl App {
         }
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            for (mode, label) in [(CompareMode::Laps, "Laps"), (CompareMode::Drivers, "Drivers")] {
-                if chip(ui, label, self.comparison.mode == mode).clicked() && self.comparison.mode != mode {
+            for (mode, label) in [
+                (CompareMode::Laps, "Laps"),
+                (CompareMode::Drivers, "Drivers"),
+            ] {
+                if chip(ui, label, self.comparison.mode == mode).clicked()
+                    && self.comparison.mode != mode
+                {
                     self.comparison.mode = mode;
                     self.comparison.laps.clear();
                     self.comparison.driver_pick.built = None;
@@ -55,19 +72,35 @@ impl App {
     pub(super) fn compare_drivers_bar(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let names = self.compare_driver_names();
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
-        let track = self.path.as_ref().and_then(|p| lib.sessions.iter().find(|s| &s.path == p)).and_then(|s| s.track);
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
+        let track = self
+            .path
+            .as_ref()
+            .and_then(|p| lib.sessions.iter().find(|s| &s.path == p))
+            .and_then(|s| s.track);
         let p = &mut self.comparison.driver_pick;
         // Two drivers: fill them in.
         if p.a.is_empty() || !names.contains(&p.a) {
             p.a = names.first().cloned().unwrap_or_default();
         }
         if p.b.is_empty() || !names.contains(&p.b) || p.b == p.a {
-            p.b = names.iter().find(|n| **n != p.a).cloned().unwrap_or_default();
+            p.b = names
+                .iter()
+                .find(|n| **n != p.a)
+                .cloned()
+                .unwrap_or_default();
         }
         // Race days at this track where both drove.
         let days_of = |who: &str| -> Vec<aim_xrk::summary::Date> {
-            let mut d: Vec<_> = lib.sessions.iter().filter(|s| s.track == track && s.driver(&profiles) == who).filter_map(|s| s.summary.date).collect();
+            let mut d: Vec<_> = lib
+                .sessions
+                .iter()
+                .filter(|s| s.track == track && s.driver(&profiles) == who)
+                .filter_map(|s| s.summary.date)
+                .collect();
             d.sort();
             d.dedup();
             d
@@ -77,42 +110,62 @@ impl App {
         if p.day.is_some_and(|d| !both.contains(&d)) {
             p.day = None;
         }
-        let track_name = track.map(|t| lib.tracks[t].name.clone()).unwrap_or_else(|| "this track".into());
+        let track_name = track
+            .map(|t| lib.tracks[t].name.clone())
+            .unwrap_or_else(|| "this track".into());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            egui::ComboBox::from_id_salt("driver_a").width(150.0).selected_text(&p.a).show_ui(ui, |ui| {
-                for n in &names {
-                    ui.selectable_value(&mut p.a, n.clone(), n);
-                }
-            });
+            egui::ComboBox::from_id_salt("driver_a")
+                .width(150.0)
+                .selected_text(&p.a)
+                .show_ui(ui, |ui| {
+                    for n in &names {
+                        ui.selectable_value(&mut p.a, n.clone(), n);
+                    }
+                });
             ui.label(RichText::new("vs").color(SECONDARY));
-            egui::ComboBox::from_id_salt("driver_b").width(150.0).selected_text(&p.b).show_ui(ui, |ui| {
-                for n in names.iter().filter(|n| **n != p.a) {
-                    ui.selectable_value(&mut p.b, n.clone(), n);
-                }
-            });
+            egui::ComboBox::from_id_salt("driver_b")
+                .width(150.0)
+                .selected_text(&p.b)
+                .show_ui(ui, |ui| {
+                    for n in names.iter().filter(|n| **n != p.a) {
+                        ui.selectable_value(&mut p.b, n.clone(), n);
+                    }
+                });
             ui.add_space(12.0);
             ui.label(RichText::new(format!("Best laps at {track_name},")).color(SECONDARY));
-            let day_text = p.day.map(crate::dates::us_short).unwrap_or_else(|| "all race days".into());
-            egui::ComboBox::from_id_salt("driver_day").width(170.0).selected_text(day_text).show_ui(ui, |ui| {
-                ui.selectable_value(&mut p.day, None, "All race days");
-                for d in both.iter().rev() {
-                    ui.selectable_value(&mut p.day, Some(*d), crate::dates::us_short(*d));
-                }
-            });
+            let day_text = p
+                .day
+                .map(crate::dates::us_short)
+                .unwrap_or_else(|| "all race days".into());
+            egui::ComboBox::from_id_salt("driver_day")
+                .width(170.0)
+                .selected_text(day_text)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut p.day, None, "All race days");
+                    for d in both.iter().rev() {
+                        ui.selectable_value(&mut p.day, Some(*d), crate::dates::us_short(*d));
+                    }
+                });
         });
         ui.add_space(10.0);
         let key = (p.a.clone(), p.b.clone(), p.day, track);
         let rebuild = p.built.as_ref() != Some(&key);
         // Each driver's fastest session here (by its best lap).
         let picks: Vec<PathBuf> = if rebuild {
-            let (a, b, day) = (self.comparison.driver_pick.a.clone(), self.comparison.driver_pick.b.clone(), self.comparison.driver_pick.day);
+            let (a, b, day) = (
+                self.comparison.driver_pick.a.clone(),
+                self.comparison.driver_pick.b.clone(),
+                self.comparison.driver_pick.day,
+            );
             [a, b]
                 .iter()
                 .filter_map(|who| {
                     lib.sessions
                         .iter()
-                        .filter(|s| track.is_some() && s.track == track && s.driver(&profiles) == *who)
+                        .filter(|s| {
+                            track.is_some() && s.track == track && s.driver(&profiles) == *who
+                        })
                         .filter(|s| day.is_none() || s.summary.date == day)
                         .filter(|s| s.summary.best_lap_ms.is_some())
                         .min_by_key(|s| s.summary.best_lap_ms)
@@ -134,7 +187,9 @@ impl App {
                         std::sync::Arc::new(x)
                     })
                 };
-                if let Some(sess) = opened && let Some(lap) = sess.best_lap(MIN_LAP_MS).copied() {
+                if let Some(sess) = opened
+                    && let Some(lap) = sess.best_lap(MIN_LAP_MS).copied()
+                {
                     self.add_compare_lap(path, sess, lap);
                 }
             }
@@ -145,8 +200,15 @@ impl App {
     pub(super) fn compare_calculated_notes(&self, ui: &mut Ui) {
         let mut said: Vec<String> = Vec::new();
         for c in &self.comparison.laps {
-            if c.session.gps.is_none() && c.session.channel(crate::setup::SPEED_FROM_RPM).is_some() {
-                let who = c.session.info.driver.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| "One driver".into());
+            if c.session.gps.is_none() && c.session.channel(crate::setup::SPEED_FROM_RPM).is_some()
+            {
+                let who = c
+                    .session
+                    .info
+                    .driver
+                    .clone()
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or_else(|| "One driver".into());
                 if !said.contains(&who) {
                     ui.label(
                         RichText::new(format!("{who}'s session uses calculated values (speed and distance from RPM, gearing and tire size), so it may not be precise."))

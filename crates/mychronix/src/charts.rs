@@ -10,7 +10,11 @@ pub fn nice_bin(span: f64, target: f64) -> f64 {
     }
     let raw = span / target;
     let mag = 10f64.powf(raw.log10().floor());
-    [1.0, 2.0, 2.5, 5.0, 10.0].iter().map(|m| m * mag).find(|&w| w >= raw).unwrap_or(10.0 * mag)
+    [1.0, 2.0, 2.5, 5.0, 10.0]
+        .iter()
+        .map(|m| m * mag)
+        .find(|&w| w >= raw)
+        .unwrap_or(10.0 * mag)
 }
 
 /// Seconds spent in each bin of width `bin` starting at `lo`, over the time
@@ -22,7 +26,11 @@ pub fn histogram(c: &Channel, windows: &[(i64, i64)], lo: f64, bin: f64, bins: u
         let a = c.times_ms.partition_point(|&t| t < start);
         let b = c.times_ms.partition_point(|&t| t <= end);
         for i in a..b {
-            let next = if i + 1 < c.times_ms.len() { c.times_ms[i + 1].min(end) } else { end };
+            let next = if i + 1 < c.times_ms.len() {
+                c.times_ms[i + 1].min(end)
+            } else {
+                end
+            };
             let dt = ((next - c.times_ms[i]) as f64 / 1000.0).clamp(0.0, 1.0);
             let k = ((c.values[i] - lo) / bin).floor();
             if k >= 0.0 && (k as usize) < bins && c.values[i].is_finite() {
@@ -44,13 +52,23 @@ pub fn value_at(c: &Channel, t_ms: f64) -> Option<f64> {
     if t1 - t0 > 250.0 {
         return None;
     }
-    let f = if t1 > t0 { (t_ms - t0) / (t1 - t0) } else { 0.0 };
+    let f = if t1 > t0 {
+        (t_ms - t0) / (t1 - t0)
+    } else {
+        0.0
+    };
     Some(c.values[i - 1] + f * (c.values[i] - c.values[i - 1]))
 }
 
 /// Points (x, y, color value) at x's sample times within the windows, at
 /// most `max` of them (evenly thinned).
-pub fn scatter(x: &Channel, y: &Channel, color: Option<&Channel>, windows: &[(i64, i64)], max: usize) -> Vec<[f64; 3]> {
+pub fn scatter(
+    x: &Channel,
+    y: &Channel,
+    color: Option<&Channel>,
+    windows: &[(i64, i64)],
+    max: usize,
+) -> Vec<[f64; 3]> {
     let times: Vec<i64> = windows
         .iter()
         .flat_map(|&(s, e)| {
@@ -78,7 +96,15 @@ mod tests {
     use super::*;
 
     fn channel(times: &[i64], values: &[f64]) -> Channel {
-        Channel { name: "X".into(), group: None, units: String::new(), decimals: 1, interpolate: true, times_ms: times.to_vec(), values: values.to_vec() }
+        Channel {
+            name: "X".into(),
+            group: None,
+            units: String::new(),
+            decimals: 1,
+            interpolate: true,
+            times_ms: times.to_vec(),
+            values: values.to_vec(),
+        }
     }
 
     #[test]
@@ -91,7 +117,10 @@ mod tests {
     #[test]
     fn histogram_weights_by_time() {
         // 100 for 3 s, then 200 for 1 s.
-        let c = channel(&[0, 1000, 2000, 3000, 4000], &[100.0, 100.0, 100.0, 200.0, 200.0]);
+        let c = channel(
+            &[0, 1000, 2000, 3000, 4000],
+            &[100.0, 100.0, 100.0, 200.0, 200.0],
+        );
         let h = histogram(&c, &[(0, 4000)], 0.0, 100.0, 3);
         assert_eq!(h, [0.0, 3.0, 1.0]);
     }

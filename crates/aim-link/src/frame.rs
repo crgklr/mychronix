@@ -24,7 +24,11 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(tag: &[u8; 4], payload: Vec<u8>) -> Self {
-        Self { tag: *tag, flag: 0, payload }
+        Self {
+            tag: *tag,
+            flag: 0,
+            payload,
+        }
     }
 
     /// The tag without its NUL padding, for display and matching.
@@ -62,14 +66,20 @@ impl Frame {
         let tag: [u8; 4] = header[2..6].try_into().unwrap();
         let len = u32::from_le_bytes(header[6..10].try_into().unwrap()) as usize;
         if len > max_len {
-            return Err(Error::Protocol(format!("frame of {len} bytes exceeds limit {max_len}")));
+            return Err(Error::Protocol(format!(
+                "frame of {len} bytes exceeds limit {max_len}"
+            )));
         }
         let mut payload = vec![0u8; len];
         r.read_exact(&mut payload)?;
         let mut trailer = [0u8; TRAILER_LEN];
         r.read_exact(&mut trailer)?;
         check_trailer(&tag, &payload, &trailer)?;
-        Ok(Self { tag, flag: header[10], payload })
+        Ok(Self {
+            tag,
+            flag: header[10],
+            payload,
+        })
     }
 }
 
@@ -78,33 +88,50 @@ pub fn parse_all(mut buf: &[u8]) -> Result<Vec<Frame>, Error> {
     let mut frames = Vec::new();
     while !buf.is_empty() {
         if buf.len() < HEADER_LEN + TRAILER_LEN || &buf[..2] != b"<h" || buf[11] != b'>' {
-            return Err(Error::Protocol(format!("bad nested frame at {:02x?}", &buf[..buf.len().min(12)])));
+            return Err(Error::Protocol(format!(
+                "bad nested frame at {:02x?}",
+                &buf[..buf.len().min(12)]
+            )));
         }
         let tag: [u8; 4] = buf[2..6].try_into().unwrap();
         let len = u32::from_le_bytes(buf[6..10].try_into().unwrap()) as usize;
         let end = HEADER_LEN + len + TRAILER_LEN;
         if buf.len() < end {
-            return Err(Error::Protocol(format!("nested frame of {len} bytes is truncated")));
+            return Err(Error::Protocol(format!(
+                "nested frame of {len} bytes is truncated"
+            )));
         }
         let payload = buf[HEADER_LEN..HEADER_LEN + len].to_vec();
         check_trailer(&tag, &payload, &buf[HEADER_LEN + len..end])?;
-        frames.push(Frame { tag, flag: buf[10], payload });
+        frames.push(Frame {
+            tag,
+            flag: buf[10],
+            payload,
+        });
         buf = &buf[end..];
     }
     Ok(frames)
 }
 
 pub fn checksum(payload: &[u8]) -> u16 {
-    payload.iter().fold(0u16, |sum, &b| sum.wrapping_add(b as u16))
+    payload
+        .iter()
+        .fold(0u16, |sum, &b| sum.wrapping_add(b as u16))
 }
 
 fn check_trailer(tag: &[u8; 4], payload: &[u8], trailer: &[u8]) -> Result<(), Error> {
     if trailer[0] != b'<' || &trailer[1..5] != tag || trailer[7] != b'>' {
-        return Err(Error::Protocol(format!("bad frame trailer {:02x?}", trailer)));
+        return Err(Error::Protocol(format!(
+            "bad frame trailer {:02x?}",
+            trailer
+        )));
     }
     let sum = u16::from_le_bytes([trailer[5], trailer[6]]);
     if sum != checksum(payload) {
-        return Err(Error::Checksum { expected: sum, actual: checksum(payload) });
+        return Err(Error::Checksum {
+            expected: sum,
+            actual: checksum(payload),
+        });
     }
     Ok(())
 }
@@ -125,7 +152,11 @@ mod tests {
 
     #[test]
     fn round_trip_through_reader() {
-        let f = Frame { tag: *b"N\0\0\0", flag: 1, payload: b"al.ria".to_vec() };
+        let f = Frame {
+            tag: *b"N\0\0\0",
+            flag: 1,
+            payload: b"al.ria".to_vec(),
+        };
         let bytes = f.encode();
         assert_eq!(Frame::read_from(&mut &bytes[..], 1024).unwrap(), f);
         assert_eq!(f.tag_str(), "N");
@@ -136,6 +167,9 @@ mod tests {
         let mut bytes = Frame::new(b"STCP", vec![1, 2, 3]).encode();
         let n = bytes.len();
         bytes[n - 3] ^= 1;
-        assert!(matches!(Frame::read_from(&mut &bytes[..], 1024), Err(Error::Checksum { .. })));
+        assert!(matches!(
+            Frame::read_from(&mut &bytes[..], 1024),
+            Err(Error::Checksum { .. })
+        ));
     }
 }

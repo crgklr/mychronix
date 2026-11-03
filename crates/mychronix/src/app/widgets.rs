@@ -14,10 +14,19 @@ pub(super) struct Suggestions {
 
 impl Suggestions {
     pub(super) fn gather(lib: &Library, profiles: &crate::profiles::Profiles) -> Self {
-        let mut s = Suggestions { drivers: vec![], karts: vec![], championships: vec![], session_types: vec![], tracks: vec![] };
-        s.drivers.extend(profiles.drivers.iter().map(|d| d.name.clone()));
-        s.karts.extend(profiles.karts.iter().map(|k| k.name.clone()));
-        s.championships.extend(profiles.loggers.values().map(|p| p.championship.clone()));
+        let mut s = Suggestions {
+            drivers: vec![],
+            karts: vec![],
+            championships: vec![],
+            session_types: vec![],
+            tracks: vec![],
+        };
+        s.drivers
+            .extend(profiles.drivers.iter().map(|d| d.name.clone()));
+        s.karts
+            .extend(profiles.karts.iter().map(|k| k.name.clone()));
+        s.championships
+            .extend(profiles.loggers.values().map(|p| p.championship.clone()));
         for m in lib.sessions.iter().filter_map(|x| x.meta.as_ref()) {
             s.drivers.push(m.driver.clone());
             s.karts.push(m.kart.clone());
@@ -28,20 +37,51 @@ impl Suggestions {
         // RaceStudio's session types.
         s.session_types.extend(
             [
-                "Generic testing", "Practice 1", "Practice 2", "Practice 3", "Practice 4", "Qualifying", "Qualifying 1", "Qualifying 2",
-                "Warm-up", "Heat", "Heat 1", "Heat 2", "Heat 3", "Pre-final", "Final", "1st Final", "2nd Final", "Race", "1st Race",
-                "2nd Race", "A-Main", "Test", "Engine Test", "Track Outing",
+                "Generic testing",
+                "Practice 1",
+                "Practice 2",
+                "Practice 3",
+                "Practice 4",
+                "Qualifying",
+                "Qualifying 1",
+                "Qualifying 2",
+                "Warm-up",
+                "Heat",
+                "Heat 1",
+                "Heat 2",
+                "Heat 3",
+                "Pre-final",
+                "Final",
+                "1st Final",
+                "2nd Final",
+                "Race",
+                "1st Race",
+                "2nd Race",
+                "A-Main",
+                "Test",
+                "Engine Test",
+                "Track Outing",
             ]
             .map(String::from),
         );
         // Tracks you've raced or made first, then every AiM track.
-        for t in lib.tracks.iter().filter(|t| !t.sessions.is_empty() || t.kind == Kind::Custom) {
+        for t in lib
+            .tracks
+            .iter()
+            .filter(|t| !t.sessions.is_empty() || t.kind == Kind::Custom)
+        {
             s.tracks.push(t.name.clone());
         }
         for t in &lib.tracks {
             s.tracks.push(t.name.clone());
         }
-        for v in [&mut s.drivers, &mut s.karts, &mut s.championships, &mut s.session_types, &mut s.tracks] {
+        for v in [
+            &mut s.drivers,
+            &mut s.karts,
+            &mut s.championships,
+            &mut s.session_types,
+            &mut s.tracks,
+        ] {
             let mut seen = std::collections::HashSet::new();
             v.retain(|x| !x.trim().is_empty() && seen.insert(x.to_lowercase()));
         }
@@ -54,27 +94,61 @@ impl Suggestions {
 /// A field that picks one of `options` (shown as `empty` when none is
 /// picked), sized like `suggest_field`. With `add`, a last item for adding a
 /// new one: true when it's clicked.
-pub(super) fn pick_field(ui: &mut Ui, id: &str, value: &mut String, options: &[String], empty: &str, add: Option<&str>, width: f32) -> bool {
+pub(super) fn pick_field(
+    ui: &mut Ui,
+    id: &str,
+    value: &mut String,
+    options: &[String],
+    empty: &str,
+    add: Option<&str>,
+    width: f32,
+) -> bool {
     let mut adding = false;
-    let shown = if value.trim().is_empty() { RichText::new(empty).color(DIM) } else { RichText::new(value.as_str()).color(TEXT) };
+    let shown = if value.trim().is_empty() {
+        RichText::new(empty).color(DIM)
+    } else {
+        RichText::new(value.as_str()).color(TEXT)
+    };
     ui.spacing_mut().interact_size.y = 44.0;
-    egui::ComboBox::from_id_salt(id).width(width - 8.0).height(320.0).selected_text(shown.font(regular(16.5))).show_ui(ui, |ui| {
-        for o in options {
-            if ui.selectable_label(value.eq_ignore_ascii_case(o), RichText::new(o).font(regular(15.0))).clicked() {
-                *value = o.clone();
+    egui::ComboBox::from_id_salt(id)
+        .width(width - 8.0)
+        .height(320.0)
+        .selected_text(shown.font(regular(16.5)))
+        .show_ui(ui, |ui| {
+            for o in options {
+                if ui
+                    .selectable_label(
+                        value.eq_ignore_ascii_case(o),
+                        RichText::new(o).font(regular(15.0)),
+                    )
+                    .clicked()
+                {
+                    *value = o.clone();
+                }
             }
-        }
-        if let Some(label) = add {
-            if !options.is_empty() {
-                ui.separator();
+            if let Some(label) = add {
+                if !options.is_empty() {
+                    ui.separator();
+                }
+                adding = ui
+                    .selectable_label(
+                        false,
+                        RichText::new(label).font(regular(15.0)).color(SECONDARY),
+                    )
+                    .clicked();
             }
-            adding = ui.selectable_label(false, RichText::new(label).font(regular(15.0)).color(SECONDARY)).clicked();
-        }
-    });
+        });
     adding
 }
 
-pub(super) fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &str, suggestions: &[String], width: f32) -> egui::Response {
+pub(super) fn suggest_field(
+    ui: &mut Ui,
+    id: &str,
+    value: &mut String,
+    hint: &str,
+    suggestions: &[String],
+    width: f32,
+) -> egui::Response {
     let response = ui.add(
         egui::TextEdit::singleline(value)
             .id_salt(id)
@@ -87,7 +161,9 @@ pub(super) fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &st
     let ctx = ui.ctx().clone();
     // Stay open while the pointer is over the list, so a click on it lands.
     let last_rect: Option<Rect> = ctx.data(|d| d.get_temp(popup_id));
-    let over_list = last_rect.zip(ctx.pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+    let over_list = last_rect
+        .zip(ctx.pointer_hover_pos())
+        .is_some_and(|(r, p)| r.contains(p));
     if !(response.has_focus() || over_list) {
         ctx.data_mut(|d| d.remove::<Rect>(popup_id));
         return response;
@@ -118,19 +194,34 @@ pub(super) fn suggest_field(ui: &mut Ui, id: &str, value: &mut String, hint: &st
                     ui.set_width(response.rect.width() - 8.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
                     // Eight rows show; more scroll.
-                    egui::ScrollArea::vertical().max_height(34.0 * 8.0).show(ui, |ui| {
-                        for m in &matches {
-                            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-                            if resp.hovered() {
-                                ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), SURFACE_HOVER);
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    egui::ScrollArea::vertical()
+                        .max_height(34.0 * 8.0)
+                        .show(ui, |ui| {
+                            for m in &matches {
+                                let (r, resp) = ui.allocate_exact_size(
+                                    vec2(ui.available_width(), 34.0),
+                                    Sense::click(),
+                                );
+                                if resp.hovered() {
+                                    ui.painter().rect_filled(
+                                        r,
+                                        CornerRadius::same(theme::RADIUS_SMALL),
+                                        SURFACE_HOVER,
+                                    );
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                ui.painter().text(
+                                    r.left_center() + vec2(10.0, 0.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    m.as_str(),
+                                    regular(14.5),
+                                    TEXT,
+                                );
+                                if resp.clicked() {
+                                    picked = Some((*m).clone());
+                                }
                             }
-                            ui.painter().text(r.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, m.as_str(), regular(14.5), TEXT);
-                            if resp.clicked() {
-                                picked = Some((*m).clone());
-                            }
-                        }
-                    });
+                        });
                 });
         });
     ctx.data_mut(|d| d.insert_temp(popup_id, area.response.rect));
@@ -166,12 +257,27 @@ pub(super) fn rpm_color(t: f32) -> Color32 {
 
 /// A temperature on the track: blue when low, through yellow and orange, to red when high.
 pub(super) fn temp_color(t: f32) -> Color32 {
-    ramp_color(&[Color32::from_rgb(0x2f, 0x6b, 0xff), Color32::from_rgb(0xf2, 0xd1, 0x3b), Color32::from_rgb(0xf0, 0x8c, 0x2b), Color32::from_rgb(0xe5, 0x48, 0x4d)], t)
+    ramp_color(
+        &[
+            Color32::from_rgb(0x2f, 0x6b, 0xff),
+            Color32::from_rgb(0xf2, 0xd1, 0x3b),
+            Color32::from_rgb(0xf0, 0x8c, 0x2b),
+            Color32::from_rgb(0xe5, 0x48, 0x4d),
+        ],
+        t,
+    )
 }
 
 /// Speed on the track: red when slow to green when fast.
 pub(super) fn track_speed_color(t: f32) -> Color32 {
-    ramp_color(&[Color32::from_rgb(0xe5, 0x48, 0x4d), Color32::from_rgb(0xf0, 0xa0, 0x4b), theme::GOOD], t)
+    ramp_color(
+        &[
+            Color32::from_rgb(0xe5, 0x48, 0x4d),
+            Color32::from_rgb(0xf0, 0xa0, 0x4b),
+            theme::GOOD,
+        ],
+        t,
+    )
 }
 
 /// How a channel's values color the track, low to high, by what it measures
@@ -222,8 +328,6 @@ pub(super) fn speed_color(t: f32) -> Color32 {
     mix(STOPS[i], STOPS[i + 1], x - i as f32)
 }
 
-
-
 pub(super) fn hairline(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, theme::OUTLINE);
@@ -253,7 +357,11 @@ pub(super) fn progress_bar(ui: &mut Ui, width: f32, height: f32, fraction: f32) 
     let round = CornerRadius::same((height / 2.0) as u8);
     ui.painter().rect_filled(r, round, SURFACE_ACTIVE);
     let w = (r.width() * fraction.clamp(0.0, 1.0)).max(height);
-    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(w, height)), round, theme::GOOD);
+    ui.painter().rect_filled(
+        Rect::from_min_size(r.min, vec2(w, height)),
+        round,
+        theme::GOOD,
+    );
 }
 
 pub(super) fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
@@ -271,7 +379,12 @@ pub(super) fn graph_card(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(SURFACE)
         .corner_radius(CornerRadius::same(theme::RADIUS))
-        .inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 8 })
+        .inner_margin(Margin {
+            left: 16,
+            right: 16,
+            top: 12,
+            bottom: 8,
+        })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_height(height - 20.0);
@@ -280,12 +393,23 @@ pub(super) fn graph_card(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui)) {
 }
 
 /// Pill button; `primary` fills it with ink.
-pub(super) fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, primary: bool) -> egui::Response {
+pub(super) fn button(
+    ui: &mut Ui,
+    icon: Option<Icon>,
+    label: &str,
+    primary: bool,
+) -> egui::Response {
     button_with(ui, icon, None, label, primary)
 }
 
 /// A button whose icon can have its own color (e.g. a yellow star).
-pub(super) fn button_with(ui: &mut Ui, icon: Option<Icon>, icon_tint: Option<Color32>, label: &str, primary: bool) -> egui::Response {
+pub(super) fn button_with(
+    ui: &mut Ui,
+    icon: Option<Icon>,
+    icon_tint: Option<Color32>,
+    label: &str,
+    primary: bool,
+) -> egui::Response {
     let (fg, fill, hover) = if primary {
         (ON_TEXT, TEXT, Color32::from_rgb(0xd9, 0xdd, 0xe2))
     } else {
@@ -293,15 +417,20 @@ pub(super) fn button_with(ui: &mut Ui, icon: Option<Icon>, icon_tint: Option<Col
     };
     let galley = ui.painter().layout_no_wrap(label.into(), medium(14.0), fg);
     let icon_w = if icon.is_some() { 24.0 } else { 0.0 };
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + icon_w + 32.0, 38.0), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(galley.size().x + icon_w + 32.0, 38.0), Sense::click());
     let fill = if response.hovered() { hover } else { fill };
     ui.painter().rect_filled(rect, CornerRadius::same(19), fill);
     let mut x = rect.left() + 16.0;
     if let Some(icon) = icon {
-        icon.image(icon_tint.unwrap_or(fg), 16.0).paint_at(ui, Rect::from_min_size(pos2(x, rect.center().y - 8.0), Vec2::splat(16.0)));
+        icon.image(icon_tint.unwrap_or(fg), 16.0).paint_at(
+            ui,
+            Rect::from_min_size(pos2(x, rect.center().y - 8.0), Vec2::splat(16.0)),
+        );
         x += icon_w;
     }
-    ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, fg);
+    ui.painter()
+        .galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, fg);
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -317,8 +446,10 @@ pub(super) fn chip(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
         (false, true) => SURFACE_HOVER,
         (false, false) => SURFACE,
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(255), fill);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, fg);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(255), fill);
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, fg);
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -326,17 +457,26 @@ pub(super) fn chip(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
 }
 
 pub(super) fn tag(ui: &mut Ui, text: &str, fill: Color32) {
-    let galley = ui.painter().layout_no_wrap(text.into(), semibold(11.5), ON_TEXT);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.into(), semibold(11.5), ON_TEXT);
     let (rect, _) = ui.allocate_exact_size(galley.size() + vec2(14.0, 6.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(255), fill);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ON_TEXT);
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(255), fill);
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, ON_TEXT);
 }
 
 pub(super) fn search_field(ui: &mut Ui, text: &mut String, hint: &str) {
     Frame::new()
         .fill(SURFACE)
         .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin { left: 12, right: 10, top: 4, bottom: 4 })
+        .inner_margin(Margin {
+            left: 12,
+            right: 10,
+            top: 4,
+            bottom: 4,
+        })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add(Icon::Search.image(DIM, 16.0));
@@ -347,7 +487,11 @@ pub(super) fn search_field(ui: &mut Ui, text: &mut String, hint: &str) {
                         .hint_text(RichText::new(hint).color(DIM))
                         .desired_width(ui.available_width() - clear_w),
                 );
-                if !text.is_empty() && ui.add(Icon::X.image(DIM, 14.0).sense(Sense::click())).clicked() {
+                if !text.is_empty()
+                    && ui
+                        .add(Icon::X.image(DIM, 14.0).sense(Sense::click()))
+                        .clicked()
+                {
                     text.clear();
                 }
             });
@@ -359,13 +503,16 @@ pub(super) fn swatch(ui: &mut Ui, color: Option<Color32>) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
     match color {
         Some(c) => ui.painter().circle_filled(rect.center(), 5.0, c),
-        None => ui.painter().circle_stroke(rect.center(), 4.5, Stroke::new(1.2, DIM)),
+        None => ui
+            .painter()
+            .circle_stroke(rect.center(), 4.5, Stroke::new(1.2, DIM)),
     };
 }
 
 /// A full-width clickable list row with hover and selected states.
 pub(super) fn row(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui)) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     if ui.is_rect_visible(rect) {
         let fill = if selected {
             Some(SURFACE_ACTIVE)
@@ -375,10 +522,15 @@ pub(super) fn row(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui)) -> egu
             None
         };
         if let Some(fill) = fill {
-            ui.painter().rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), fill);
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), fill);
         }
         let inner = rect.shrink2(vec2(10.0, 0.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
         add(&mut child);
     }
     if response.hovered() {

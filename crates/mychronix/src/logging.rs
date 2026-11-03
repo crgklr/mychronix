@@ -39,8 +39,16 @@ impl Log for FileLog {
         if !self.enabled(r.metadata()) {
             return;
         }
-        let line = format!("{} {:<5} {}: {}\n", timestamp(), r.level(), r.target(), r.args());
-        let Ok(mut guard) = self.file.lock() else { return };
+        let line = format!(
+            "{} {:<5} {}: {}\n",
+            timestamp(),
+            r.level(),
+            r.target(),
+            r.args()
+        );
+        let Ok(mut guard) = self.file.lock() else {
+            return;
+        };
         // Roll over once the file passes the limit.
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > MAX_BYTES) {
             let _ = std::fs::rename(&self.path, self.path.with_extension("log.old"));
@@ -52,23 +60,40 @@ impl Log for FileLog {
     }
 
     fn flush(&self) {
-        if let Ok(mut g) = self.file.lock() && let Some(f) = g.as_mut() {
+        if let Ok(mut g) = self.file.lock()
+            && let Some(f) = g.as_mut()
+        {
             let _ = f.flush();
         }
     }
 }
 
 fn open(path: &PathBuf) -> Option<std::fs::File> {
-    std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
 }
 
 /// "2026-10-12 17:45:02.123Z" (UTC).
 fn timestamp() -> String {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = now.as_secs() as i64;
     let d = crate::dates::from_days(secs.div_euclid(86_400));
     let s = secs.rem_euclid(86_400);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z", d.year, d.month, d.day, s / 3600, s % 3600 / 60, s % 60, now.subsec_millis())
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z",
+        d.year,
+        d.month,
+        d.day,
+        s / 3600,
+        s % 3600 / 60,
+        s % 60,
+        now.subsec_millis()
+    )
 }
 
 /// Where the log is.
@@ -83,7 +108,11 @@ pub fn init() {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let ours = match std::env::var("MYCHRONIX_LOG").unwrap_or_default().to_lowercase().as_str() {
+    let ours = match std::env::var("MYCHRONIX_LOG")
+        .unwrap_or_default()
+        .to_lowercase()
+        .as_str()
+    {
         "trace" => LevelFilter::Trace,
         "debug" => LevelFilter::Debug,
         "warn" => LevelFilter::Warn,

@@ -80,7 +80,10 @@ impl Track {
             id: t.id,
             tkk: Some(path.to_path_buf()),
             // Beside it, the MyChron it was copied from (see `device::copy_custom_tracks`).
-            from_mychron: std::fs::read_to_string(path.with_extension("mychron")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+            from_mychron: std::fs::read_to_string(path.with_extension("mychron"))
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             country: t.country,
             region: t.region,
             center: t.center.or(t.start_finish),
@@ -122,27 +125,57 @@ impl Track {
 
     /// Works out `sort_key` and `search` from the names; again whenever they change.
     pub fn index(&mut self) {
-        self.sort_key = self.full_name.as_deref().unwrap_or(&self.name).to_lowercase();
+        self.sort_key = self
+            .full_name
+            .as_deref()
+            .unwrap_or(&self.name)
+            .to_lowercase();
         let country = crate::countries::label(&self.country);
-        let parts = [Some(self.name.as_str()), Some(self.region.as_str()), self.city.as_deref(), self.full_name.as_deref(), Some(country.as_str())];
+        let parts = [
+            Some(self.name.as_str()),
+            Some(self.region.as_str()),
+            self.city.as_deref(),
+            self.full_name.as_deref(),
+            Some(country.as_str()),
+        ];
         // One per line, so a search can't match across two of them.
-        self.search = parts.into_iter().flatten().collect::<Vec<_>>().join("\n").to_lowercase();
+        self.search = parts
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
     }
 
     /// "City, Region", as much as is known.
     pub fn locality(&self) -> String {
         let city = self.city.clone().unwrap_or_default();
         // Some AiM cities already end with the state ("Pine Hall, NC").
-        let has_region = !self.region.is_empty() && city.split(',').any(|part| part.trim().eq_ignore_ascii_case(&self.region));
-        let region = if has_region { String::new() } else { self.region.clone() };
-        [city, region].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ")
+        let has_region = !self.region.is_empty()
+            && city
+                .split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case(&self.region));
+        let region = if has_region {
+            String::new()
+        } else {
+            self.region.clone()
+        };
+        [city, region]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// "637 m Kart Track (Paved)", as RaceStudio describes a track.
     pub fn description(&self) -> String {
         let mut parts = Vec::new();
         if let Some(l) = self.length_m {
-            parts.push(aim_track::length_label(l, self.track_kind, crate::units::imperial()));
+            parts.push(aim_track::length_label(
+                l,
+                self.track_kind,
+                crate::units::imperial(),
+            ));
         }
         if self.track_kind != aim_track::TrackKind::Unknown {
             parts.push(self.track_kind.label());
@@ -179,19 +212,26 @@ impl LocalSession {
     /// its MyChron was on when it was recorded; "" when neither. The one rule
     /// Sessions, Events, the Garage, PB and the assistant all go by.
     pub fn driver(&self, profiles: &crate::profiles::Profiles) -> String {
-        let kart = self.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
+        let kart = self
+            .kart
+            .and_then(|id| profiles.karts.iter().find(|k| k.id == id));
         self.meta
             .as_ref()
             .map(|m| m.driver.trim().to_string())
             .filter(|d| !d.is_empty())
-            .or_else(|| kart.and_then(|k| profiles.driver_name(k.driver)).map(str::to_string))
+            .or_else(|| {
+                kart.and_then(|k| profiles.driver_name(k.driver))
+                    .map(str::to_string)
+            })
             .unwrap_or_default()
     }
 
     /// Where it was recorded, as its MyChron placed it (the start/finish of
     /// the track it recorded on); None when it recorded no track.
     pub fn place(&self) -> Option<LatLon> {
-        self.summary.start_finish.map(|(lat, lon)| LatLon { lat, lon })
+        self.summary
+            .start_finish
+            .map(|(lat, lon)| LatLon { lat, lon })
     }
 
     /// Its track's name: the track it's assigned to, else the name you typed
@@ -199,7 +239,12 @@ impl LocalSession {
     pub fn track_name(&self, tracks: &[Track]) -> Option<String> {
         self.track
             .map(|t| tracks[t].name.clone())
-            .or_else(|| self.meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty()))
+            .or_else(|| {
+                self.meta
+                    .as_ref()
+                    .map(|m| m.track.clone())
+                    .filter(|t| !t.is_empty())
+            })
             .or_else(|| self.summary.track.clone())
     }
 
@@ -244,7 +289,13 @@ impl Library {
             t.index();
         }
         lib.assign_karts(&crate::profiles::Profiles::load());
-        log::info!("library: {} tracks, {} sessions, {} sources, in {:?}", lib.tracks.len(), lib.sessions.len(), lib.sources.len(), started.elapsed());
+        log::info!(
+            "library: {} tracks, {} sessions, {} sources, in {:?}",
+            lib.tracks.len(),
+            lib.sessions.len(),
+            lib.sources.len(),
+            started.elapsed()
+        );
         log::debug!("library sources: {:?}", lib.sources);
         lib
     }
@@ -252,7 +303,9 @@ impl Library {
     /// Custom tracks first, so they win over list entries with the same guid.
     fn add_custom_tracks(&mut self, ours: &Path, by_guid: &mut HashMap<String, usize>) {
         for path in files_with_ext(ours, "tkk") {
-            let Ok(t) = aim_track::read_tkk(&path) else { continue };
+            let Ok(t) = aim_track::read_tkk(&path) else {
+                continue;
+            };
             let guid = t.guid.clone().unwrap_or_else(|| format!("tkk:{}", t.id));
             if by_guid.contains_key(&guid) {
                 continue;
@@ -270,8 +323,14 @@ impl Library {
         rias.extend(crate::aim_tracks::list_path());
         rias.extend(crate::aim_tracks::mychron_list_path());
         for path in rias {
-            let Ok(records) = aim_track::read_ria(&path) else { continue };
-            let kind = if path.file_name().is_some_and(|n| n == "dev.ria") { Kind::Custom } else { Kind::Aim };
+            let Ok(records) = aim_track::read_ria(&path) else {
+                continue;
+            };
+            let kind = if path.file_name().is_some_and(|n| n == "dev.ria") {
+                Kind::Custom
+            } else {
+                Kind::Aim
+            };
             let tkk_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
             let before = self.tracks.len();
             for r in records {
@@ -299,10 +358,14 @@ impl Library {
     /// country (and city) of the nearest AiM track, and the outline measured.
     fn fill_in_custom_tracks(&mut self) {
         for i in 0..self.tracks.len() {
-            if !self.tracks[i].country.is_empty() && (self.tracks[i].kind != Kind::Custom || self.tracks[i].city.is_some()) {
+            if !self.tracks[i].country.is_empty()
+                && (self.tracks[i].kind != Kind::Custom || self.tracks[i].city.is_some())
+            {
                 continue;
             }
-            let Some(here) = self.tracks[i].center else { continue };
+            let Some(here) = self.tracks[i].center else {
+                continue;
+            };
             let nearest = self
                 .tracks
                 .iter()
@@ -315,7 +378,9 @@ impl Library {
                 self.tracks[i].country = country;
                 self.tracks[i].region = region;
                 if self.tracks[i].city.is_none() {
-                    self.tracks[i].city = tkk.and_then(|p| aim_track::read_tkk(p).ok()).and_then(|f| f.info.city);
+                    self.tracks[i].city = tkk
+                        .and_then(|p| aim_track::read_tkk(p).ok())
+                        .and_then(|f| f.info.city);
                 }
             }
         }
@@ -333,14 +398,23 @@ impl Library {
     /// its MyChron recorded.
     fn add_sessions(&mut self, dir: &Path, by_guid: &HashMap<String, usize>) {
         for path in files_with_ext(dir, "xri") {
-            let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Ok(summary) = aim_xrk::parse_xri(&bytes) else { continue };
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Ok(summary) = aim_xrk::parse_xri(&bytes) else {
+                continue;
+            };
             let session = self.sessions.len();
             let xrz = path.with_extension("xrz");
             let mut meta = crate::device::SessionMeta::load(&xrz);
-            let named = meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty() && Some(t) != summary.track.as_ref());
+            let named = meta
+                .as_ref()
+                .map(|m| m.track.clone())
+                .filter(|t| !t.is_empty() && Some(t) != summary.track.as_ref());
             let track = match (named, meta.as_mut()) {
-                (Some(name), Some(m)) => self.link_named(session, &name, &summary, m, &xrz, by_guid),
+                (Some(name), Some(m)) => {
+                    self.link_named(session, &name, &summary, m, &xrz, by_guid)
+                }
                 _ => self.match_track(&summary, by_guid),
             };
             self.push_session(xrz, logger_of(&path), summary, track, meta);
@@ -353,25 +427,53 @@ impl Library {
     fn add_mychron4_sessions(&mut self, dir: &Path) {
         let rs2 = files_with_ext(dir, "drk").into_iter().map(|p| (p, true));
         let mc4 = files_with_ext(dir, "mc4").into_iter().map(|p| (p, false));
-        let imd = files_with_ext(dir, "imd").into_iter().filter(|p| !p.with_extension("drk").exists()).map(|p| (p, false));
+        let imd = files_with_ext(dir, "imd")
+            .into_iter()
+            .filter(|p| !p.with_extension("drk").exists())
+            .map(|p| (p, false));
         for (path, is_drk) in rs2.chain(mc4).chain(imd) {
-            let summary = if is_drk { aim_xrk::drk::summary(&path) } else { aim_xrk::mc4::summary(&path) };
+            let summary = if is_drk {
+                aim_xrk::drk::summary(&path)
+            } else {
+                aim_xrk::mc4::summary(&path)
+            };
             let Ok(summary) = summary else { continue };
             let meta = crate::device::SessionMeta::load(&path);
-            let named = meta.as_ref().map(|m| m.track.clone()).filter(|t| !t.is_empty());
-            let track = named.or_else(|| summary.track.clone()).and_then(|name| self.match_by_name(&name, &summary));
+            let named = meta
+                .as_ref()
+                .map(|m| m.track.clone())
+                .filter(|t| !t.is_empty());
+            let track = named
+                .or_else(|| summary.track.clone())
+                .and_then(|name| self.match_by_name(&name, &summary));
             self.push_session(path.clone(), logger_of(&path), summary, track, meta);
         }
     }
 
     /// Adds a session (with its setup and weather beside it) to the library and its track.
-    fn push_session(&mut self, path: PathBuf, logger: String, summary: SessionSummary, track: Option<usize>, meta: Option<crate::device::SessionMeta>) {
+    fn push_session(
+        &mut self,
+        path: PathBuf,
+        logger: String,
+        summary: SessionSummary,
+        track: Option<usize>,
+        meta: Option<crate::device::SessionMeta>,
+    ) {
         if let Some(i) = track {
             self.tracks[i].sessions.push(self.sessions.len());
         }
         let setup = crate::setup::Setup::load(&path);
         let weather = crate::weather::Weather::load(&path);
-        self.sessions.push(LocalSession { path, logger, summary, track, meta, setup, weather, kart: None });
+        self.sessions.push(LocalSession {
+            path,
+            logger,
+            summary,
+            track,
+            meta,
+            setup,
+            weather,
+            kart: None,
+        });
     }
 
     /// Laps timed from GPS (see `jobs::relap`) stand in for the logger's
@@ -387,9 +489,22 @@ impl Library {
                     s.summary.best_lap_ms = d.best.map(|b| b.1);
                 }
                 Some(_) => {}
-                None if s.summary.laps.unwrap_or(0) <= 1 && s.summary.duration_ms.unwrap_or(0) > 120_000 => self.relap_pending.push(s.path.clone()),
+                None if s.summary.laps.unwrap_or(0) <= 1
+                    && s.summary.duration_ms.unwrap_or(0) > 120_000 =>
+                {
+                    self.relap_pending.push(s.path.clone())
+                }
                 // A track picked over the MyChron's: its laps may start at another line.
-                None if s.meta.as_ref().and_then(|m| m.track_guid.as_deref()).is_some_and(|g| !g.is_empty() && Some(g) != s.summary.track_guid.as_deref()) => self.relap_pending.push(s.path.clone()),
+                None if s
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.track_guid.as_deref())
+                    .is_some_and(|g| {
+                        !g.is_empty() && Some(g) != s.summary.track_guid.as_deref()
+                    }) =>
+                {
+                    self.relap_pending.push(s.path.clone())
+                }
                 None => {}
             }
         }
@@ -401,7 +516,9 @@ impl Library {
         for t in &mut self.tracks {
             // By when they started (sessions from several MyChrons mix here,
             // and each numbers its own), then by number.
-            t.sessions.sort_by_key(|&i| std::cmp::Reverse((self.sessions[i].start(), self.sessions[i].summary.number)));
+            t.sessions.sort_by_key(|&i| {
+                std::cmp::Reverse((self.sessions[i].start(), self.sessions[i].summary.number))
+            });
         }
         // Keep session indices valid: sessions aren't reordered, only tracks.
         self.tracks.sort_by(|a, b| {
@@ -427,7 +544,12 @@ impl Library {
 
     /// The start of a MyChron's newest session here, or "" (see `Profiles::mount`).
     pub fn newest_start(&self, logger: &str) -> String {
-        self.sessions.iter().filter(|s| s.logger == logger).map(|s| s.start()).max().unwrap_or_default()
+        self.sessions
+            .iter()
+            .filter(|s| s.logger == logger)
+            .map(|s| s.start())
+            .max()
+            .unwrap_or_default()
     }
 
     pub fn count(&self, kind: Kind) -> usize {
@@ -437,18 +559,26 @@ impl Library {
 
 /// The logger a session file came from: its folder's name.
 fn logger_of(path: &Path) -> String {
-    path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    path.parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Every file with extension `ext` under `dir`, in order.
 fn files_with_ext(dir: &Path, ext: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return out };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             out.extend(files_with_ext(&path, ext));
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+        {
             out.push(path);
         }
     }

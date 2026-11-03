@@ -23,7 +23,8 @@ struct StderrLog(log::LevelFilter);
 
 impl log::Log for StderrLog {
     fn enabled(&self, m: &log::Metadata) -> bool {
-        m.level() <= self.0 && (m.target().starts_with("aim_") || m.target().starts_with("mychronix"))
+        m.level() <= self.0
+            && (m.target().starts_with("aim_") || m.target().starts_with("mychronix"))
     }
     fn log(&self, r: &log::Record) {
         if self.enabled(r.metadata()) {
@@ -109,7 +110,11 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn sessions_root() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Mychronix").join("sessions")
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join("Mychronix")
+        .join("sessions")
 }
 
 fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
@@ -121,17 +126,31 @@ fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
             println!("{} runs on the key", runs.len());
             for r in &runs {
                 let (date, time) = r.start().unwrap_or_default();
-                let best = r.best_lap_cs.map(|cs| format_lap_time(cs as i64 * 10)).unwrap_or_else(|| "-".into());
-                println!("  run {:>3}  {date} {time}  {:>2} laps  best {best:>9}  {:>6} bytes  logger {}", r.number, r.laps(), r.data_len, r.serial);
+                let best = r
+                    .best_lap_cs
+                    .map(|cs| format_lap_time(cs as i64 * 10))
+                    .unwrap_or_else(|| "-".into());
+                println!(
+                    "  run {:>3}  {date} {time}  {:>2} laps  best {best:>9}  {:>6} bytes  logger {}",
+                    r.number,
+                    r.laps(),
+                    r.data_len,
+                    r.serial
+                );
             }
         }
         DataKeyCommand::Pull { to } => {
             // Each run under the MyChron that recorded it (one key can carry several), unless --to names one folder.
-            let mut have: std::collections::HashMap<PathBuf, Vec<RunStart>> = std::collections::HashMap::new();
+            let mut have: std::collections::HashMap<PathBuf, Vec<RunStart>> =
+                std::collections::HashMap::new();
             let mut saved = 0;
             for r in &runs {
-                let Some((date, time)) = r.start() else { continue };
-                let dir = to.clone().unwrap_or_else(|| sessions_root().join(r.serial.to_string()));
+                let Some((date, time)) = r.start() else {
+                    continue;
+                };
+                let dir = to
+                    .clone()
+                    .unwrap_or_else(|| sessions_root().join(r.serial.to_string()));
                 if !have.contains_key(&dir) {
                     std::fs::create_dir_all(&dir)?;
                     // Runs already here (from RaceStudio 2's .drk files or an earlier pull), by start time.
@@ -143,7 +162,10 @@ fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
                         .collect();
                     have.insert(dir.clone(), here);
                 }
-                if have[&dir].iter().any(|(d, t)| d.as_deref() == Some(&date) && t.as_deref() == Some(&time)) {
+                if have[&dir]
+                    .iter()
+                    .any(|(d, t)| d.as_deref() == Some(&date) && t.as_deref() == Some(&time))
+                {
                     continue;
                 }
                 let run = key.download(r, |_, _| {})?;
@@ -152,7 +174,11 @@ fn datakey(cmd: DataKeyCommand) -> anyhow::Result<()> {
                 println!("saved {}", path.display());
                 saved += 1;
             }
-            println!("{saved} new of {} runs; {} already here", runs.len(), runs.len() - saved);
+            println!(
+                "{saved} new of {} runs; {} already here",
+                runs.len(),
+                runs.len() - saved
+            );
         }
     }
     Ok(())
@@ -183,8 +209,16 @@ fn info(file: &PathBuf, list_channels: bool) -> anyhow::Result<()> {
     let best = session.best_lap(10_000).map(|l| l.number);
     println!("\nLaps ({}):", session.laps.len());
     for lap in &session.laps {
-        let mark = if Some(lap.number) == best { "  best" } else { "" };
-        println!("  {:>3}  {}{mark}", lap.number, format_lap_time(lap.duration_ms()));
+        let mark = if Some(lap.number) == best {
+            "  best"
+        } else {
+            ""
+        };
+        println!(
+            "  {:>3}  {}{mark}",
+            lap.number,
+            format_lap_time(lap.duration_ms())
+        );
     }
 
     match &session.gps {
@@ -194,7 +228,12 @@ fn info(file: &PathBuf, list_channels: bool) -> anyhow::Result<()> {
     println!("Channels: {}", session.channels.len());
     if list_channels {
         for c in &session.channels {
-            println!("  {:<28} {:>8} samples  {}", c.name, c.values.len(), c.units);
+            println!(
+                "  {:<28} {:>8} samples  {}",
+                c.name,
+                c.values.len(),
+                c.units
+            );
         }
     }
     Ok(())
@@ -204,7 +243,9 @@ fn device(cmd: DeviceCommand) -> anyhow::Result<()> {
     match cmd {
         DeviceCommand::Probe => {
             if aim_link::usb::is_present() {
-                let id = aim_link::usb::UsbLogger::open().and_then(|mut l| l.logger_id()).context("a MyChron is plugged in by USB but didn't answer")?;
+                let id = aim_link::usb::UsbLogger::open()
+                    .and_then(|mut l| l.logger_id())
+                    .context("a MyChron is plugged in by USB but didn't answer")?;
                 println!("MyChron on USB");
                 if let Some(id) = id {
                     println!("Logger id  {id}");
@@ -212,7 +253,11 @@ fn device(cmd: DeviceCommand) -> anyhow::Result<()> {
                 return Ok(());
             }
             let beacon = probe()?;
-            println!("Logger at {} answered in {} ms", beacon.address, beacon.round_trip.as_millis());
+            println!(
+                "Logger at {} answered in {} ms",
+                beacon.address,
+                beacon.round_trip.as_millis()
+            );
             if let Some(id) = beacon.logger_id {
                 println!("Logger id  {id}");
             }
@@ -227,15 +272,20 @@ fn device(cmd: DeviceCommand) -> anyhow::Result<()> {
         }
         DeviceCommand::Ls { dir } => {
             let dir = dir.as_deref().unwrap_or(aim_link::SESSIONS_DIR);
-            let entries = connect()?.list(dir).with_context(|| format!("listing {dir}"))?;
+            let entries = connect()?
+                .list(dir)
+                .with_context(|| format!("listing {dir}"))?;
             for e in &entries {
                 println!("{:<24} {:>10}  {} {}", e.name, e.size, e.date, e.time);
             }
             println!("{} entries in {dir}", entries.len());
         }
         DeviceCommand::Get { path, output } => {
-            let output = output.unwrap_or_else(|| PathBuf::from(path.rsplit('/').next().unwrap_or("download")));
-            let data = connect()?.read_file(&path, progress_bar(&path)).with_context(|| format!("reading {path}"))?;
+            let output = output
+                .unwrap_or_else(|| PathBuf::from(path.rsplit('/').next().unwrap_or("download")));
+            let data = connect()?
+                .read_file(&path, progress_bar(&path))
+                .with_context(|| format!("reading {path}"))?;
             eprintln!();
             std::fs::write(&output, &data)?;
             println!("Saved {} ({} bytes)", output.display(), data.len());
@@ -253,16 +303,21 @@ fn probe() -> anyhow::Result<aim_link::Beacon> {
 
 /// USB when a MyChron 6 is plugged in, else its WiFi.
 fn connect() -> anyhow::Result<Link> {
-    Link::connect().context("couldn't open a connection to the MyChron (USB, or WiFi at 10.0.0.1:2000)")
+    Link::connect()
+        .context("couldn't open a connection to the MyChron (USB, or WiFi at 10.0.0.1:2000)")
 }
 
 fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
     let logger_id = if aim_link::usb::is_present() {
-        aim_link::usb::UsbLogger::open().and_then(|mut l| l.logger_id()).context("a MyChron is plugged in by USB but didn't answer")?
+        aim_link::usb::UsbLogger::open()
+            .and_then(|mut l| l.logger_id())
+            .context("a MyChron is plugged in by USB but didn't answer")?
     } else {
         probe()?.logger_id
     };
-    let id = logger_id.map(|id| id.to_string()).unwrap_or_else(|| "unknown".into());
+    let id = logger_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".into());
     let dir = match to {
         Some(dir) => dir,
         None => dirs_home()?.join("Mychronix").join("sessions").join(&id),
@@ -270,11 +325,20 @@ fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
     let mut logger = connect()?;
-    let listing = logger.list(aim_link::SESSIONS_DIR).context("listing sessions")?;
+    let listing = logger
+        .list(aim_link::SESSIONS_DIR)
+        .context("listing sessions")?;
     // An .hrz listed beside its .xrz is the same recording: fetched once.
-    let mut sessions: Vec<_> = listing.iter().filter(|e| e.is_session() && !saved::listed_twice(&listing, e)).collect();
+    let mut sessions: Vec<_> = listing
+        .iter()
+        .filter(|e| e.is_session() && !saved::listed_twice(&listing, e))
+        .collect();
     sessions.sort_by(|a, b| a.name.cmp(&b.name));
-    println!("Logger {id}: {} sessions; saving to {}", sessions.len(), dir.display());
+    println!(
+        "Logger {id}: {} sessions; saving to {}",
+        sessions.len(),
+        dir.display()
+    );
     let (mut saved, mut skipped) = (0, 0);
     for entry in sessions {
         // The name comes from the logger: never let it point outside this folder.
@@ -289,19 +353,33 @@ fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
         // A different recording under a name already used here (after a format) goes beside it.
         let target = saved::target_for(&dir, entry);
         let path = format!("{}/{}", aim_link::SESSIONS_DIR, entry.name);
-        let data = logger.read_file(&path, progress_bar(&entry.name)).with_context(|| format!("reading {path}"))?;
+        let data = logger
+            .read_file(&path, progress_bar(&entry.name))
+            .with_context(|| format!("reading {path}"))?;
         eprintln!();
         write_whole(&target, &data)?;
         // Its summary (.xri) beside it, and when the logger listed it, as the app notes them.
         let xri = Path::new(&entry.name).with_extension("xri");
         if listing.iter().any(|e| Path::new(&e.name) == xri) {
-            let bytes = logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}).with_context(|| format!("reading {}", xri.display()))?;
+            let bytes = logger
+                .read_file(
+                    &format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()),
+                    |_, _| {},
+                )
+                .with_context(|| format!("reading {}", xri.display()))?;
             write_whole(&target.with_extension("xri"), &bytes)?;
         }
         let meta = serde_json::json!({ "driver": "", "kart": "", "championship": "", "track": "", "listed": saved::listed(entry) });
-        write_whole(&target.with_extension("meta.json"), serde_json::to_string_pretty(&meta)?.as_bytes())?;
+        write_whole(
+            &target.with_extension("meta.json"),
+            serde_json::to_string_pretty(&meta)?.as_bytes(),
+        )?;
         if target.file_name() != Some(std::ffi::OsStr::new(&entry.name)) {
-            println!("{} is a different recording from the one saved under that name; saved as {}", entry.name, target.display());
+            println!(
+                "{} is a different recording from the one saved under that name; saved as {}",
+                entry.name,
+                target.display()
+            );
         }
         saved += 1;
     }
@@ -312,7 +390,11 @@ fn pull(to: Option<PathBuf>) -> anyhow::Result<()> {
 /// The listed date and time noted beside a saved session (its `.meta.json`), if any.
 fn saved_listed(session: &Path) -> Option<String> {
     let text = std::fs::read_to_string(session.with_extension("meta.json")).ok()?;
-    serde_json::from_str::<serde_json::Value>(&text).ok()?.get("listed")?.as_str().map(String::from)
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()?
+        .get("listed")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Writes to a temporary name first, so an interrupted download never looks complete.
@@ -324,7 +406,9 @@ fn write_whole(target: &Path, data: &[u8]) -> anyhow::Result<()> {
 }
 
 fn dirs_home() -> anyhow::Result<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set")
 }
 
 fn progress_bar(label: &str) -> impl FnMut(u64, u64) + '_ {
@@ -353,11 +437,21 @@ fn local_sessions(dir: Option<PathBuf>) -> anyhow::Result<()> {
     };
     for dir in dirs {
         let mut rows = Vec::new();
-        let mut files: Vec<_> = std::fs::read_dir(&dir)?.flatten().map(|e| e.path()).collect();
+        let mut files: Vec<_> = std::fs::read_dir(&dir)?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
         files.sort();
-        for path in files.iter().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xri"))) {
-            let mut summary = aim_xrk::parse_xri(&std::fs::read(path)?).with_context(|| format!("reading {}", path.display()))?;
-            summary.file = path.with_extension("xrz").file_name().map(|n| n.to_string_lossy().into_owned());
+        for path in files
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xri")))
+        {
+            let mut summary = aim_xrk::parse_xri(&std::fs::read(path)?)
+                .with_context(|| format!("reading {}", path.display()))?;
+            summary.file = path
+                .with_extension("xrz")
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned());
             rows.push(summary);
         }
         println!("{}  ({} sessions)", dir.display(), rows.len());
@@ -368,14 +462,21 @@ fn local_sessions(dir: Option<PathBuf>) -> anyhow::Result<()> {
 }
 
 fn print_summaries(rows: &[aim_xrk::SessionSummary]) {
-    println!("{:>4}  {:<10}  {:<8}  {:<10}  {:>4}  {:>9}  {:>9}  {:>6}  {:>6}", "#", "Date", "Start", "Track", "Laps", "Best", "On track", "RPM", "Speed");
+    println!(
+        "{:>4}  {:<10}  {:<8}  {:<10}  {:>4}  {:>9}  {:>9}  {:>6}  {:>6}",
+        "#", "Date", "Start", "Track", "Laps", "Best", "On track", "RPM", "Speed"
+    );
     for s in rows {
         let dash = || "—".to_string();
         let best = match (s.best_lap_ms, s.best_lap_number) {
             (Some(ms), _) => format_lap_time(ms as i64),
             _ => dash(),
         };
-        let track = s.track.clone().filter(|_| s.has_track()).unwrap_or_else(|| "no track".into());
+        let track = s
+            .track
+            .clone()
+            .filter(|_| s.has_track())
+            .unwrap_or_else(|| "no track".into());
         println!(
             "{:>4}  {:<10}  {:<8}  {:<10}  {:>4}  {:>9}  {:>9}  {:>6}  {:>6}",
             s.number.map(|n| n.to_string()).unwrap_or_else(dash),
@@ -384,7 +485,9 @@ fn print_summaries(rows: &[aim_xrk::SessionSummary]) {
             track,
             s.laps.map(|n| n.to_string()).unwrap_or_else(dash),
             best,
-            s.duration_ms.map(|ms| format_lap_time(ms as i64)).unwrap_or_else(dash),
+            s.duration_ms
+                .map(|ms| format_lap_time(ms as i64))
+                .unwrap_or_else(dash),
             s.max_rpm.map(|n| n.to_string()).unwrap_or_else(dash),
             s.max_speed.map(|v| format!("{v:.1}")).unwrap_or_else(dash),
         );

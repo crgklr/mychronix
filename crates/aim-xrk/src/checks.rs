@@ -37,19 +37,54 @@ pub enum Sensor {
 
 pub fn sensor_of(channel: &str) -> Option<Sensor> {
     let n = channel.to_lowercase();
-    let not = ["gps", "logger", "alarm", "predictive", "diff", "internal", "batt", "luminosity", "backlight", "wifi", "calculated", "voltage", "led", "btn", "button", "err", "warn", "_alm"];
+    let not = [
+        "gps",
+        "logger",
+        "alarm",
+        "predictive",
+        "diff",
+        "internal",
+        "batt",
+        "luminosity",
+        "backlight",
+        "wifi",
+        "calculated",
+        "voltage",
+        "led",
+        "btn",
+        "button",
+        "err",
+        "warn",
+        "_alm",
+    ];
     // Warning flags ("Oil Pressure Low") sit at zero until something's wrong.
-    let flag = n.ends_with(" low") || n.ends_with(" high") || n.ends_with("_low") || n.ends_with("_high");
+    let flag =
+        n.ends_with(" low") || n.ends_with(" high") || n.ends_with("_low") || n.ends_with("_high");
     if flag || not.iter().any(|w| n.contains(w)) {
         return None;
     }
     if n.contains("rpm") {
         Some(Sensor::Rpm)
-    } else if n.contains("jackshaft") || n.contains("wheelspeed") || n.contains("wheel speed") || n.starts_with("vwheel") {
+    } else if n.contains("jackshaft")
+        || n.contains("wheelspeed")
+        || n.contains("wheel speed")
+        || n.starts_with("vwheel")
+    {
         Some(Sensor::SpeedSensor)
-    } else if n.contains("temp") || n.contains("egt") || n.contains("exhaust") || n.contains("water") || n.contains("cht") || n.contains("head") {
+    } else if n.contains("temp")
+        || n.contains("egt")
+        || n.contains("exhaust")
+        || n.contains("water")
+        || n.contains("cht")
+        || n.contains("head")
+    {
         Some(Sensor::Temperature)
-    } else if n.contains("throttle") || n == "tps" || n.contains("pedal") || n.contains("brake") || n.contains("steer") {
+    } else if n.contains("throttle")
+        || n == "tps"
+        || n.contains("pedal")
+        || n.contains("brake")
+        || n.contains("steer")
+    {
         Some(Sensor::Driver)
     } else if n.contains("press") {
         Some(Sensor::Pressure)
@@ -86,7 +121,13 @@ pub fn sensor_issues(session: &Session) -> Vec<Issue> {
     // trailer, not driven on a track, so it isn't checked.
     let moved = match session.channel("GPS Speed") {
         Some(c) => {
-            let fast_ms: i64 = c.times_ms.windows(2).zip(&c.values).filter(|(_, v)| **v > 20.0).map(|(w, _)| w[1] - w[0]).sum();
+            let fast_ms: i64 = c
+                .times_ms
+                .windows(2)
+                .zip(&c.values)
+                .filter(|(_, v)| **v > 20.0)
+                .map(|(w, _)| w[1] - w[0])
+                .sum();
             fast_ms >= 30_000 && !travelled(session)
         }
         None => !session.complete_laps().is_empty(),
@@ -97,18 +138,29 @@ pub fn sensor_issues(session: &Session) -> Vec<Issue> {
             continue;
         }
         if c.values.is_empty() {
-            issues.push(Issue { channel: c.name.clone(), kind: IssueKind::NotConnected });
+            issues.push(Issue {
+                channel: c.name.clone(),
+                kind: IssueKind::NotConnected,
+            });
             continue;
         }
         if !moved {
             continue;
         }
         if c.values.iter().all(|v| (v - c.values[0]).abs() < 1e-9) {
-            issues.push(Issue { channel: c.name.clone(), kind: IssueKind::NoSignal });
+            issues.push(Issue {
+                channel: c.name.clone(),
+                kind: IssueKind::NoSignal,
+            });
             continue;
         }
-        if sensor_of(&c.name) == Some(Sensor::Rpm) && let Some(percent) = rpm_dropouts(session, c) {
-            issues.push(Issue { channel: c.name.clone(), kind: IssueKind::DropOuts { percent } });
+        if sensor_of(&c.name) == Some(Sensor::Rpm)
+            && let Some(percent) = rpm_dropouts(session, c)
+        {
+            issues.push(Issue {
+                channel: c.name.clone(),
+                kind: IssueKind::DropOuts { percent },
+            });
         }
     }
     issues
@@ -123,7 +175,11 @@ pub fn working_sensors(session: &Session) -> Vec<String> {
         .iter()
         // At least 50 readings that vary: a few stray values from a floating
         // input (seen on a MyChron 4 with no head-temp sensor) don't count.
-        .filter(|c| sensor_of(&c.name).is_some() && c.values.len() >= 50 && c.values.iter().any(|v| (v - c.values[0]).abs() > 1e-9))
+        .filter(|c| {
+            sensor_of(&c.name).is_some()
+                && c.values.len() >= 50
+                && c.values.iter().any(|v| (v - c.values[0]).abs() > 1e-9)
+        })
         .map(|c| c.name.clone())
         .collect()
 }
@@ -138,10 +194,15 @@ pub fn worth_reporting(issue: &Issue, worked_before: impl Fn(&str) -> bool) -> b
 /// Whether the session ends more than 300 m from where it started: kart
 /// sessions start and finish in the pits, even on big tracks.
 fn travelled(session: &Session) -> bool {
-    let Some(g) = session.gps.as_ref().filter(|g| g.len() > 1) else { return false };
+    let Some(g) = session.gps.as_ref().filter(|g| g.len() > 1) else {
+        return false;
+    };
     let n = g.len() - 1;
     let k = 111_320.0 * g.latitude[0].to_radians().cos();
-    let (dx, dy) = ((g.longitude[n] - g.longitude[0]) * k, (g.latitude[n] - g.latitude[0]) * 110_540.0);
+    let (dx, dy) = (
+        (g.longitude[n] - g.longitude[0]) * k,
+        (g.latitude[n] - g.latitude[0]) * 110_540.0,
+    );
     (dx * dx + dy * dy).sqrt() > 300.0
 }
 
@@ -168,13 +229,22 @@ pub fn recording_gaps(session: &Session) -> Vec<(i64, i64)> {
     // Channels sampled at least 5 times a second (one logged once a second
     // has a gap between every sample).
     let fast = |t: &[i64]| t.len() > 10 && t[t.len() - 1] - t[0] < 200 * t.len() as i64;
-    let mut times: Vec<i64> = session.channels.iter().filter(|c| fast(&c.times_ms)).flat_map(|c| c.times_ms.iter().copied()).collect();
+    let mut times: Vec<i64> = session
+        .channels
+        .iter()
+        .filter(|c| fast(&c.times_ms))
+        .flat_map(|c| c.times_ms.iter().copied())
+        .collect();
     if let Some(g) = session.gps.as_ref().filter(|g| fast(&g.times_ms)) {
         times.extend(&g.times_ms);
     }
     times.sort_unstable();
     times.dedup();
-    times.windows(2).filter(|w| w[1] - w[0] > 1000).map(|w| (w[0], w[1])).collect()
+    times
+        .windows(2)
+        .filter(|w| w[1] - w[0] > 1000)
+        .map(|w| (w[0], w[1]))
+        .collect()
 }
 
 #[cfg(test)]
@@ -184,38 +254,81 @@ mod tests {
 
     fn channel(name: &str, values: Vec<f64>) -> Channel {
         let n = values.len() as i64;
-        Channel { name: name.into(), group: None, units: String::new(), decimals: 1, interpolate: true, times_ms: (0..n).map(|k| k * 100).collect(), values }
+        Channel {
+            name: name.into(),
+            group: None,
+            units: String::new(),
+            decimals: 1,
+            interpolate: true,
+            times_ms: (0..n).map(|k| k * 100).collect(),
+            values,
+        }
     }
 
     fn session(channels: Vec<Channel>) -> Session {
-        Session { info: SessionInfo::default(), channels, laps: Vec::<Lap>::new(), gps: None }
+        Session {
+            info: SessionInfo::default(),
+            channels,
+            laps: Vec::<Lap>::new(),
+            gps: None,
+        }
     }
 
     #[test]
     fn flags_dead_sensors_only_when_moving() {
-        let speed = channel("GPS Speed", (0..400).map(|k| if k < 10 { 0.0 } else { 40.0 }).collect());
-        let half = channel("RPM", (0..400).map(|k| if k % 2 == 0 { 0.0 } else { 9000.0 }).collect());
+        let speed = channel(
+            "GPS Speed",
+            (0..400).map(|k| if k < 10 { 0.0 } else { 40.0 }).collect(),
+        );
+        let half = channel(
+            "RPM",
+            (0..400)
+                .map(|k| if k % 2 == 0 { 0.0 } else { 9000.0 })
+                .collect(),
+        );
         let s = session(vec![
             speed.clone(),
             channel("RPM", vec![0.0; 400]),
             channel("WheelSpeed", vec![0.0; 400]),
-            Channel { values: vec![], times_ms: vec![], ..channel("Temp TC 1", vec![]) },
+            Channel {
+                values: vec![],
+                times_ms: vec![],
+                ..channel("Temp TC 1", vec![])
+            },
             channel("Exhaust Temp", (0..400).map(|k| 400.0 + k as f64).collect()),
             channel("Luminosity", vec![100.0; 400]),
             channel("Predictive Time", vec![-12290.0; 400]),
         ]);
-        let got: Vec<(String, IssueKind)> = sensor_issues(&s).into_iter().map(|i| (i.channel, i.kind)).collect();
+        let got: Vec<(String, IssueKind)> = sensor_issues(&s)
+            .into_iter()
+            .map(|i| (i.channel, i.kind))
+            .collect();
         assert_eq!(
             got,
-            [("RPM".to_string(), IssueKind::NoSignal), ("WheelSpeed".into(), IssueKind::NoSignal), ("Temp TC 1".into(), IssueKind::NotConnected)]
+            [
+                ("RPM".to_string(), IssueKind::NoSignal),
+                ("WheelSpeed".into(), IssueKind::NoSignal),
+                ("Temp TC 1".into(), IssueKind::NotConnected)
+            ]
         );
         // RPM half zero while moving.
         let s = session(vec![speed, half]);
-        assert!(matches!(sensor_issues(&s)[0].kind, IssueKind::DropOuts { percent } if (45..=55).contains(&percent)));
+        assert!(
+            matches!(sensor_issues(&s)[0].kind, IssueKind::DropOuts { percent } if (45..=55).contains(&percent))
+        );
         // A warm-up on the stand, or a 10 s roll: a flat RPM isn't flagged.
-        let stand = session(vec![channel("GPS Speed", vec![0.5; 400]), channel("RPM", vec![0.0; 400])]);
+        let stand = session(vec![
+            channel("GPS Speed", vec![0.5; 400]),
+            channel("RPM", vec![0.0; 400]),
+        ]);
         assert!(sensor_issues(&stand).is_empty());
-        let roll = session(vec![channel("GPS Speed", (0..400).map(|k| if k < 100 { 30.0 } else { 0.0 }).collect()), channel("RPM", vec![0.0; 400])]);
+        let roll = session(vec![
+            channel(
+                "GPS Speed",
+                (0..400).map(|k| if k < 100 { 30.0 } else { 0.0 }).collect(),
+            ),
+            channel("RPM", vec![0.0; 400]),
+        ]);
         assert!(sensor_issues(&roll).is_empty());
     }
 
@@ -225,7 +338,17 @@ mod tests {
         assert_eq!(sensor_of("Jackshaft"), Some(Sensor::SpeedSensor));
         assert_eq!(sensor_of("Temp TC 1"), Some(Sensor::Temperature));
         assert_eq!(sensor_of("Steering Angle"), Some(Sensor::Driver));
-        for n in ["Logger Temperature", "GPS Speed", "EGT Alarm_1", "Calculated_Gear", "External Voltage", "Luminosity", "Best Run Diff", "Oil Pressure Low", "ECU_ERR_FUEL_PRESS"] {
+        for n in [
+            "Logger Temperature",
+            "GPS Speed",
+            "EGT Alarm_1",
+            "Calculated_Gear",
+            "External Voltage",
+            "Luminosity",
+            "Best Run Diff",
+            "Oil Pressure Low",
+            "ECU_ERR_FUEL_PRESS",
+        ] {
             assert_eq!(sensor_of(n), None, "{n}");
         }
     }
@@ -233,12 +356,28 @@ mod tests {
     #[test]
     fn finds_stretches_nothing_was_recorded() {
         // Two channels at 10 Hz, both missing 20.0-26.8 s; a once-a-second one carries on through it.
-        let gap = |c: Channel| Channel { times_ms: c.times_ms.iter().copied().filter(|t| !(20_000..26_800).contains(t)).collect(), ..c };
+        let gap = |c: Channel| Channel {
+            times_ms: c
+                .times_ms
+                .iter()
+                .copied()
+                .filter(|t| !(20_000..26_800).contains(t))
+                .collect(),
+            ..c
+        };
         let rpm = gap(channel("RPM", vec![9000.0; 600]));
         let speed = gap(channel("GPS Speed", vec![40.0; 600]));
-        let slow = Channel { times_ms: (0..60).map(|k| k * 1000).collect(), ..channel("Logger Temperature", vec![30.0; 60]) };
-        assert_eq!(recording_gaps(&session(vec![rpm.clone(), speed, slow])), [(19_900, 26_800)]);
+        let slow = Channel {
+            times_ms: (0..60).map(|k| k * 1000).collect(),
+            ..channel("Logger Temperature", vec![30.0; 60])
+        };
+        assert_eq!(
+            recording_gaps(&session(vec![rpm.clone(), speed, slow])),
+            [(19_900, 26_800)]
+        );
         // One channel's own gap isn't one when another recorded through it.
-        assert!(recording_gaps(&session(vec![rpm, channel("GPS Speed", vec![40.0; 600])])).is_empty());
+        assert!(
+            recording_gaps(&session(vec![rpm, channel("GPS Speed", vec![40.0; 600])])).is_empty()
+        );
     }
 }

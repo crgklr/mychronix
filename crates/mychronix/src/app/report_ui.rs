@@ -27,7 +27,13 @@ impl App {
         if st.for_path != self.path {
             st.for_path = self.path.clone();
             let slow = slow_laps(session);
-            st.excluded = session.laps.iter().zip(&slow).filter(|(_, s)| **s).map(|(l, _)| l.number).collect();
+            st.excluded = session
+                .laps
+                .iter()
+                .zip(&slow)
+                .filter(|(_, s)| **s)
+                .map(|(l, _)| l.number)
+                .collect();
             st.plotted = 0;
         }
         let config = st.config.get_or_insert_with(ReportConfig::load);
@@ -36,8 +42,19 @@ impl App {
         }
         // The logger's own lap-timing channels (Prev Lap Diff, Predictive Time…) are written about once a
         // lap, against its own timing: no number per lap to show, so they're left out (and never offered).
-        let lap_timing = |name: &str| session.channels.iter().find(|c| c.name == name).is_some_and(|c| channel_group(c, false) == "Lap timing");
-        let mut columns: Vec<Column> = config.columns.iter().filter(|c| report::channel(session, &c.channel).is_some() && !lap_timing(&c.channel)).cloned().collect();
+        let lap_timing = |name: &str| {
+            session
+                .channels
+                .iter()
+                .find(|c| c.name == name)
+                .is_some_and(|c| channel_group(c, false) == "Lap timing")
+        };
+        let mut columns: Vec<Column> = config
+            .columns
+            .iter()
+            .filter(|c| report::channel(session, &c.channel).is_some() && !lap_timing(&c.channel))
+            .cloned()
+            .collect();
         // A layout picked on another logger that hardly fits this session (GPS
         // g-forces on a MyChron 4 without GPS): show the overview instead, and
         // keep the saved layout for the sessions it suits.
@@ -58,7 +75,11 @@ impl App {
             }
             ui.add_space(10.0);
             if chip(ui, "+ Column", st.adding.is_some()).clicked() {
-                st.adding = if st.adding.is_some() { None } else { Some((String::new(), Stat::Max)) };
+                st.adding = if st.adding.is_some() {
+                    None
+                } else {
+                    Some((String::new(), Stat::Max))
+                };
             }
         });
         if let Some((channel, stat)) = &mut st.adding {
@@ -66,11 +87,23 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 egui::ComboBox::from_id_salt("report_channel")
-                    .selected_text(if channel.is_empty() { "Channel…".to_string() } else { report::short_name(channel).to_string() })
+                    .selected_text(if channel.is_empty() {
+                        "Channel…".to_string()
+                    } else {
+                        report::short_name(channel).to_string()
+                    })
                     .width(220.0)
                     .show_ui(ui, |ui| {
-                        for c in session.channels.iter().filter(|c| !is_dead(c) && channel_group(c, false) != "Lap timing") {
-                            let label = if report::short_name(&c.name) != c.name { format!("{} ({})", report::short_name(&c.name), c.name) } else { c.name.clone() };
+                        for c in session
+                            .channels
+                            .iter()
+                            .filter(|c| !is_dead(c) && channel_group(c, false) != "Lap timing")
+                        {
+                            let label = if report::short_name(&c.name) != c.name {
+                                format!("{} ({})", report::short_name(&c.name), c.name)
+                            } else {
+                                c.name.clone()
+                            };
                             ui.selectable_value(channel, c.name.clone(), label);
                         }
                     });
@@ -80,7 +113,10 @@ impl App {
                     }
                 }
                 if !channel.is_empty() && button(ui, Some(Icon::Check), "Add", true).clicked() {
-                    let col = Column { channel: channel.clone(), stat: *stat };
+                    let col = Column {
+                        channel: channel.clone(),
+                        stat: *stat,
+                    };
                     if !config.columns.contains(&col) {
                         config.columns.push(col);
                         changed = true;
@@ -102,14 +138,42 @@ impl App {
             cells.push(row);
         }
         let n_cols = columns.len() + 1;
-        let included: Vec<usize> = (0..laps.len()).filter(|&i| !st.excluded.contains(&laps[i].number)).collect();
-        let summaries: Vec<Option<[f64; 4]>> =
-            (0..n_cols).map(|k| report::summary(&included.iter().filter_map(|&i| cells[i][k]).collect::<Vec<_>>())).collect();
+        let included: Vec<usize> = (0..laps.len())
+            .filter(|&i| !st.excluded.contains(&laps[i].number))
+            .collect();
+        let summaries: Vec<Option<[f64; 4]>> = (0..n_cols)
+            .map(|k| {
+                report::summary(
+                    &included
+                        .iter()
+                        .filter_map(|&i| cells[i][k])
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
         let decimals: Vec<usize> = std::iter::once(3)
-            .chain(columns.iter().map(|c| if c.stat.is_share() || c.stat == Stat::Corrections { 0 } else { report::channel(session, &c.channel).map(|ch| ch.decimals.min(2) as usize).unwrap_or(1) }))
+            .chain(columns.iter().map(|c| {
+                if c.stat.is_share() || c.stat == Stat::Corrections {
+                    0
+                } else {
+                    report::channel(session, &c.channel)
+                        .map(|ch| ch.decimals.min(2) as usize)
+                        .unwrap_or(1)
+                }
+            }))
             .collect();
         let units: Vec<String> = std::iter::once("s".to_string())
-            .chain(columns.iter().map(|c| if c.stat.is_share() { "% of lap".to_string() } else if c.stat == Stat::Corrections { "per lap".to_string() } else { report::channel(session, &c.channel).map(|ch| pretty_units(&ch.units).to_string()).unwrap_or_default() }))
+            .chain(columns.iter().map(|c| {
+                if c.stat.is_share() {
+                    "% of lap".to_string()
+                } else if c.stat == Stat::Corrections {
+                    "per lap".to_string()
+                } else {
+                    report::channel(session, &c.channel)
+                        .map(|ch| pretty_units(&ch.units).to_string())
+                        .unwrap_or_default()
+                }
+            }))
             .collect();
         let fmt = |k: usize, v: f64| match k {
             0 => format_lap_time((v * 1000.0).round() as i64),
@@ -121,18 +185,35 @@ impl App {
         let mut toggle = None;
         let mut hovered = None;
         // A column filled by speed worked out from RPM says so.
-        if columns.iter().any(|c| report::channel(session, &c.channel).is_some_and(|ch| super::is_calculated(&ch.name))) {
+        if columns.iter().any(|c| {
+            report::channel(session, &c.channel).is_some_and(|ch| super::is_calculated(&ch.name))
+        }) {
             super::calculated_note(ui);
             ui.add_space(6.0);
         }
         // The plotted column against lap number.
         let k = st.plotted.min(n_cols - 1);
-        let title = if k == 0 { "Lap time".to_string() } else { columns[k - 1].title() };
-        let pts: Vec<[f64; 2]> = included.iter().filter_map(|&i| cells[i][k].map(|v| [laps[i].number as f64, v])).collect();
-        let hot: Vec<[f64; 2]> = st.hovered_lap.and_then(|n| laps.iter().position(|l| l.number == n)).and_then(|i| cells[i][k].map(|v| vec![[laps[i].number as f64, v]])).unwrap_or_default();
+        let title = if k == 0 {
+            "Lap time".to_string()
+        } else {
+            columns[k - 1].title()
+        };
+        let pts: Vec<[f64; 2]> = included
+            .iter()
+            .filter_map(|&i| cells[i][k].map(|v| [laps[i].number as f64, v]))
+            .collect();
+        let hot: Vec<[f64; 2]> = st
+            .hovered_lap
+            .and_then(|n| laps.iter().position(|l| l.number == n))
+            .and_then(|i| cells[i][k].map(|v| vec![[laps[i].number as f64, v]]))
+            .unwrap_or_default();
         graph_card(ui, 200.0, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{title} by lap")).font(medium(14.5)).color(TEXT));
+                ui.label(
+                    RichText::new(format!("{title} by lap"))
+                        .font(medium(14.5))
+                        .color(TEXT),
+                );
                 ui.label(RichText::new(&units[k]).size(13.0).color(DIM));
             });
             Plot::new(("report_plot", k))
@@ -147,12 +228,30 @@ impl App {
                 .allow_scroll(false)
                 .show_x(false)
                 .show_y(false)
-                .x_axis_formatter(|m, _| if (m.value - m.value.round()).abs() < 1e-6 { format!("Lap {}", m.value.round()) } else { String::new() })
+                .x_axis_formatter(|m, _| {
+                    if (m.value - m.value.round()).abs() < 1e-6 {
+                        format!("Lap {}", m.value.round())
+                    } else {
+                        String::new()
+                    }
+                })
                 .show(ui, |plot| {
-                    plot.line(Line::new(title.clone(), PlotPoints::from(pts.clone())).color(SERIES[0]).width(2.0));
-                    plot.points(egui_plot::Points::new("laps", PlotPoints::from(pts)).color(SERIES[0]).radius(4.0));
+                    plot.line(
+                        Line::new(title.clone(), PlotPoints::from(pts.clone()))
+                            .color(SERIES[0])
+                            .width(2.0),
+                    );
+                    plot.points(
+                        egui_plot::Points::new("laps", PlotPoints::from(pts))
+                            .color(SERIES[0])
+                            .radius(4.0),
+                    );
                     if !hot.is_empty() {
-                        plot.points(egui_plot::Points::new("hovered", PlotPoints::from(hot)).color(TEXT).radius(7.0));
+                        plot.points(
+                            egui_plot::Points::new("hovered", PlotPoints::from(hot))
+                                .color(TEXT)
+                                .radius(7.0),
+                        );
                     }
                 });
         });
@@ -299,7 +398,9 @@ impl App {
             );
         });
         st.hovered_lap = hovered;
-        if let Some(n) = toggle && !st.excluded.remove(&n) {
+        if let Some(n) = toggle
+            && !st.excluded.remove(&n)
+        {
             st.excluded.insert(n);
         }
 
@@ -310,7 +411,8 @@ impl App {
             changed = true;
         }
         if changed && let Err(e) = config.save() {
-            self.notices.error(format!("Couldn't save the report columns: {e}"));
+            self.notices
+                .error(format!("Couldn't save the report columns: {e}"));
         }
         if let Some((i, t, k)) = to_corner {
             self.lap = Some(i);
@@ -324,10 +426,20 @@ impl App {
 impl App {
     /// The session in a few numbers across the top of Laps: the best lap, the
     /// best of every corner, consistency and pace, and an insight to look into.
-    fn laps_figures(&mut self, ui: &mut Ui, session: &Session, model: Option<&crate::corner_model::CornerModel>) {
+    fn laps_figures(
+        &mut self,
+        ui: &mut Ui,
+        session: &Session,
+        model: Option<&crate::corner_model::CornerModel>,
+    ) {
         use aim_xrk::notes::Note;
         self.open_session_notes(session);
-        let notes = self.sensors.notes.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+        let notes = self
+            .sensors
+            .notes
+            .as_ref()
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default();
         let best = session.best_lap(MIN_LAP_MS).copied();
         let mut go = None;
         ui.horizontal(|ui| {

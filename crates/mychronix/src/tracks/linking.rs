@@ -33,7 +33,12 @@ pub struct TrackOffer {
 /// same but for spaces and punctuation, 2 one inside the other ("kank" and
 /// "Kankakee Sh"); None when they're unrelated.
 pub fn name_match(typed: &str, t: &Track) -> Option<u8> {
-    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let squash = |s: &str| {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
     let names = std::iter::once(t.name.as_str()).chain(t.full_name.as_deref());
     let typed_sq = squash(typed);
     names
@@ -43,7 +48,10 @@ pub fn name_match(typed: &str, t: &Track) -> Option<u8> {
                 Some(0)
             } else if !typed_sq.is_empty() && n_sq == typed_sq {
                 Some(1)
-            } else if typed_sq.chars().count() >= 2 && (n_sq.contains(&typed_sq) || typed_sq.contains(&n_sq) && n_sq.chars().count() >= 2) {
+            } else if typed_sq.chars().count() >= 2
+                && (n_sq.contains(&typed_sq)
+                    || typed_sq.contains(&n_sq) && n_sq.chars().count() >= 2)
+            {
                 Some(2)
             } else {
                 None
@@ -56,12 +64,20 @@ impl Library {
     /// The tracks where a session was recorded (every configuration there),
     /// nearest first, with how far; none when its MyChron didn't place it.
     pub fn around(&self, s: &LocalSession) -> Vec<(usize, f64)> {
-        s.place().map(|p| self.near(p, NAMED_NEAR_M)).unwrap_or_default()
+        s.place()
+            .map(|p| self.near(p, NAMED_NEAR_M))
+            .unwrap_or_default()
     }
 
     /// Tracks within `within_m` of `place`, nearest first, with how far.
     pub fn near(&self, place: LatLon, within_m: f64) -> Vec<(usize, f64)> {
-        let mut v: Vec<(usize, f64)> = self.tracks.iter().enumerate().filter_map(|(i, t)| Some((i, t.center?.distance_m(&place)))).filter(|(_, d)| *d <= within_m).collect();
+        let mut v: Vec<(usize, f64)> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| Some((i, t.center?.distance_m(&place))))
+            .filter(|(_, d)| *d <= within_m)
+            .collect();
         v.sort_by(|a, b| a.1.total_cmp(&b.1));
         v
     }
@@ -76,13 +92,26 @@ impl Library {
             _ => f64::MAX / 2.0,
         };
         (0..self.tracks.len())
-            .filter(|&i| self.tracks[i].name.eq_ignore_ascii_case(name) || self.tracks[i].full_name.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(name)))
-            .filter(|&i| distance(&self.tracks[i]) <= NAMED_NEAR_M || distance(&self.tracks[i]) == f64::MAX / 2.0)
+            .filter(|&i| {
+                self.tracks[i].name.eq_ignore_ascii_case(name)
+                    || self.tracks[i]
+                        .full_name
+                        .as_deref()
+                        .is_some_and(|f| f.eq_ignore_ascii_case(name))
+            })
+            .filter(|&i| {
+                distance(&self.tracks[i]) <= NAMED_NEAR_M
+                    || distance(&self.tracks[i]) == f64::MAX / 2.0
+            })
             .min_by(|&a, &b| distance(&self.tracks[a]).total_cmp(&distance(&self.tracks[b])))
     }
 
     /// The track a session's MyChron recorded: by guid, else by name at the same place.
-    pub(super) fn match_track(&self, s: &SessionSummary, by_guid: &HashMap<String, usize>) -> Option<usize> {
+    pub(super) fn match_track(
+        &self,
+        s: &SessionSummary,
+        by_guid: &HashMap<String, usize>,
+    ) -> Option<usize> {
         if let Some(i) = s.track_guid.as_ref().and_then(|g| by_guid.get(g)) {
             return Some(*i);
         }
@@ -104,23 +133,48 @@ impl Library {
     ///   linked, as it already was; otherwise the tracks here now don't count
     ///   as new, except ones whose name is close to it (offered). The link is
     ///   saved.
-    pub(super) fn link_named(&mut self, session: usize, name: &str, summary: &SessionSummary, meta: &mut crate::device::SessionMeta, xrz: &Path, by_guid: &HashMap<String, usize>) -> Option<usize> {
+    pub(super) fn link_named(
+        &mut self,
+        session: usize,
+        name: &str,
+        summary: &SessionSummary,
+        meta: &mut crate::device::SessionMeta,
+        xrz: &Path,
+        by_guid: &HashMap<String, usize>,
+    ) -> Option<usize> {
         let near = self.match_by_name(name, summary);
         let place = summary.start_finish.map(|(lat, lon)| LatLon { lat, lon });
-        let around: Vec<usize> = place.map(|p| self.near(p, NAMED_NEAR_M).into_iter().map(|(i, _)| i).collect()).unwrap_or_default();
+        let around: Vec<usize> = place
+            .map(|p| {
+                self.near(p, NAMED_NEAR_M)
+                    .into_iter()
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .unwrap_or_default();
         match meta.track_guid.clone() {
             Some(g) if !g.is_empty() => by_guid.get(&g).copied().or(near),
             Some(_) => {
-                let fresh: Vec<usize> = around.into_iter().filter(|&i| !meta.track_declined.contains(&self.tracks[i].guid)).collect();
+                let fresh: Vec<usize> = around
+                    .into_iter()
+                    .filter(|&i| !meta.track_declined.contains(&self.tracks[i].guid))
+                    .collect();
                 if !fresh.is_empty() {
                     self.offer(session, name, fresh);
                 }
                 None
             }
             None => {
-                meta.track_guid = Some(near.map(|i| self.tracks[i].guid.clone()).unwrap_or_default());
+                meta.track_guid = Some(
+                    near.map(|i| self.tracks[i].guid.clone())
+                        .unwrap_or_default(),
+                );
                 if near.is_none() {
-                    meta.track_declined = around.iter().filter(|&&i| name_match(name, &self.tracks[i]).is_none()).map(|&i| self.tracks[i].guid.clone()).collect();
+                    meta.track_declined = around
+                        .iter()
+                        .filter(|&&i| name_match(name, &self.tracks[i]).is_none())
+                        .map(|&i| self.tracks[i].guid.clone())
+                        .collect();
                 }
                 if let Err(e) = meta.save(xrz) {
                     log::warn!("couldn't save the track link for {}: {e}", xrz.display());
@@ -132,7 +186,11 @@ impl Library {
 
     /// Adds `tracks` to the offer for sessions named `name`, with `session`.
     fn offer(&mut self, session: usize, name: &str, tracks: Vec<usize>) {
-        match self.offers.iter_mut().find(|o| o.typed.eq_ignore_ascii_case(name)) {
+        match self
+            .offers
+            .iter_mut()
+            .find(|o| o.typed.eq_ignore_ascii_case(name))
+        {
             Some(o) => {
                 o.sessions.push(session);
                 for i in tracks {
@@ -141,7 +199,11 @@ impl Library {
                     }
                 }
             }
-            None => self.offers.push(TrackOffer { typed: name.to_string(), sessions: vec![session], tracks }),
+            None => self.offers.push(TrackOffer {
+                typed: name.to_string(),
+                sessions: vec![session],
+                tracks,
+            }),
         }
     }
 
@@ -150,7 +212,15 @@ impl Library {
         for o in &mut self.offers {
             let place = o.sessions.first().and_then(|&i| self.sessions[i].place());
             let tracks = &self.tracks;
-            let key = |&i: &usize| (name_match(&o.typed, &tracks[i]).unwrap_or(9), place.zip(tracks[i].center).map(|(a, b)| a.distance_m(&b) as i64).unwrap_or(i64::MAX));
+            let key = |&i: &usize| {
+                (
+                    name_match(&o.typed, &tracks[i]).unwrap_or(9),
+                    place
+                        .zip(tracks[i].center)
+                        .map(|(a, b)| a.distance_m(&b) as i64)
+                        .unwrap_or(i64::MAX),
+                )
+            };
             o.tracks.sort_by_key(key);
         }
     }

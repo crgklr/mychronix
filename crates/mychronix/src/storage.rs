@@ -21,7 +21,10 @@ static UNREADABLE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Messages about damaged files, for the app to show once.
 pub fn take_warnings() -> Vec<String> {
-    WARNINGS.lock().map(|mut w| std::mem::take(&mut *w)).unwrap_or_default()
+    WARNINGS
+        .lock()
+        .map(|mut w| std::mem::take(&mut *w))
+        .unwrap_or_default()
 }
 
 fn warn(message: String) {
@@ -38,7 +41,10 @@ pub fn load<T: DeserializeOwned>(path: &Path) -> Option<T> {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
-            warn(format!("Couldn't read {}: {e}. Mychronix won't save over it until it can be read.", path.display()));
+            warn(format!(
+                "Couldn't read {}: {e}. Mychronix won't save over it until it can be read.",
+                path.display()
+            ));
             if let Ok(mut u) = UNREADABLE.lock() {
                 u.push(path.to_path_buf());
             }
@@ -51,9 +57,16 @@ pub fn load<T: DeserializeOwned>(path: &Path) -> Option<T> {
             let aside = damaged_name(path);
             let moved = std::fs::rename(path, &aside).is_ok();
             warn(if moved {
-                format!("{} was damaged ({e}). It's been kept as {} and Mychronix started that part afresh.", file_label(path), file_label(&aside))
+                format!(
+                    "{} was damaged ({e}). It's been kept as {} and Mychronix started that part afresh.",
+                    file_label(path),
+                    file_label(&aside)
+                )
             } else {
-                format!("{} is damaged ({e}) and couldn't be moved aside.", file_label(path))
+                format!(
+                    "{} is damaged ({e}) and couldn't be moved aside.",
+                    file_label(path)
+                )
             });
             None
         }
@@ -69,7 +82,10 @@ pub fn load_or_default<T: DeserializeOwned + Default>(path: Option<PathBuf>) -> 
 pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     log::debug!("saving {}", path.display());
     if UNREADABLE.lock().is_ok_and(|u| u.iter().any(|p| p == path)) && path.exists() {
-        let e = std::io::Error::other(format!("{} couldn't be read, so it wasn't saved over", file_label(path)));
+        let e = std::io::Error::other(format!(
+            "{} couldn't be read, so it wasn't saved over",
+            file_label(path)
+        ));
         log::warn!("{e}");
         return Err(e);
     }
@@ -113,24 +129,41 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
 /// it, the newest `keep` days only: for the files that hold what you typed
 /// in (drivers, karts), so a bad save can be undone.
 pub fn back_up_daily(path: &Path, keep: usize) {
-    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().map(|s| s.to_string_lossy().into_owned())) else { return };
+    let (Some(dir), Some(stem)) = (
+        path.parent(),
+        path.file_stem().map(|s| s.to_string_lossy().into_owned()),
+    ) else {
+        return;
+    };
     if !path.exists() {
         return;
     }
     let backups = dir.join("backups");
     let today = crate::dates::today();
-    let name = format!("{stem}-{:04}-{:02}-{:02}.json", today.year, today.month, today.day);
+    let name = format!(
+        "{stem}-{:04}-{:02}-{:02}.json",
+        today.year, today.month, today.day
+    );
     if backups.join(&name).exists() {
         return;
     }
-    if let Err(e) = std::fs::create_dir_all(&backups).and_then(|_| std::fs::copy(path, backups.join(&name))) {
+    if let Err(e) =
+        std::fs::create_dir_all(&backups).and_then(|_| std::fs::copy(path, backups.join(&name)))
+    {
         log::warn!("couldn't back up {}: {e}", path.display());
         return;
     }
     // Dates sort as text: drop all but the newest.
     let prefix = format!("{stem}-");
     let mut old: Vec<PathBuf> = std::fs::read_dir(&backups)
-        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix))).collect())
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+                })
+                .collect()
+        })
         .unwrap_or_default();
     old.sort();
     for p in old.iter().rev().skip(keep) {
@@ -139,14 +172,22 @@ pub fn back_up_daily(path: &Path, keep: usize) {
 }
 
 fn damaged_name(path: &Path) -> PathBuf {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let stem = path.file_name().map(|n| n.to_string_lossy().trim_end_matches(".json").to_string()).unwrap_or_default();
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stem = path
+        .file_name()
+        .map(|n| n.to_string_lossy().trim_end_matches(".json").to_string())
+        .unwrap_or_default();
     path.with_file_name(format!("{stem}.damaged-{secs}.json"))
 }
 
 /// "events.json" or "a_0035.setup.json" for messages.
 fn file_label(path: &Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 #[cfg(test)]
@@ -171,12 +212,25 @@ mod tests {
         // Damaged: moved aside, a warning recorded, and the default used.
         std::fs::write(&path, "{ not json").unwrap();
         take_warnings();
-        assert_eq!(load_or_default::<Thing>(Some(path.clone())), Thing::default());
+        assert_eq!(
+            load_or_default::<Thing>(Some(path.clone())),
+            Thing::default()
+        );
         assert!(!path.exists());
-        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains("damaged")).collect();
+        let kept: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("damaged"))
+            .collect();
         assert_eq!(kept.len(), 1);
         // Warnings are shared by tests running alongside: count this file's.
-        assert_eq!(take_warnings().iter().filter(|w| w.contains("things")).count(), 1);
+        assert_eq!(
+            take_warnings()
+                .iter()
+                .filter(|w| w.contains("things"))
+                .count(),
+            1
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -210,13 +264,26 @@ mod tests {
         save(&path, &Thing { n: 1 }).unwrap();
         std::fs::create_dir_all(dir.join("backups")).unwrap();
         for day in ["2026-01-01", "2026-01-02", "2026-01-03"] {
-            std::fs::write(dir.join("backups").join(format!("profiles-{day}.json")), "{}").unwrap();
+            std::fs::write(
+                dir.join("backups").join(format!("profiles-{day}.json")),
+                "{}",
+            )
+            .unwrap();
         }
         back_up_daily(&path, 2);
-        let mut kept: Vec<String> = std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut kept: Vec<String> = std::fs::read_dir(dir.join("backups"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         kept.sort();
         let t = crate::dates::today();
-        assert_eq!(kept, vec!["profiles-2026-01-03.json".to_string(), format!("profiles-{:04}-{:02}-{:02}.json", t.year, t.month, t.day)]);
+        assert_eq!(
+            kept,
+            vec![
+                "profiles-2026-01-03.json".to_string(),
+                format!("profiles-{:04}-{:02}-{:02}.json", t.year, t.month, t.day)
+            ]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

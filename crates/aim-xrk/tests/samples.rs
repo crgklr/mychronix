@@ -8,7 +8,10 @@ fn sample_files(dir: &Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             sample_files(&path, out);
         } else if matches!(
-            path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
+            path.extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
             Some("xrk" | "xrz")
         ) {
             out.push(path);
@@ -29,7 +32,12 @@ fn reads_sample_sessions() {
         let session = aim_xrk::Session::open(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
         assert!(!session.channels.is_empty(), "{path:?}: no channels");
         for c in &session.channels {
-            assert_eq!(c.times_ms.len(), c.values.len(), "{path:?}: channel {}", c.name);
+            assert_eq!(
+                c.times_ms.len(),
+                c.values.len(),
+                "{path:?}: channel {}",
+                c.name
+            );
         }
     }
 }
@@ -38,8 +46,17 @@ fn reads_sample_sessions() {
 #[test]
 fn summaries_and_sessions_survive_junk() {
     fn bytes(seed: u64, len: usize) -> Vec<u8> {
-        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (0..len).map(|_| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; (x >> 24) as u8 }).collect()
+        let mut x = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> 24) as u8
+            })
+            .collect()
     }
     let xri = b"<hIMEM0000000099a><hTINF0000000048a>sess_num=35|date=10/10/2026|hour=14:19:23|<TINF003379><hLAPS0000000030a>nlap=15|best=30480|<LAPS001234><IMEM000000>";
     for n in 0..xri.len() {

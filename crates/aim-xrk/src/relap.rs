@@ -35,7 +35,10 @@ pub const SAME_LINE_M: f64 = 20.0;
 
 /// Meters east and north of `(lat0, lon0)`.
 fn local(lat0: f64, lon0: f64, lat: f64, lon: f64) -> (f64, f64) {
-    ((lon - lon0) * 111_320.0 * lat0.to_radians().cos(), (lat - lat0) * 110_540.0)
+    (
+        (lon - lon0) * 111_320.0 * lat0.to_radians().cos(),
+        (lat - lat0) * 110_540.0,
+    )
 }
 
 /// A pass across the line through a start/finish point.
@@ -54,14 +57,20 @@ pub struct Crossing {
 /// speed, timed where the path crosses the line (interpolated between fixes).
 pub fn crossings(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
     let (lat0, lon0) = start_finish;
-    let xy: Vec<(f64, f64)> = gps.latitude.iter().zip(&gps.longitude).map(|(&la, &lo)| local(lat0, lon0, la, lo)).collect();
+    let xy: Vec<(f64, f64)> = gps
+        .latitude
+        .iter()
+        .zip(&gps.longitude)
+        .map(|(&la, &lo)| local(lat0, lon0, la, lo))
+        .collect();
     let n = xy.len();
     let d = |k: usize| (xy[k].0 * xy[k].0 + xy[k].1 * xy[k].1).sqrt();
     let mut out = Vec::new();
     let mut i = 1;
     while i + 1 < n {
         // A closest approach: nearer than both neighbors, inside the radius, moving.
-        if d(i) <= RADIUS_M && d(i) <= d(i - 1) && d(i) < d(i + 1) && gps.speed_kmh[i] >= MOVING_KMH {
+        if d(i) <= RADIUS_M && d(i) <= d(i - 1) && d(i) < d(i + 1) && gps.speed_kmh[i] >= MOVING_KMH
+        {
             // The line at right angles to the kart's heading through the point:
             // find where the along-track coordinate changes sign.
             let (a, b) = (xy[i - 1], xy[i + 1]);
@@ -74,8 +83,13 @@ pub fn crossings(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
                 if let Some(k) = (lo..hi).find(|&k| along(k) <= 0.0 && along(k + 1) > 0.0) {
                     let (s0, s1) = (along(k), along(k + 1));
                     let f = -s0 / (s1 - s0);
-                    let t = gps.times_ms[k] as f64 + f * (gps.times_ms[k + 1] - gps.times_ms[k]) as f64;
-                    out.push(Crossing { time_ms: t.round() as i64, heading: hy.atan2(hx), distance_m: d(i) });
+                    let t =
+                        gps.times_ms[k] as f64 + f * (gps.times_ms[k + 1] - gps.times_ms[k]) as f64;
+                    out.push(Crossing {
+                        time_ms: t.round() as i64,
+                        heading: hy.atan2(hx),
+                        distance_m: d(i),
+                    });
                 }
             }
             i += 3;
@@ -90,13 +104,28 @@ pub fn crossings(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
 /// start/finish is always crossed the same way; a spot the track passes twice
 /// is crossed two ways), at least a lap's minimum apart.
 fn lap_crossings(all: &[Crossing]) -> Vec<Crossing> {
-    let same_way = |a: f64, b: f64| (a - b + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let same_way = |a: f64, b: f64| {
+        (a - b + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+    };
     // The heading most crossings share (within 45°).
-    let main = all.iter().max_by_key(|c| all.iter().filter(|o| same_way(o.heading, c.heading).abs() < 0.785).count()).map(|c| c.heading);
+    let main = all
+        .iter()
+        .max_by_key(|c| {
+            all.iter()
+                .filter(|o| same_way(o.heading, c.heading).abs() < 0.785)
+                .count()
+        })
+        .map(|c| c.heading);
     let Some(main) = main else { return Vec::new() };
     let mut out: Vec<Crossing> = Vec::new();
-    for c in all.iter().filter(|c| same_way(c.heading, main).abs() < 0.785) {
-        if out.last().is_none_or(|last| c.time_ms - last.time_ms >= MIN_LAP_MS) {
+    for c in all
+        .iter()
+        .filter(|c| same_way(c.heading, main).abs() < 0.785)
+    {
+        if out
+            .last()
+            .is_none_or(|last| c.time_ms - last.time_ms >= MIN_LAP_MS)
+        {
             out.push(*c);
         }
     }
@@ -106,7 +135,9 @@ fn lap_crossings(all: &[Crossing]) -> Vec<Crossing> {
 /// Whether the logger's laps look untimed: one long lap, or a lap that's
 /// two or more of the others run together.
 pub fn needs_retiming(session: &Session) -> bool {
-    let Some(gps) = session.gps.as_ref().filter(|g| g.len() > 100) else { return false };
+    let Some(gps) = session.gps.as_ref().filter(|g| g.len() > 100) else {
+        return false;
+    };
     // Driving, not a warm-up on the stand: covered some ground.
     let moving = gps.speed_kmh.iter().filter(|&&v| v >= 20.0).count();
     if moving < 200 {
@@ -114,7 +145,12 @@ pub fn needs_retiming(session: &Session) -> bool {
     }
     let laps = &session.laps;
     // Out-lap and in-lap aside, the laps that should be complete.
-    let inner: Vec<i64> = laps.iter().skip(1).take(laps.len().saturating_sub(2)).map(Lap::duration_ms).collect();
+    let inner: Vec<i64> = laps
+        .iter()
+        .skip(1)
+        .take(laps.len().saturating_sub(2))
+        .map(Lap::duration_ms)
+        .collect();
     if inner.is_empty() {
         return true;
     }
@@ -130,8 +166,18 @@ pub fn needs_retiming(session: &Session) -> bool {
 /// numbers them. None when no candidate gives at least two full laps.
 pub fn retime(session: &Session, candidates: &[(f64, f64)]) -> Option<(usize, Vec<Lap>)> {
     let gps = session.gps.as_ref()?;
-    let start = session.channels.iter().filter_map(|c| c.times_ms.first()).min().copied()?;
-    let end = session.channels.iter().filter_map(|c| c.times_ms.last()).max().copied()?;
+    let start = session
+        .channels
+        .iter()
+        .filter_map(|c| c.times_ms.first())
+        .min()
+        .copied()?;
+    let end = session
+        .channels
+        .iter()
+        .filter_map(|c| c.times_ms.last())
+        .max()
+        .copied()?;
     // (candidate, crossings, laps of a typical length, how near the kart passes).
     let mut best: Option<(usize, Vec<Crossing>, usize, f64)> = None;
     for (k, &sf) in candidates.iter().enumerate() {
@@ -139,29 +185,50 @@ pub fn retime(session: &Session, candidates: &[(f64, f64)]) -> Option<(usize, Ve
         if passes.len() < 3 {
             continue;
         }
-        let mut times: Vec<i64> = passes.windows(2).map(|w| w[1].time_ms - w[0].time_ms).collect();
+        let mut times: Vec<i64> = passes
+            .windows(2)
+            .map(|w| w[1].time_ms - w[0].time_ms)
+            .collect();
         times.sort_unstable();
         // The typical lap: the lower middle one. With only a few laps, slow
         // ones (a warm-up, a stop) would otherwise make it the slow one.
         let median = times[(times.len() - 1) / 2] as f64;
         // Laps within a fifth of the typical one: real laps, not a pit stop or a spin.
-        let good = times.iter().filter(|&&t| (t as f64 - median).abs() <= median * 0.2).count();
+        let good = times
+            .iter()
+            .filter(|&&t| (t as f64 - median).abs() <= median * 0.2)
+            .count();
         if good < 2 || good * 2 < times.len() {
             continue;
         }
         let near = passes.iter().map(|c| c.distance_m).sum::<f64>() / passes.len() as f64;
         // Most laps first; between lines giving the same laps, the one driven
         // over most squarely (the track's own line, not one beside it).
-        let better = best.as_ref().is_none_or(|b| good > b.2 || (good == b.2 && near < b.3));
+        let better = best
+            .as_ref()
+            .is_none_or(|b| good > b.2 || (good == b.2 && near < b.3));
         if better {
             best = Some((k, passes, good, near));
         }
     }
     let (k, passes, _, _) = best?;
     let mut bounds = vec![start];
-    bounds.extend(passes.iter().map(|c| c.time_ms).filter(|&t| t > start && t < end));
+    bounds.extend(
+        passes
+            .iter()
+            .map(|c| c.time_ms)
+            .filter(|&t| t > start && t < end),
+    );
     bounds.push(end);
-    let laps = bounds.windows(2).enumerate().map(|(i, w)| Lap { number: i as i32 + 1, start_ms: w[0], end_ms: w[1] }).collect();
+    let laps = bounds
+        .windows(2)
+        .enumerate()
+        .map(|(i, w)| Lap {
+            number: i as i32 + 1,
+            start_ms: w[0],
+            end_ms: w[1],
+        })
+        .collect();
     Some((k, laps))
 }
 
@@ -171,7 +238,8 @@ pub fn logger_line(session: &Session) -> Option<(f64, f64)> {
     let gps = session.gps.as_ref()?;
     let lap = session.laps.get(1)?;
     let i = gps.times_ms.partition_point(|&t| t < lap.start_ms);
-    Some((*gps.latitude.get(i)?, *gps.longitude.get(i)?)).filter(|(la, lo)| *la != 0.0 || *lo != 0.0)
+    Some((*gps.latitude.get(i)?, *gps.longitude.get(i)?))
+        .filter(|(la, lo)| *la != 0.0 || *lo != 0.0)
 }
 
 /// Meters between two points (near enough for a few kilometers).
@@ -219,7 +287,8 @@ mod tests {
             let (x, y) = (R * a.sin(), R * a.cos());
             g.times_ms.push(i as i64 * 100);
             g.latitude.push(lat0 + y / 110_540.0);
-            g.longitude.push(lon0 + x / (111_320.0 * lat0.to_radians().cos()));
+            g.longitude
+                .push(lon0 + x / (111_320.0 * lat0.to_radians().cos()));
             g.speed_kmh.push(36.0);
             g.yaw_rate_dps.push(0.0);
         }
@@ -232,7 +301,10 @@ mod tests {
         let t = crossings(&circle(3), (41.0 - R / 110_540.0, -73.0));
         assert_eq!(t.len(), 3, "{t:?}");
         for (k, c) in t.iter().enumerate() {
-            assert!((c.time_ms - (10_000 + 20_000 * k as i64)).abs() <= 20, "{t:?}");
+            assert!(
+                (c.time_ms - (10_000 + 20_000 * k as i64)).abs() <= 20,
+                "{t:?}"
+            );
         }
     }
 
@@ -244,16 +316,25 @@ mod tests {
         for i in 0..1200 {
             let t = i as f64 / 10.0;
             let phase = t % 40.0;
-            let (x, y) = if phase < 20.0 { (phase * 10.0 - 100.0, 0.0) } else { (100.0 - (phase - 20.0) * 10.0, 4.0) };
+            let (x, y) = if phase < 20.0 {
+                (phase * 10.0 - 100.0, 0.0)
+            } else {
+                (100.0 - (phase - 20.0) * 10.0, 4.0)
+            };
             g.times_ms.push((t * 1000.0) as i64);
             g.latitude.push(lat0 + y / 110_540.0);
-            g.longitude.push(lon0 + x / (111_320.0 * lat0.to_radians().cos()));
+            g.longitude
+                .push(lon0 + x / (111_320.0 * lat0.to_radians().cos()));
             g.speed_kmh.push(36.0);
             g.yaw_rate_dps.push(0.0);
         }
         // The point at x = 0 is passed twice a lap, one way then the other: laps, not half-laps.
         let laps = lap_crossings(&crossings(&g, (lat0, lon0)));
-        assert!(laps.windows(2).all(|w| (w[1].time_ms - w[0].time_ms - 40_000).abs() < 100), "{laps:?}");
+        assert!(
+            laps.windows(2)
+                .all(|w| (w[1].time_ms - w[0].time_ms - 40_000).abs() < 100),
+            "{laps:?}"
+        );
     }
 
     #[test]
@@ -274,14 +355,36 @@ mod tests {
             }
             t0 += secs * 1000;
         }
-        let rpm = crate::Channel { name: "RPM".into(), group: None, units: String::new(), decimals: 0, interpolate: true, times_ms: gps.times_ms.clone(), values: vec![9000.0; gps.len()] };
-        let session = Session { info: Default::default(), channels: vec![rpm], laps: vec![Lap { number: 1, start_ms: 0, end_ms: t0 }], gps: Some(gps) };
+        let rpm = crate::Channel {
+            name: "RPM".into(),
+            group: None,
+            units: String::new(),
+            decimals: 0,
+            interpolate: true,
+            times_ms: gps.times_ms.clone(),
+            values: vec![9000.0; gps.len()],
+        };
+        let session = Session {
+            info: Default::default(),
+            channels: vec![rpm],
+            laps: vec![Lap {
+                number: 1,
+                start_ms: 0,
+                end_ms: t0,
+            }],
+            gps: Some(gps),
+        };
         // Two real laps among four: enough to trust the line. (Taking the
         // upper middle lap, 40 s, as typical counted only one.)
         let (_, laps) = retime(&session, &[(41.0 + R / 110_540.0, -73.0)]).expect("a line");
         let times: Vec<i64> = laps.iter().map(Lap::duration_ms).collect();
         assert_eq!(laps.len(), 6, "{times:?}");
-        assert!(laps[2..4].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 100), "{times:?}");
+        assert!(
+            laps[2..4]
+                .iter()
+                .all(|l| (l.duration_ms() - 20_000).abs() <= 100),
+            "{times:?}"
+        );
     }
 
     #[test]
@@ -294,8 +397,20 @@ mod tests {
         let gps = circle(5);
         let session = Session {
             info: Default::default(),
-            channels: vec![crate::Channel { name: "RPM".into(), group: None, units: String::new(), decimals: 0, interpolate: true, times_ms: gps.times_ms.clone(), values: vec![9000.0; gps.len()] }],
-            laps: vec![Lap { number: 1, start_ms: 0, end_ms: 100_000 }],
+            channels: vec![crate::Channel {
+                name: "RPM".into(),
+                group: None,
+                units: String::new(),
+                decimals: 0,
+                interpolate: true,
+                times_ms: gps.times_ms.clone(),
+                values: vec![9000.0; gps.len()],
+            }],
+            laps: vec![Lap {
+                number: 1,
+                start_ms: 0,
+                end_ms: 100_000,
+            }],
             gps: Some(gps),
         };
         // An outdated line nobody drives, then the real one.
@@ -303,7 +418,12 @@ mod tests {
         assert_eq!(k, 1);
         // Out-lap to 10 s, four 20 s laps, in-lap from 90 s.
         assert_eq!(laps.len(), 6);
-        assert!(laps[1..5].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 40), "{laps:?}");
+        assert!(
+            laps[1..5]
+                .iter()
+                .all(|l| (l.duration_ms() - 20_000).abs() <= 40),
+            "{laps:?}"
+        );
     }
 
     #[test]
@@ -312,8 +432,22 @@ mod tests {
         // The logger timed 20 s laps at the circle's top (where it starts).
         let session = Session {
             info: Default::default(),
-            channels: vec![crate::Channel { name: "RPM".into(), group: None, units: String::new(), decimals: 0, interpolate: true, times_ms: gps.times_ms.clone(), values: vec![9000.0; gps.len()] }],
-            laps: (0..5).map(|i| Lap { number: i + 1, start_ms: i as i64 * 20_000, end_ms: (i as i64 + 1) * 20_000 }).collect(),
+            channels: vec![crate::Channel {
+                name: "RPM".into(),
+                group: None,
+                units: String::new(),
+                decimals: 0,
+                interpolate: true,
+                times_ms: gps.times_ms.clone(),
+                values: vec![9000.0; gps.len()],
+            }],
+            laps: (0..5)
+                .map(|i| Lap {
+                    number: i + 1,
+                    start_ms: i as i64 * 20_000,
+                    end_ms: (i as i64 + 1) * 20_000,
+                })
+                .collect(),
             gps: Some(gps),
         };
         let top = (41.0 + R / 110_540.0, -73.0);
@@ -324,7 +458,12 @@ mod tests {
         // 20 s laps, in-lap from 90 s).
         let laps = at_picked_line(&session, (41.0 - R / 110_540.0, -73.0)).unwrap();
         assert_eq!(laps.len(), 6);
-        assert!(laps[1..5].iter().all(|l| (l.duration_ms() - 20_000).abs() <= 40), "{laps:?}");
+        assert!(
+            laps[1..5]
+                .iter()
+                .all(|l| (l.duration_ms() - 20_000).abs() <= 40),
+            "{laps:?}"
+        );
         // A line the kart never crosses leaves the logger's laps alone.
         assert!(at_picked_line(&session, (41.01, -73.0)).is_none());
     }

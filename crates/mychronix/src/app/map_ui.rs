@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use crate::corner_model::{CornerModel, Slowing, STEP_M};
+use crate::corner_model::{CornerModel, STEP_M, Slowing};
 
 const BRAKE: Color32 = theme::LOSE;
 const TRAIL: Color32 = theme::TRAIL;
@@ -51,13 +51,26 @@ pub(super) struct MapState {
 
 impl Default for MapState {
     fn default() -> Self {
-        Self { whole: false, color: ColorBy::default(), all_laps: false, satellite: false, memory: walkers::MapMemory::default(), target: None, shown: None, anim: None, legend: Vec2::ZERO }
+        Self {
+            whole: false,
+            color: ColorBy::default(),
+            all_laps: false,
+            satellite: false,
+            memory: walkers::MapMemory::default(),
+            target: None,
+            shown: None,
+            anim: None,
+            legend: Vec2::ZERO,
+        }
     }
 }
 
 /// Meters east and north of (lat0, lon0) back to a position (the inverse of the corner model's projection).
 fn to_lat_lon(lat0: f64, lon0: f64, (x, y): (f64, f64)) -> aim_track::LatLon {
-    aim_track::LatLon { lat: lat0 + y / 110_540.0, lon: lon0 + x / (111_320.0 * lat0.to_radians().cos()) }
+    aim_track::LatLon {
+        lat: lat0 + y / 110_540.0,
+        lon: lon0 + x / (111_320.0 * lat0.to_radians().cos()),
+    }
 }
 
 /// Center and zoom that fit `points` into `size` pixels. A kart track's corner
@@ -74,12 +87,17 @@ fn fit(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f
         lon0 = lon0.min(p.lon);
         lon1 = lon1.max(p.lon);
     }
-    let c = aim_track::LatLon { lat: (lat0 + lat1) / 2.0, lon: (lon0 + lon1) / 2.0 };
+    let c = aim_track::LatLon {
+        lat: (lat0 + lat1) / 2.0,
+        lon: (lon0 + lon1) / 2.0,
+    };
     let width_m = ((lon1 - lon0) * 111_320.0 * c.lat.to_radians().cos()).max(15.0);
     let height_m = ((lat1 - lat0) * 110_540.0).max(15.0);
     // Meters per pixel at zoom z (256-pixel tiles): 156543.03 × cos(lat) / 2^z.
     let mpp = (width_m / (size.x as f64 * 0.85)).max(height_m / (size.y as f64 * 0.85));
-    let zoom = (156_543.03 * c.lat.to_radians().cos() / mpp).log2().clamp(3.0, 21.5);
+    let zoom = (156_543.03 * c.lat.to_radians().cos() / mpp)
+        .log2()
+        .clamp(3.0, 21.5);
     Some((c, zoom))
 }
 
@@ -105,38 +123,72 @@ struct Overlay {
 }
 
 impl walkers::Plugin for Overlay {
-    fn run(self: Box<Self>, ui: &mut Ui, response: &egui::Response, projector: &walkers::Projector, _memory: &walkers::MapMemory) {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        response: &egui::Response,
+        projector: &walkers::Projector,
+        _memory: &walkers::MapMemory,
+    ) {
         ui.set_clip_rect(response.rect.intersect(ui.clip_rect()));
         let painter = ui.painter();
-        let to_screen = |p: &aim_track::LatLon| projector.project(walkers::lat_lon(p.lat, p.lon)).to_pos2();
+        let to_screen =
+            |p: &aim_track::LatLon| projector.project(walkers::lat_lon(p.lat, p.lon)).to_pos2();
         if let Some((middle, width_m, closed)) = &self.track {
             let pts: Vec<egui::Pos2> = middle.iter().map(to_screen).collect();
-            let px = projector.scale_pixel_per_meter(walkers::lat_lon(middle[0].lat, middle[0].lon)) * *width_m as f32;
+            let px = projector
+                .scale_pixel_per_meter(walkers::lat_lon(middle[0].lat, middle[0].lon))
+                * *width_m as f32;
             // A loop is drawn closed, so the track joins itself at start/finish.
-            let line = |pts: Vec<egui::Pos2>, stroke| if *closed { egui::Shape::closed_line(pts, stroke) } else { egui::Shape::line(pts, stroke) };
+            let line = |pts: Vec<egui::Pos2>, stroke| {
+                if *closed {
+                    egui::Shape::closed_line(pts, stroke)
+                } else {
+                    egui::Shape::line(pts, stroke)
+                }
+            };
             painter.add(line(pts.clone(), Stroke::new(px + 3.0, TRACK_EDGE)));
             painter.add(line(pts.clone(), Stroke::new(px, TRACK)));
             // Start/finish: a dashed line across the track.
             if pts.len() > 2 {
                 let d = (pts[1] - pts[0]).normalized();
                 let n = vec2(-d.y, d.x) * px / 2.0;
-                painter.extend(egui::Shape::dashed_line(&[pts[0] - n, pts[0] + n], Stroke::new(3.0, TEXT), 4.0, 4.0));
+                painter.extend(egui::Shape::dashed_line(
+                    &[pts[0] - n, pts[0] + n],
+                    Stroke::new(3.0, TEXT),
+                    4.0,
+                    4.0,
+                ));
             }
         }
         for path in &self.paths {
             let pts: Vec<egui::Pos2> = path.points.iter().map(to_screen).collect();
             if path.dashed {
-                painter.extend(egui::Shape::dashed_line(&pts, Stroke::new(path.width, path.colors[0]), 6.0, 5.0));
+                painter.extend(egui::Shape::dashed_line(
+                    &pts,
+                    Stroke::new(path.width, path.colors[0]),
+                    6.0,
+                    5.0,
+                ));
                 continue;
             }
             if path.colors.len() == 1 {
-                painter.add(egui::Shape::line(pts, Stroke::new(path.width, path.colors[0])));
+                painter.add(egui::Shape::line(
+                    pts,
+                    Stroke::new(path.width, path.colors[0]),
+                ));
                 continue;
             }
             // A dark casing so the colors read over satellite imagery.
-            painter.add(egui::Shape::line(pts.clone(), Stroke::new(path.width + 3.0, Color32::from_black_alpha(140))));
+            painter.add(egui::Shape::line(
+                pts.clone(),
+                Stroke::new(path.width + 3.0, Color32::from_black_alpha(140)),
+            ));
             for k in 0..pts.len().saturating_sub(1) {
-                painter.line_segment([pts[k], pts[k + 1]], Stroke::new(path.width, path.colors[k.min(path.colors.len() - 1)]));
+                painter.line_segment(
+                    [pts[k], pts[k + 1]],
+                    Stroke::new(path.width, path.colors[k.min(path.colors.len() - 1)]),
+                );
             }
         }
         for (number, apex, outside, on) in &self.corners {
@@ -145,10 +197,20 @@ impl walkers::Plugin for Overlay {
             let r = if *on { 13.0 } else { 11.0 };
             painter.circle_filled(c, r + 2.0, Color32::from_black_alpha(170));
             painter.circle_filled(c, r, if *on { TEXT } else { SURFACE_ACTIVE });
-            painter.text(c, egui::Align2::CENTER_CENTER, (number + 1).to_string(), semibold(12.5), if *on { ON_TEXT } else { TEXT });
+            painter.text(
+                c,
+                egui::Align2::CENTER_CENTER,
+                (number + 1).to_string(),
+                semibold(12.5),
+                if *on { ON_TEXT } else { TEXT },
+            );
             // Click and drag: a hand moves a little while pressing, and the
             // map underneath would take that as a drag and pan away.
-            let hit = ui.interact(Rect::from_center_size(c, Vec2::splat(30.0)), ui.id().with(("map_corner", number)), Sense::click_and_drag());
+            let hit = ui.interact(
+                Rect::from_center_size(c, Vec2::splat(30.0)),
+                ui.id().with(("map_corner", number)),
+                Sense::click_and_drag(),
+            );
             if hit.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -163,11 +225,16 @@ impl App {
     pub(super) fn map_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let Some(model) = self.corner_model(session) else {
             card(ui, |ui| {
-                ui.label(RichText::new("The map needs GPS for the lap, and a corner to brake for.").color(SECONDARY));
+                ui.label(
+                    RichText::new("The map needs GPS for the lap, and a corner to brake for.")
+                        .color(SECONDARY),
+                );
             });
             return;
         };
-        let Some(gps) = session.gps.as_ref() else { return };
+        let Some(gps) = session.gps.as_ref() else {
+            return;
+        };
         let (lat0, lon0) = (gps.latitude[0], gps.longitude[0]);
         // The lap looked at (the best for the whole session), and the corner, shared with Corners.
         let picked = self.lap.and_then(|i| model.trace_of(i));
@@ -179,22 +246,57 @@ impl App {
         self.corners.selected = Some((trace, corner));
         let whole = self.map_view.whole;
         // Against: the best you drove this corner, or for the whole track, the best lap.
-        let reference = if whole { model.best } else { model.best_of[corner] };
-        let rpm = session.channels.iter().find(|c| c.name == "RPM" && !is_dead(c));
+        let reference = if whole {
+            model.best
+        } else {
+            model.best_of[corner]
+        };
+        let rpm = session
+            .channels
+            .iter()
+            .find(|c| c.name == "RPM" && !is_dead(c));
         let lap = session.laps[model.traces[trace].lap];
 
-        let colors = line_colors(&model, trace, reference, self.map_view.color, rpm, lap.start_ms);
-        let latlon = |t: usize| -> Vec<aim_track::LatLon> { model.traces[t].xy.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect() };
+        let colors = line_colors(
+            &model,
+            trace,
+            reference,
+            self.map_view.color,
+            rpm,
+            lap.start_ms,
+        );
+        let latlon = |t: usize| -> Vec<aim_track::LatLon> {
+            model.traces[t]
+                .xy
+                .iter()
+                .map(|&p| to_lat_lon(lat0, lon0, p))
+                .collect()
+        };
         let mut paths = Vec::new();
         if self.map_view.all_laps {
             for t in (0..model.traces.len()).filter(|&t| model.counts[t] && t != trace) {
-                paths.push(Path { points: latlon(t), colors: vec![Color32::from_white_alpha(70)], width: 1.2, dashed: false });
+                paths.push(Path {
+                    points: latlon(t),
+                    colors: vec![Color32::from_white_alpha(70)],
+                    width: 1.2,
+                    dashed: false,
+                });
             }
         }
         if reference != trace {
-            paths.push(Path { points: latlon(reference), colors: vec![Color32::from_white_alpha(220)], width: 1.6, dashed: true });
+            paths.push(Path {
+                points: latlon(reference),
+                colors: vec![Color32::from_white_alpha(220)],
+                width: 1.6,
+                dashed: true,
+            });
         }
-        paths.push(Path { points: latlon(trace), colors, width: 4.0, dashed: false });
+        paths.push(Path {
+            points: latlon(trace),
+            colors,
+            width: 4.0,
+            dashed: false,
+        });
         let best_xy = &model.traces[model.best].xy;
         let at = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(best_xy.len() - 1);
         let corners: Vec<(usize, aim_track::LatLon, aim_track::LatLon, bool)> = model
@@ -204,15 +306,33 @@ impl App {
             .map(|(k, s)| {
                 // The number sits off the line, on the outside of the corner.
                 let i = at(s.apex);
-                let (a, b) = (best_xy[i.saturating_sub(3)], best_xy[(i + 3).min(best_xy.len() - 1)]);
+                let (a, b) = (
+                    best_xy[i.saturating_sub(3)],
+                    best_xy[(i + 3).min(best_xy.len() - 1)],
+                );
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
                 let len = (dx * dx + dy * dy).sqrt().max(1e-6);
                 let mid = best_xy[i];
-                let center = model.traces[model.best].xy.iter().fold((0.0, 0.0), |s, p| (s.0 + p.0, s.1 + p.1));
+                let center = model.traces[model.best]
+                    .xy
+                    .iter()
+                    .fold((0.0, 0.0), |s, p| (s.0 + p.0, s.1 + p.1));
                 let n = best_xy.len() as f64;
-                let out = if (mid.0 - center.0 / n) * (-dy / len) + (mid.1 - center.1 / n) * (dx / len) > 0.0 { 1.0 } else { -1.0 };
+                let out = if (mid.0 - center.0 / n) * (-dy / len)
+                    + (mid.1 - center.1 / n) * (dx / len)
+                    > 0.0
+                {
+                    1.0
+                } else {
+                    -1.0
+                };
                 let off = (mid.0 - dy / len * out, mid.1 + dx / len * out);
-                (k, to_lat_lon(lat0, lon0, mid), to_lat_lon(lat0, lon0, off), !whole && k == corner)
+                (
+                    k,
+                    to_lat_lon(lat0, lon0, mid),
+                    to_lat_lon(lat0, lon0, off),
+                    !whole && k == corner,
+                )
             })
             .collect();
         let clicked = Arc::new(Mutex::new(None));
@@ -222,15 +342,35 @@ impl App {
         let width = self.path.clone().and_then(|p| {
             let lib = self.lib();
             let t = &lib.tracks[lib.sessions.iter().find(|s| s.path == p)?.track?];
-            let set = crate::settings::get().track_widths.iter().find(|(name, _)| name.eq_ignore_ascii_case(&t.name)).map(|(_, &w)| w).filter(|w| (2.0..=40.0).contains(w));
-            Some(set.unwrap_or(if t.track_kind == aim_track::TrackKind::RaceTrack { 12.0 } else { 8.0 }))
+            let set = crate::settings::get()
+                .track_widths
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&t.name))
+                .map(|(_, &w)| w)
+                .filter(|w| (2.0..=40.0).contains(w));
+            Some(
+                set.unwrap_or(if t.track_kind == aim_track::TrackKind::RaceTrack {
+                    12.0
+                } else {
+                    8.0
+                }),
+            )
         });
         let width = width.unwrap_or(8.0);
         let track = (!self.map_view.satellite).then(|| {
             let (middle, closed) = track_shape(&model, width);
-            (middle.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect(), width, closed)
+            (
+                middle.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect(),
+                width,
+                closed,
+            )
         });
-        let overlay = Overlay { track, paths, corners, clicked: clicked.clone() };
+        let overlay = Overlay {
+            track,
+            paths,
+            corners,
+            clicked: clicked.clone(),
+        };
 
         // Where to look: the whole track, or the corner from its braking point to the next one's.
         let rect = ui.available_rect_before_wrap();
@@ -241,9 +381,14 @@ impl App {
             // From before the braking point to a little past the apex: the corner, not the straight after it.
             let s = model.segments[corner];
             let from = (s.from - 15.0).min(s.apex - 60.0);
-            (at(from)..=at((s.apex + 45.0).min(s.to))).map(|i| to_lat_lon(lat0, lon0, best_xy[i])).collect()
+            (at(from)..=at((s.apex + 45.0).min(s.to)))
+                .map(|i| to_lat_lon(lat0, lon0, best_xy[i]))
+                .collect()
         };
-        let free = vec2((rect.width() - panel_w - 40.0).max(200.0), (rect.height() - if whole { 120.0 } else { 300.0 }).max(200.0));
+        let free = vec2(
+            (rect.width() - panel_w - 40.0).max(200.0),
+            (rect.height() - if whole { 120.0 } else { 300.0 }).max(200.0),
+        );
         if let Some((c, zoom)) = fit(&view_pts, free) {
             // Keep the subject clear of the panel on the right and the trace at the bottom.
             let mpp = 156_543.03 * c.lat.to_radians().cos() / 2f64.powf(zoom);
@@ -257,9 +402,14 @@ impl App {
         let satellite = self.map_view.satellite;
         let start = walkers::lat_lon(lat0, lon0);
         let mut memory = std::mem::take(&mut self.map_view.memory);
-        ui.painter().rect_filled(ui.available_rect_before_wrap(), CornerRadius::same(theme::RADIUS), GROUND);
+        ui.painter().rect_filled(
+            ui.available_rect_before_wrap(),
+            CornerRadius::same(theme::RADIUS),
+            GROUND,
+        );
         let map = if satellite {
-            let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
+            let tiles =
+                super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
             ui.add(walkers::Map::new(Some(tiles), &mut memory, start).with_plugin(overlay))
         } else {
             ui.add(walkers::Map::new(None, &mut memory, start).with_plugin(overlay))
@@ -275,52 +425,89 @@ impl App {
         // numbers on the right, the lap bottom left with the key beside it, speed above.
         let ov = |ui: &mut Ui, at: Rect, add: &mut dyn FnMut(&mut Ui)| -> Rect {
             ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                Frame::new().fill(GLASS).stroke(Stroke::new(1.0, theme::OUTLINE)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(6)).show(ui, |ui| add(ui)).response.rect
+                Frame::new()
+                    .fill(GLASS)
+                    .stroke(Stroke::new(1.0, theme::OUTLINE))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(6))
+                    .show(ui, |ui| add(ui))
+                    .response
+                    .rect
             })
             .inner
         };
         let n = model.segments.len();
         let mut go_corner: Option<Option<usize>> = None;
-        ov(ui, Rect::from_min_size(rect.left_top() + vec2(14.0, 14.0), vec2(rect.width() * 0.55, 44.0)), &mut |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if chip(ui, "Whole track", whole).clicked() {
-                    go_corner = Some(None);
-                }
-                for k in 0..n {
-                    if chip(ui, &(k + 1).to_string(), !whole && k == corner).clicked() {
-                        go_corner = Some(Some(k));
+        ov(
+            ui,
+            Rect::from_min_size(
+                rect.left_top() + vec2(14.0, 14.0),
+                vec2(rect.width() * 0.55, 44.0),
+            ),
+            &mut |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if chip(ui, "Whole track", whole).clicked() {
+                        go_corner = Some(None);
                     }
-                }
-            });
-        });
+                    for k in 0..n {
+                        if chip(ui, &(k + 1).to_string(), !whole && k == corner).clicked() {
+                            go_corner = Some(Some(k));
+                        }
+                    }
+                });
+            },
+        );
         let mut color = self.map_view.color;
         let mut sat = satellite;
-        ov(ui, Rect::from_min_size(pos2(rect.right() - 474.0, rect.top() + 14.0), vec2(460.0, 44.0)), &mut |ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for (c, label) in [(ColorBy::Gain, "Gain / lose"), (ColorBy::Rpm, "RPM"), (ColorBy::Speed, "Speed"), (ColorBy::Slowing, "Braking · trail · lift")] {
-                    if c == ColorBy::Rpm && rpm.is_none() {
-                        continue;
+        ov(
+            ui,
+            Rect::from_min_size(
+                pos2(rect.right() - 474.0, rect.top() + 14.0),
+                vec2(460.0, 44.0),
+            ),
+            &mut |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (c, label) in [
+                        (ColorBy::Gain, "Gain / lose"),
+                        (ColorBy::Rpm, "RPM"),
+                        (ColorBy::Speed, "Speed"),
+                        (ColorBy::Slowing, "Braking · trail · lift"),
+                    ] {
+                        if c == ColorBy::Rpm && rpm.is_none() {
+                            continue;
+                        }
+                        if chip(ui, label, color == c).clicked() {
+                            color = c;
+                        }
                     }
-                    if chip(ui, label, color == c).clicked() {
-                        color = c;
-                    }
-                }
-                ui.label(RichText::new("Color the line by").size(12.5).color(DIM));
-            });
-        });
+                    ui.label(RichText::new("Color the line by").size(12.5).color(DIM));
+                });
+            },
+        );
         self.map_view.color = color;
 
         // The numbers, on the right.
-        let side = Rect::from_min_size(pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0), vec2(panel_w, rect.height() - 82.0));
+        let side = Rect::from_min_size(
+            pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0),
+            vec2(panel_w, rect.height() - 82.0),
+        );
         ov(ui, side, &mut |ui| {
             ui.set_width(panel_w - 12.0);
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 if whole {
                     whole_numbers(ui, &model, trace, &mut go_corner);
                 } else {
-                    corner_numbers(ui, &model, trace, corner, rpm, &session.laps, self.map_view.all_laps);
+                    corner_numbers(
+                        ui,
+                        &model,
+                        trace,
+                        corner,
+                        rpm,
+                        &session.laps,
+                        self.map_view.all_laps,
+                    );
                 }
             });
         });
@@ -330,77 +517,148 @@ impl App {
         let pos = laps_with.iter().position(|&t| t == trace).unwrap_or(0);
         let mut step: Option<usize> = None;
         let mut all = self.map_view.all_laps;
-        let picker = ov(ui, Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 58.0), vec2(rect.width() - panel_w - 60.0, 44.0)), &mut |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if chip(ui, "‹", false).on_hover_text("Previous lap").clicked() && pos > 0 {
-                    step = Some(laps_with[pos - 1]);
-                }
-                let tr = &model.traces[trace];
-                ui.label(RichText::new(format!("Lap {}", tr.number)).font(semibold(14.0)).color(TEXT));
-                ui.label(RichText::new(format_lap_time(lap.duration_ms())).size(13.5).color(SECONDARY));
-                if chip(ui, "›", false).on_hover_text("Next lap").clicked() && pos + 1 < laps_with.len() {
-                    step = Some(laps_with[pos + 1]);
-                }
-                ui.label(RichText::new("against").size(13.0).color(DIM));
-                let against = if reference == trace && whole {
-                    "the best of every corner (this is the best lap)".to_string()
-                } else if reference == trace {
-                    "nothing: it's your best here".to_string()
-                } else if whole {
-                    format!("lap {} (the best lap)", model.traces[reference].number)
-                } else {
-                    format!("lap {} (your best corner {})", model.traces[reference].number, corner + 1)
-                };
-                ui.label(RichText::new(against).size(13.5).color(SECONDARY)).on_hover_text("The dashed line");
-                ui.add_space(6.0);
-                if chip(ui, "All laps", all).on_hover_text("Every lap that counts, faint: how repeatable the line is").clicked() {
-                    all = !all;
-                }
-                if picked.is_none() {
-                    ui.label(RichText::new(if self.lap.is_some() { "(that lap doesn't go all the way round: showing the best)" } else { "" }).size(12.0).color(DIM));
-                }
-            });
-        });
+        let picker = ov(
+            ui,
+            Rect::from_min_size(
+                pos2(rect.left() + 14.0, rect.bottom() - 58.0),
+                vec2(rect.width() - panel_w - 60.0, 44.0),
+            ),
+            &mut |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if chip(ui, "‹", false).on_hover_text("Previous lap").clicked() && pos > 0 {
+                        step = Some(laps_with[pos - 1]);
+                    }
+                    let tr = &model.traces[trace];
+                    ui.label(
+                        RichText::new(format!("Lap {}", tr.number))
+                            .font(semibold(14.0))
+                            .color(TEXT),
+                    );
+                    ui.label(
+                        RichText::new(format_lap_time(lap.duration_ms()))
+                            .size(13.5)
+                            .color(SECONDARY),
+                    );
+                    if chip(ui, "›", false).on_hover_text("Next lap").clicked()
+                        && pos + 1 < laps_with.len()
+                    {
+                        step = Some(laps_with[pos + 1]);
+                    }
+                    ui.label(RichText::new("against").size(13.0).color(DIM));
+                    let against = if reference == trace && whole {
+                        "the best of every corner (this is the best lap)".to_string()
+                    } else if reference == trace {
+                        "nothing: it's your best here".to_string()
+                    } else if whole {
+                        format!("lap {} (the best lap)", model.traces[reference].number)
+                    } else {
+                        format!(
+                            "lap {} (your best corner {})",
+                            model.traces[reference].number,
+                            corner + 1
+                        )
+                    };
+                    ui.label(RichText::new(against).size(13.5).color(SECONDARY))
+                        .on_hover_text("The dashed line");
+                    ui.add_space(6.0);
+                    if chip(ui, "All laps", all)
+                        .on_hover_text("Every lap that counts, faint: how repeatable the line is")
+                        .clicked()
+                    {
+                        all = !all;
+                    }
+                    if picked.is_none() {
+                        ui.label(
+                            RichText::new(if self.lap.is_some() {
+                                "(that lap doesn't go all the way round: showing the best)"
+                            } else {
+                                ""
+                            })
+                            .size(12.0)
+                            .color(DIM),
+                        );
+                    }
+                });
+            },
+        );
         self.map_view.all_laps = all;
         // What the colors mean: on the bottom row, centered in the room between
         // the lap picker and the satellite switch, or above the lap picker when
         // that room is too narrow.
-        let switch = Rect::from_min_size(rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0), vec2(150.0, 44.0));
+        let switch = Rect::from_min_size(
+            rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0),
+            vec2(150.0, 44.0),
+        );
         let (room_l, room_r) = (picker.right() + 12.0, switch.left() - 12.0);
         let size = self.map_view.legend;
         let beside = size.x > 0.0 && size.x <= room_r - room_l;
         let at = if beside {
-            Rect::from_min_size(pos2((room_l + room_r - size.x) / 2.0, picker.center().y - size.y / 2.0), size + vec2(1.0, 1.0))
+            Rect::from_min_size(
+                pos2(
+                    (room_l + room_r - size.x) / 2.0,
+                    picker.center().y - size.y / 2.0,
+                ),
+                size + vec2(1.0, 1.0),
+            )
         } else {
-            Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 100.0), vec2(rect.width() - panel_w - 60.0, 36.0))
+            Rect::from_min_size(
+                pos2(rect.left() + 14.0, rect.bottom() - 100.0),
+                vec2(rect.width() - panel_w - 60.0, 36.0),
+            )
         };
-        self.map_view.legend = ov(ui, at, &mut |ui| legend(ui, color, &model, trace, rpm, lap.start_ms)).size();
+        self.map_view.legend = ov(ui, at, &mut |ui| {
+            legend(ui, color, &model, trace, rpm, lap.start_ms)
+        })
+        .size();
         // Speed through the corner, this lap against the best of it, with how the kart slowed underneath.
         if !whole {
             let above = if beside { 58.0 } else { 100.0 };
-            let at_rect = Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - above - 10.0 - 150.0), vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0));
-            ov(ui, at_rect, &mut |ui| speed_trace(ui, &model, trace, reference, corner));
+            let at_rect = Rect::from_min_size(
+                pos2(rect.left() + 14.0, rect.bottom() - above - 10.0 - 150.0),
+                vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0),
+            );
+            ov(ui, at_rect, &mut |ui| {
+                speed_trace(ui, &model, trace, reference, corner)
+            });
         }
         // Satellite imagery under the track, on or off, in the lower right.
         ov(ui, switch, &mut |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.add_space(4.0);
-                ui.label(RichText::new("Satellite").size(13.5).color(if sat { TEXT } else { SECONDARY }));
-                if toggle(ui, sat).on_hover_text("Satellite imagery under the track").clicked() {
+                ui.label(RichText::new("Satellite").size(13.5).color(if sat {
+                    TEXT
+                } else {
+                    SECONDARY
+                }));
+                if toggle(ui, sat)
+                    .on_hover_text("Satellite imagery under the track")
+                    .clicked()
+                {
                     sat = !sat;
                 }
             });
         });
         self.map_view.satellite = sat;
         if satellite {
-            ui.painter().text(switch.right_top() + vec2(-4.0, -6.0), egui::Align2::RIGHT_BOTTOM, "Imagery © Esri, Maxar, Earthstar Geographics", regular(10.5), Color32::from_white_alpha(150));
+            ui.painter().text(
+                switch.right_top() + vec2(-4.0, -6.0),
+                egui::Align2::RIGHT_BOTTOM,
+                "Imagery © Esri, Maxar, Earthstar Geographics",
+                regular(10.5),
+                Color32::from_white_alpha(150),
+            );
         }
 
         // The arrow keys step through the corners (unless they're moving a text cursor).
         let typing = ui.ctx().egui_wants_keyboard_input();
-        let (left, right) = ui.input(|i| (i.key_pressed(egui::Key::ArrowLeft) && !typing, i.key_pressed(egui::Key::ArrowRight) && !typing));
+        let (left, right) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowLeft) && !typing,
+                i.key_pressed(egui::Key::ArrowRight) && !typing,
+            )
+        });
         if right {
             go_corner = Some(Some(if whole { 0 } else { (corner + 1) % n }));
         } else if left {
@@ -425,7 +683,9 @@ impl App {
     fn map_view_move_to(&mut self, to: (f64, f64, f64), ctx: &egui::Context) {
         let st = &mut self.map_view;
         let now = ctx.input(|i| i.time);
-        let changed = st.target.is_none_or(|t| (t.0 - to.0).abs() > 1e-7 || (t.1 - to.1).abs() > 1e-7 || (t.2 - to.2).abs() > 1e-3);
+        let changed = st.target.is_none_or(|t| {
+            (t.0 - to.0).abs() > 1e-7 || (t.1 - to.1).abs() > 1e-7 || (t.2 - to.2).abs() > 1e-3
+        });
         if changed {
             let from = st.shown.unwrap_or(to);
             st.anim = Some((from, now));
@@ -434,7 +694,11 @@ impl App {
         if let Some((from, t0)) = st.anim {
             let f = ((now - t0) / 0.35).clamp(0.0, 1.0);
             let e = 1.0 - (1.0 - f).powi(3);
-            let at = (from.0 + (to.0 - from.0) * e, from.1 + (to.1 - from.1) * e, from.2 + (to.2 - from.2) * e);
+            let at = (
+                from.0 + (to.0 - from.0) * e,
+                from.1 + (to.1 - from.1) * e,
+                from.2 + (to.2 - from.2) * e,
+            );
             st.memory.center_at(walkers::lat_lon(at.0, at.1));
             let _ = st.memory.set_zoom(at.2);
             st.shown = Some(at);
@@ -448,7 +712,14 @@ impl App {
 }
 
 /// The color of each point of the lap's line.
-fn line_colors(model: &CornerModel, trace: usize, reference: usize, by: ColorBy, rpm: Option<&Channel>, start_ms: i64) -> Vec<Color32> {
+fn line_colors(
+    model: &CornerModel,
+    trace: usize,
+    reference: usize,
+    by: ColorBy,
+    rpm: Option<&Channel>,
+    start_ms: i64,
+) -> Vec<Color32> {
     let tr = &model.traces[trace];
     let n = tr.xy.len();
     match by {
@@ -470,33 +741,62 @@ fn line_colors(model: &CornerModel, trace: usize, reference: usize, by: ColorBy,
         }
         ColorBy::Speed => {
             let (lo, hi) = super::robust_range(tr.kmh.iter().copied());
-            tr.kmh.iter().map(|v| super::track_speed_color(((v - lo) / (hi - lo).max(1e-6)) as f32)).collect()
+            tr.kmh
+                .iter()
+                .map(|v| super::track_speed_color(((v - lo) / (hi - lo).max(1e-6)) as f32))
+                .collect()
         }
         ColorBy::Rpm => {
-            let Some(ch) = rpm else { return vec![theme::GOOD; n] };
+            let Some(ch) = rpm else {
+                return vec![theme::GOOD; n];
+            };
             // Where RPM wasn't recorded, gray rather than the color of a low reading.
-            let v: Vec<Option<f64>> = tr.t.iter().map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64)).collect();
+            let v: Vec<Option<f64>> =
+                tr.t.iter()
+                    .map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64))
+                    .collect();
             let (lo, hi) = super::robust_range(v.iter().flatten().copied());
-            v.iter().map(|x| x.map_or(LIFT, |x| super::rpm_color(((x - lo) / (hi - lo).max(1e-6)) as f32))).collect()
+            v.iter()
+                .map(|x| {
+                    x.map_or(LIFT, |x| {
+                        super::rpm_color(((x - lo) / (hi - lo).max(1e-6)) as f32)
+                    })
+                })
+                .collect()
         }
         ColorBy::Gain => {
             let r = &model.traces[reference];
             // How fast the gap to the reference grows (losing) or shrinks (gaining), per point.
-            let rate: Vec<f64> = (0..n).map(|j| {
-                let (a, b) = (j.saturating_sub(2), (j + 2).min(n - 1));
-                (tr.t[b] - tr.t[a]) - (r.t[b] - r.t[a])
-            }).collect();
+            let rate: Vec<f64> = (0..n)
+                .map(|j| {
+                    let (a, b) = (j.saturating_sub(2), (j + 2).min(n - 1));
+                    (tr.t[b] - tr.t[a]) - (r.t[b] - r.t[a])
+                })
+                .collect();
             // Scaled to the 95th percentile, so one spike doesn't wash the rest out.
             let mut mags: Vec<f64> = rate.iter().map(|x| x.abs()).collect();
             mags.sort_by(f64::total_cmp);
-            let scale = mags.get(mags.len() * 95 / 100).copied().unwrap_or(0.0).max(1e-6);
-            rate.iter().map(|x| super::gain_color((x / scale) as f32)).collect()
+            let scale = mags
+                .get(mags.len() * 95 / 100)
+                .copied()
+                .unwrap_or(0.0)
+                .max(1e-6);
+            rate.iter()
+                .map(|x| super::gain_color((x / scale) as f32))
+                .collect()
         }
     }
 }
 
 /// The legend for what colors the line.
-fn legend(ui: &mut Ui, by: ColorBy, model: &CornerModel, trace: usize, rpm: Option<&Channel>, start_ms: i64) {
+fn legend(
+    ui: &mut Ui,
+    by: ColorBy,
+    model: &CornerModel,
+    trace: usize,
+    rpm: Option<&Channel>,
+    start_ms: i64,
+) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         let key = |ui: &mut Ui, color: Color32, text: &str| {
@@ -508,7 +808,10 @@ fn legend(ui: &mut Ui, by: ColorBy, model: &CornerModel, trace: usize, rpm: Opti
         let ramp = |ui: &mut Ui, f: &dyn Fn(f32) -> Color32| {
             let (bar, _) = ui.allocate_exact_size(vec2(120.0, 6.0), Sense::hover());
             for j in 0..40 {
-                let r = Rect::from_min_size(pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
+                let r = Rect::from_min_size(
+                    pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()),
+                    vec2(bar.width() / 40.0 + 0.5, bar.height()),
+                );
                 ui.painter().rect_filled(r, 0.0, f(j as f32 / 39.0));
             }
         };
@@ -529,17 +832,36 @@ fn legend(ui: &mut Ui, by: ColorBy, model: &CornerModel, trace: usize, rpm: Opti
             ColorBy::Speed => {
                 let (lo, hi) = super::robust_range(model.traces[trace].kmh.iter().copied());
                 let u = crate::units::speed_unit();
-                ui.label(RichText::new(format!("{:.0} {u}", crate::units::speed(lo))).size(12.5).color(SECONDARY));
+                ui.label(
+                    RichText::new(format!("{:.0} {u}", crate::units::speed(lo)))
+                        .size(12.5)
+                        .color(SECONDARY),
+                );
                 ramp(ui, &super::track_speed_color);
-                ui.label(RichText::new(format!("{:.0} {u}", crate::units::speed(hi))).size(12.5).color(SECONDARY));
+                ui.label(
+                    RichText::new(format!("{:.0} {u}", crate::units::speed(hi)))
+                        .size(12.5)
+                        .color(SECONDARY),
+                );
             }
             ColorBy::Rpm => {
                 if let Some(ch) = rpm {
-                    let v = model.traces[trace].t.iter().filter_map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64));
+                    let v = model.traces[trace]
+                        .t
+                        .iter()
+                        .filter_map(|t| super::sample_at(ch, start_ms + (t * 1000.0) as i64));
                     let (lo, hi) = super::robust_range(v);
-                    ui.label(RichText::new(format!("{lo:.0} rpm")).size(12.5).color(SECONDARY));
+                    ui.label(
+                        RichText::new(format!("{lo:.0} rpm"))
+                            .size(12.5)
+                            .color(SECONDARY),
+                    );
                     ramp(ui, &super::rpm_color);
-                    ui.label(RichText::new(format!("{hi:.0} rpm")).size(12.5).color(SECONDARY));
+                    ui.label(
+                        RichText::new(format!("{hi:.0} rpm"))
+                            .size(12.5)
+                            .color(SECONDARY),
+                    );
                 }
             }
         }
@@ -551,12 +873,28 @@ fn whole_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, go: &mut Option
     let tr = &model.traces[trace];
     let lap_s: f64 = model.stats[trace].iter().map(|s| s.time_s).sum();
     let left = (lap_s - model.ideal_s()).max(0.0);
-    ui.label(RichText::new(format!("Lap {}", tr.number)).font(semibold(18.0)).color(TEXT));
-    ui.label(RichText::new("against the best of every corner").size(12.5).color(DIM));
+    ui.label(
+        RichText::new(format!("Lap {}", tr.number))
+            .font(semibold(18.0))
+            .color(TEXT),
+    );
+    ui.label(
+        RichText::new("against the best of every corner")
+            .size(12.5)
+            .color(DIM),
+    );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{left:.2} s")).font(semibold(22.0)).color(theme::FAVORITE));
-        ui.label(RichText::new("left on this lap").size(13.0).color(SECONDARY));
+        ui.label(
+            RichText::new(format!("{left:.2} s"))
+                .font(semibold(22.0))
+                .color(theme::FAVORITE),
+        );
+        ui.label(
+            RichText::new("left on this lap")
+                .size(13.0)
+                .color(SECONDARY),
+        );
     });
     ui.add_space(8.0);
     for k in 0..model.segments.len() {
@@ -564,38 +902,89 @@ fn whole_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, go: &mut Option
         let loss = model.loss(trace, k);
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(rect, CornerRadius::same(6), SURFACE_HOVER);
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(6), SURFACE_HOVER);
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        ui.painter().text(rect.left_center() + vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("Corner {}", k + 1), regular(13.5), TEXT);
-        let (text, color) = if best { ("best".to_string(), theme::GOOD) } else { (format!("+{loss:.2}"), if loss >= 0.005 { BRAKE } else { SECONDARY }) };
-        ui.painter().text(rect.right_center() - vec2(6.0, 0.0), egui::Align2::RIGHT_CENTER, text, medium(13.5), color);
+        ui.painter().text(
+            rect.left_center() + vec2(6.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            format!("Corner {}", k + 1),
+            regular(13.5),
+            TEXT,
+        );
+        let (text, color) = if best {
+            ("best".to_string(), theme::GOOD)
+        } else {
+            (
+                format!("+{loss:.2}"),
+                if loss >= 0.005 { BRAKE } else { SECONDARY },
+            )
+        };
+        ui.painter().text(
+            rect.right_center() - vec2(6.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            medium(13.5),
+            color,
+        );
         if resp.clicked() {
             *go = Some(Some(k));
         }
     }
     ui.add_space(8.0);
-    ui.label(RichText::new("Pick a corner to zoom in on it.").size(12.0).color(DIM));
+    ui.label(
+        RichText::new("Pick a corner to zoom in on it.")
+            .size(12.0)
+            .color(DIM),
+    );
 }
 
 /// One corner's numbers: this lap against the best you drove it, as in Corners' up close.
-fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize, rpm: Option<&Channel>, laps: &[aim_xrk::Lap], all_laps: bool) {
+fn corner_numbers(
+    ui: &mut Ui,
+    model: &CornerModel,
+    trace: usize,
+    corner: usize,
+    rpm: Option<&Channel>,
+    laps: &[aim_xrk::Lap],
+    all_laps: bool,
+) {
     let bi = model.best_of[corner];
     let own = bi == trace;
     let (a, b) = (&model.stats[trace][corner], &model.stats[bi][corner]);
     let d = a.time_s - b.time_s;
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Corner {}", corner + 1)).font(semibold(18.0)).color(TEXT));
+        ui.label(
+            RichText::new(format!("Corner {}", corner + 1))
+                .font(semibold(18.0))
+                .color(TEXT),
+        );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let text = if own { format!("lap {}: your best here", model.traces[trace].number) } else { format!("lap {} vs {}", model.traces[trace].number, model.traces[bi].number) };
+            let text = if own {
+                format!("lap {}: your best here", model.traces[trace].number)
+            } else {
+                format!(
+                    "lap {} vs {}",
+                    model.traces[trace].number, model.traces[bi].number
+                )
+            };
             ui.label(RichText::new(text).size(12.0).color(DIM));
         });
     });
     ui.horizontal(|ui| {
         if own {
-            ui.label(RichText::new("best").font(semibold(22.0)).color(theme::GOOD));
+            ui.label(
+                RichText::new("best")
+                    .font(semibold(22.0))
+                    .color(theme::GOOD),
+            );
         } else {
-            ui.label(RichText::new(format!("+{d:.2} s")).font(semibold(22.0)).color(if d >= 0.005 { BRAKE } else { SECONDARY }));
+            ui.label(
+                RichText::new(format!("+{d:.2} s"))
+                    .font(semibold(22.0))
+                    .color(if d >= 0.005 { BRAKE } else { SECONDARY }),
+            );
             ui.label(RichText::new("lost here").size(13.0).color(SECONDARY));
         }
     });
@@ -611,16 +1000,61 @@ fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize,
     let peak_g = |t: usize| {
         let s = model.segments[corner];
         let tr = &model.traces[t];
-        let (i0, i1) = ((s.from / STEP_M) as usize, ((s.to / STEP_M) as usize).min(tr.cornering.len() - 1));
-        tr.cornering[i0..=i1].iter().fold(0.0_f64, |m, g| m.max(g.abs()))
+        let (i0, i1) = (
+            (s.from / STEP_M) as usize,
+            ((s.to / STEP_M) as usize).min(tr.cornering.len() - 1),
+        );
+        tr.cornering[i0..=i1]
+            .iter()
+            .fold(0.0_f64, |m, g| m.max(g.abs()))
     };
     // (label, this lap, the best, higher is better, decimals, unit, big)
     let mut rows: Vec<(&str, f64, f64, bool, usize, String, bool)> = vec![
-        ("Entry", speed(a.entry_kmh), speed(b.entry_kmh), true, 1, su.to_string(), true),
-        ("Apex", speed(a.min_kmh), speed(b.min_kmh), true, 1, su.to_string(), true),
-        ("Down the straight", speed(a.exit_kmh), speed(b.exit_kmh), true, 1, su.to_string(), true),
-        ("Brakes at", crate::units::distance(a.brake_m), crate::units::distance(b.brake_m), true, 0, du.to_string(), false),
-        ("On the brakes", a.brake_s, b.brake_s, false, 2, "s".into(), false),
+        (
+            "Entry",
+            speed(a.entry_kmh),
+            speed(b.entry_kmh),
+            true,
+            1,
+            su.to_string(),
+            true,
+        ),
+        (
+            "Apex",
+            speed(a.min_kmh),
+            speed(b.min_kmh),
+            true,
+            1,
+            su.to_string(),
+            true,
+        ),
+        (
+            "Down the straight",
+            speed(a.exit_kmh),
+            speed(b.exit_kmh),
+            true,
+            1,
+            su.to_string(),
+            true,
+        ),
+        (
+            "Brakes at",
+            crate::units::distance(a.brake_m),
+            crate::units::distance(b.brake_m),
+            true,
+            0,
+            du.to_string(),
+            false,
+        ),
+        (
+            "On the brakes",
+            a.brake_s,
+            b.brake_s,
+            false,
+            2,
+            "s".into(),
+            false,
+        ),
     ];
     if let (Some(x), Some(y)) = (apex_rpm(trace, a), apex_rpm(bi, b)) {
         rows.push(("Apex RPM", x, y, true, 0, "".into(), false));
@@ -628,28 +1062,68 @@ fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize,
     if let (Some((x, _)), Some((y, _))) = (a.steering, b.steering) {
         rows.push(("Steering", x, y, false, 0, "°".into(), false));
     }
-    rows.push(("Cornering", peak_g(trace), peak_g(bi), true, 2, "g".into(), false));
-    egui::Grid::new(("map_numbers", corner)).num_columns(3).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        ui.label("");
-        ui.label(RichText::new(format!("LAP {}", model.traces[trace].number)).font(medium(10.5)).color(DIM));
-        ui.label(RichText::new(if own { String::new() } else { format!("LAP {}", model.traces[bi].number) }).font(medium(10.5)).color(DIM));
-        ui.end_row();
-        for (label, x, y, higher, dec, unit, big) in rows {
-            ui.label(RichText::new(label).size(13.0).color(SECONDARY));
-            let size = if big { 17.0 } else { 13.5 };
-            ui.label(RichText::new(format!("{x:.dec$} {unit}")).font(if big { semibold(size) } else { regular(size) }).color(TEXT));
-            if own {
-                ui.label("");
-            } else {
-                let worse = if higher { x < y } else { x > y };
-                let close = (x - y).abs() < 0.5 * 10f64.powi(-(dec as i32));
-                ui.label(RichText::new(format!("{y:.dec$}")).size(13.5).color(if close || !worse { DIM } else { theme::LOSE_TEXT }));
-            }
+    rows.push((
+        "Cornering",
+        peak_g(trace),
+        peak_g(bi),
+        true,
+        2,
+        "g".into(),
+        false,
+    ));
+    egui::Grid::new(("map_numbers", corner))
+        .num_columns(3)
+        .spacing(vec2(12.0, 6.0))
+        .show(ui, |ui| {
+            ui.label("");
+            ui.label(
+                RichText::new(format!("LAP {}", model.traces[trace].number))
+                    .font(medium(10.5))
+                    .color(DIM),
+            );
+            ui.label(
+                RichText::new(if own {
+                    String::new()
+                } else {
+                    format!("LAP {}", model.traces[bi].number)
+                })
+                .font(medium(10.5))
+                .color(DIM),
+            );
             ui.end_row();
-        }
-    });
+            for (label, x, y, higher, dec, unit, big) in rows {
+                ui.label(RichText::new(label).size(13.0).color(SECONDARY));
+                let size = if big { 17.0 } else { 13.5 };
+                ui.label(
+                    RichText::new(format!("{x:.dec$} {unit}"))
+                        .font(if big { semibold(size) } else { regular(size) })
+                        .color(TEXT),
+                );
+                if own {
+                    ui.label("");
+                } else {
+                    let worse = if higher { x < y } else { x > y };
+                    let close = (x - y).abs() < 0.5 * 10f64.powi(-(dec as i32));
+                    ui.label(RichText::new(format!("{y:.dec$}")).size(13.5).color(
+                        if close || !worse {
+                            DIM
+                        } else {
+                            theme::LOSE_TEXT
+                        },
+                    ));
+                }
+                ui.end_row();
+            }
+        });
     ui.add_space(8.0);
-    ui.add(egui::Label::new(RichText::new(format!("Brakes at: {du} from the start of the lap.")).size(12.0).color(DIM)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(format!("Brakes at: {du} from the start of the lap."))
+                .size(12.0)
+                .color(DIM),
+        )
+        .wrap(),
+    );
     // How repeatable the line is at the apex: the spread of where each counting lap went.
     if all_laps {
         let s = model.segments[corner];
@@ -658,21 +1132,38 @@ fn corner_numbers(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize,
         let (p, q) = (best_xy[i.saturating_sub(1)], best_xy[i + 1]);
         let (dx, dy) = (q.0 - p.0, q.1 - p.1);
         let len = (dx * dx + dy * dy).sqrt().max(1e-6);
-        let offs: Vec<f64> = (0..model.traces.len()).filter(|&t| model.counts[t]).map(|t| {
-            let a = model.traces[t].xy[i];
-            ((a.0 - best_xy[i].0) * -dy + (a.1 - best_xy[i].1) * dx) / len
-        }).collect();
+        let offs: Vec<f64> = (0..model.traces.len())
+            .filter(|&t| model.counts[t])
+            .map(|t| {
+                let a = model.traces[t].xy[i];
+                ((a.0 - best_xy[i].0) * -dy + (a.1 - best_xy[i].1) * dx) / len
+            })
+            .collect();
         if offs.len() > 1 {
             let mean = offs.iter().sum::<f64>() / offs.len() as f64;
-            let sd = (offs.iter().map(|o| (o - mean).powi(2)).sum::<f64>() / offs.len() as f64).sqrt();
+            let sd =
+                (offs.iter().map(|o| (o - mean).powi(2)).sum::<f64>() / offs.len() as f64).sqrt();
             ui.add_space(4.0);
             // In words: GPS can't tell lines much closer than half a meter apart.
-            let how = if sd < 0.5 { "was consistent" } else if sd < 1.2 { "varied a little" } else { "varied a lot" };
+            let how = if sd < 0.5 {
+                "was consistent"
+            } else if sd < 1.2 {
+                "varied a little"
+            } else {
+                "varied a lot"
+            };
             ui.add(egui::Label::new(RichText::new(format!("Across {} laps, your line at the apex {how}.", offs.len())).size(12.5).color(TEXT)).wrap())
                 .on_hover_text("From the MyChron's GPS, which can't tell lines less than about half a meter apart.");
         }
     } else {
-        ui.add(egui::Label::new(RichText::new("Turn on All laps to see how repeatable the line is here.").size(12.0).color(DIM)).wrap());
+        ui.add(
+            egui::Label::new(
+                RichText::new("Turn on All laps to see how repeatable the line is here.")
+                    .size(12.0)
+                    .color(DIM),
+            )
+            .wrap(),
+        );
     }
 }
 
@@ -684,26 +1175,85 @@ fn speed_trace(ui: &mut Ui, model: &CornerModel, trace: usize, reference: usize,
     let ks: Vec<usize> = (idx(s.from - 10.0)..=idx(s.to)).collect();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 136.0), Sense::hover());
     let plot = Rect::from_min_max(rect.min + vec2(44.0, 6.0), rect.max - vec2(6.0, 40.0));
-    let speeds = || [trace, reference].into_iter().flat_map(|t| ks.iter().map(move |&k| crate::units::speed(model.traces[t].kmh[k])));
-    let (lo, hi) = (speeds().fold(f64::MAX, f64::min) - 1.0, speeds().fold(f64::MIN, f64::max) + 1.0);
+    let speeds = || {
+        [trace, reference].into_iter().flat_map(|t| {
+            ks.iter()
+                .map(move |&k| crate::units::speed(model.traces[t].kmh[k]))
+        })
+    };
+    let (lo, hi) = (
+        speeds().fold(f64::MAX, f64::min) - 1.0,
+        speeds().fold(f64::MIN, f64::max) + 1.0,
+    );
     let x = |j: usize| plot.left() + j as f32 / (ks.len() - 1).max(1) as f32 * plot.width();
     let y = |v: f64| plot.bottom() - ((v - lo) / (hi - lo)) as f32 * plot.height();
     let p = ui.painter_at(rect);
-    p.text(pos2(rect.left(), plot.top() + 4.0), egui::Align2::LEFT_CENTER, format!("{hi:.0}"), regular(10.5), DIM);
-    p.text(pos2(rect.left(), plot.bottom()), egui::Align2::LEFT_CENTER, format!("{lo:.0}"), regular(10.5), DIM);
-    p.text(pos2(rect.left(), plot.center().y), egui::Align2::LEFT_CENTER, crate::units::speed_unit(), regular(10.5), DIM);
-    let apex_j = ks.iter().position(|&k| k >= idx(model.stats[trace][corner].min_m)).unwrap_or(0);
-    p.extend(egui::Shape::dashed_line(&[pos2(x(apex_j), plot.top()), pos2(x(apex_j), plot.bottom())], Stroke::new(1.0, DIM), 3.0, 3.0));
-    p.text(pos2(x(apex_j) + 4.0, plot.top() + 4.0), egui::Align2::LEFT_CENTER, "apex", regular(10.5), DIM);
-    let line = |t: usize| -> Vec<egui::Pos2> { ks.iter().enumerate().map(|(j, &k)| pos2(x(j), y(crate::units::speed(model.traces[t].kmh[k])))).collect() };
+    p.text(
+        pos2(rect.left(), plot.top() + 4.0),
+        egui::Align2::LEFT_CENTER,
+        format!("{hi:.0}"),
+        regular(10.5),
+        DIM,
+    );
+    p.text(
+        pos2(rect.left(), plot.bottom()),
+        egui::Align2::LEFT_CENTER,
+        format!("{lo:.0}"),
+        regular(10.5),
+        DIM,
+    );
+    p.text(
+        pos2(rect.left(), plot.center().y),
+        egui::Align2::LEFT_CENTER,
+        crate::units::speed_unit(),
+        regular(10.5),
+        DIM,
+    );
+    let apex_j = ks
+        .iter()
+        .position(|&k| k >= idx(model.stats[trace][corner].min_m))
+        .unwrap_or(0);
+    p.extend(egui::Shape::dashed_line(
+        &[pos2(x(apex_j), plot.top()), pos2(x(apex_j), plot.bottom())],
+        Stroke::new(1.0, DIM),
+        3.0,
+        3.0,
+    ));
+    p.text(
+        pos2(x(apex_j) + 4.0, plot.top() + 4.0),
+        egui::Align2::LEFT_CENTER,
+        "apex",
+        regular(10.5),
+        DIM,
+    );
+    let line = |t: usize| -> Vec<egui::Pos2> {
+        ks.iter()
+            .enumerate()
+            .map(|(j, &k)| pos2(x(j), y(crate::units::speed(model.traces[t].kmh[k]))))
+            .collect()
+    };
     if reference != trace {
-        p.extend(egui::Shape::dashed_line(&line(reference), Stroke::new(1.5, Color32::from_white_alpha(200)), 5.0, 4.0));
+        p.extend(egui::Shape::dashed_line(
+            &line(reference),
+            Stroke::new(1.5, Color32::from_white_alpha(200)),
+            5.0,
+            4.0,
+        ));
     }
-    p.add(egui::Shape::line(line(trace), Stroke::new(2.2, theme::ACCENT)));
+    p.add(egui::Shape::line(
+        line(trace),
+        Stroke::new(2.2, theme::ACCENT),
+    ));
     // How each slowed, as strips under the chart.
     for (row, t) in [trace, reference].into_iter().enumerate() {
         let top = plot.bottom() + 8.0 + row as f32 * 14.0;
-        p.text(pos2(rect.left(), top + 4.5), egui::Align2::LEFT_CENTER, format!("lap {}", model.traces[t].number), regular(10.5), DIM);
+        p.text(
+            pos2(rect.left(), top + 4.5),
+            egui::Align2::LEFT_CENTER,
+            format!("lap {}", model.traces[t].number),
+            regular(10.5),
+            DIM,
+        );
         let a = &model.stats[t][corner];
         let first = idx(a.brake_m);
         for (j, &k) in ks.iter().enumerate().take(ks.len() - 1) {
@@ -716,7 +1266,11 @@ fn speed_trace(ui: &mut Ui, model: &CornerModel, trace: usize, reference: usize,
             } else {
                 theme::GOOD
             };
-            p.rect_filled(Rect::from_min_max(pos2(x(j), top), pos2(x(j + 1) + 0.5, top + 9.0)), 0.0, c);
+            p.rect_filled(
+                Rect::from_min_max(pos2(x(j), top), pos2(x(j + 1) + 0.5, top + 9.0)),
+                0.0,
+                c,
+            );
         }
         if reference == trace {
             break;
@@ -729,7 +1283,11 @@ fn toggle(ui: &mut Ui, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(38.0, 22.0), Sense::click());
     let t = ui.ctx().animate_bool_with_time(resp.id, on, 0.12);
     let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(255), super::mix(SURFACE_ACTIVE, theme::ACCENT, t));
+    p.rect_filled(
+        rect,
+        CornerRadius::same(255),
+        super::mix(SURFACE_ACTIVE, theme::ACCENT, t),
+    );
     let x = rect.left() + 11.0 + (rect.width() - 22.0) * t;
     p.circle_filled(pos2(x, rect.center().y), 8.0, TEXT);
     if resp.hovered() {
@@ -764,7 +1322,13 @@ fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
         (0..n)
             .map(|i| {
                 // Half the gap closed from each side, faded in over k points.
-                let f = if i + k >= n { 0.5 * (i + k + 1 - n) as f64 / k as f64 } else if i < k { -0.5 * (k - i) as f64 / k as f64 } else { 0.0 };
+                let f = if i + k >= n {
+                    0.5 * (i + k + 1 - n) as f64 / k as f64
+                } else if i < k {
+                    -0.5 * (k - i) as f64 / k as f64
+                } else {
+                    0.0
+                };
                 (b[i].0 + gap.0 * f, b[i].1 + gap.1 * f)
             })
             .collect()
@@ -773,8 +1337,17 @@ fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
     };
     let best = &best;
     // Round the loop, or held at the ends of a line that isn't one.
-    let idx = |i: isize| if closed { i.rem_euclid(n as isize) as usize } else { i.clamp(0, n as isize - 1) as usize };
-    let lines: Vec<&Vec<(f64, f64)>> = (0..model.traces.len()).filter(|&t| model.counts[t] || t == model.best).map(|t| &model.traces[t].xy).collect();
+    let idx = |i: isize| {
+        if closed {
+            i.rem_euclid(n as isize) as usize
+        } else {
+            i.clamp(0, n as isize - 1) as usize
+        }
+    };
+    let lines: Vec<&Vec<(f64, f64)>> = (0..model.traces.len())
+        .filter(|&t| model.counts[t] || t == model.best)
+        .map(|t| &model.traces[t].xy)
+        .collect();
     // Of sorted values, the one `p` of the way up.
     let pct = |v: &[f64], p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
 
@@ -789,12 +1362,18 @@ fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
         let h = dir(i - 2, i + 2);
         normals.push((-h.sin(), h.cos()));
         // How sharply the line turns (1/m, left positive), over 10 m either side.
-        let d = (dir(i, i + 5) - dir(i - 5, i) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let d = (dir(i, i + 5) - dir(i - 5, i) + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
         turn.push(d / (5.0 * STEP_M));
         // Each lap's line, meters to the left of the best lap's.
         let p = best[i as usize];
         let (nx, ny) = normals[i as usize];
-        let mut offs: Vec<f64> = lines.iter().filter_map(|l| l.get(i as usize)).map(|q| (q.0 - p.0) * nx + (q.1 - p.1) * ny).collect();
+        let mut offs: Vec<f64> = lines
+            .iter()
+            .filter_map(|l| l.get(i as usize))
+            .map(|q| (q.0 - p.0) * nx + (q.1 - p.1) * ny)
+            .collect();
         offs.sort_by(f64::total_cmp);
         sides.push((pct(&offs, 0.1), pct(&offs, 0.9)));
     }
@@ -804,15 +1383,30 @@ fn track_shape(model: &CornerModel, width: f64) -> (Vec<(f64, f64)>, bool) {
         .map(|i| {
             let (lo, hi) = sides[i];
             let straight = (lo + hi) / 2.0;
-            let corner = if turn[i] > 0.0 { hi + 0.5 - width / 2.0 } else { lo - 0.5 + width / 2.0 };
+            let corner = if turn[i] > 0.0 {
+                hi + 0.5 - width / 2.0
+            } else {
+                lo - 0.5 + width / 2.0
+            };
             // Fully a corner at a 30 m radius or tighter.
             let w = (turn[i].abs() * 30.0).min(1.0);
             w * corner + (1.0 - w) * straight
         })
         .collect();
     // Smoothed (about 16 m either side), so the edges flow.
-    let smooth = |v: &[f64]| -> Vec<f64> { (0..n as isize).map(|i| (-8..=8).map(|k| v[idx(i + k)]).sum::<f64>() / 17.0).collect() };
+    let smooth = |v: &[f64]| -> Vec<f64> {
+        (0..n as isize)
+            .map(|i| (-8..=8).map(|k| v[idx(i + k)]).sum::<f64>() / 17.0)
+            .collect()
+    };
     let shift = smooth(&smooth(&shift));
-    let middle = (0..n).map(|i| (best[i].0 + normals[i].0 * shift[i], best[i].1 + normals[i].1 * shift[i])).collect();
+    let middle = (0..n)
+        .map(|i| {
+            (
+                best[i].0 + normals[i].0 * shift[i],
+                best[i].1 + normals[i].1 * shift[i],
+            )
+        })
+        .collect();
     (middle, closed)
 }

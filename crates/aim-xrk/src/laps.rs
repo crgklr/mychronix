@@ -21,7 +21,12 @@ const SLOW: f64 = 1.15;
 
 /// The median of the complete laps no shorter than `min_ms`.
 fn median_ms(session: &Session, min_ms: i64) -> Option<i64> {
-    let mut d: Vec<i64> = session.complete_laps().iter().map(Lap::duration_ms).filter(|&d| d >= min_ms).collect();
+    let mut d: Vec<i64> = session
+        .complete_laps()
+        .iter()
+        .map(Lap::duration_ms)
+        .filter(|&d| d >= min_ms)
+        .collect();
     d.sort_unstable();
     d.get(d.len() / 2).copied()
 }
@@ -36,14 +41,21 @@ pub fn shortest(session: &Session, min_ms: i64) -> i64 {
 /// count toward bests, consistency and pace.
 pub fn racing(session: &Session) -> Vec<bool> {
     let n = session.laps.len();
-    let (short, median) = (shortest(session, MIN_LAP_MS), median_ms(session, MIN_LAP_MS));
+    let (short, median) = (
+        shortest(session, MIN_LAP_MS),
+        median_ms(session, MIN_LAP_MS),
+    );
     session
         .laps
         .iter()
         .enumerate()
         .map(|(i, l)| {
             let d = l.duration_ms();
-            n >= 3 && i > 0 && i + 1 < n && d >= short && median.is_some_and(|m| d as f64 <= m as f64 * SLOW)
+            n >= 3
+                && i > 0
+                && i + 1 < n
+                && d >= short
+                && median.is_some_and(|m| d as f64 <= m as f64 * SLOW)
         })
         .collect()
 }
@@ -61,10 +73,19 @@ mod tests {
             .map(|(i, s)| {
                 let start = t;
                 t += (s * 1000.0) as i64;
-                Lap { number: i as i32, start_ms: start, end_ms: t }
+                Lap {
+                    number: i as i32,
+                    start_ms: start,
+                    end_ms: t,
+                }
             })
             .collect();
-        Session { info: SessionInfo::default(), channels: vec![], laps, gps: None }
+        Session {
+            info: SessionInfo::default(),
+            channels: vec![],
+            laps,
+            gps: None,
+        }
     }
 
     #[test]

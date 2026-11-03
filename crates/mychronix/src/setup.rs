@@ -79,8 +79,20 @@ impl From<SetupFile> for Setup {
             notes: f.notes,
             metric: f.metric,
         };
-        if s.front_size.trim().is_empty() && s.rear_size.trim().is_empty() && let Some(size) = s.tires.split_whitespace().find(|w| is_tire_size(w)).map(str::to_string) {
-            s.tires = s.tires.split_whitespace().filter(|w| *w != size).collect::<Vec<_>>().join(" ");
+        if s.front_size.trim().is_empty()
+            && s.rear_size.trim().is_empty()
+            && let Some(size) = s
+                .tires
+                .split_whitespace()
+                .find(|w| is_tire_size(w))
+                .map(str::to_string)
+        {
+            s.tires = s
+                .tires
+                .split_whitespace()
+                .filter(|w| *w != size)
+                .collect::<Vec<_>>()
+                .join(" ");
             s.front_size = size.clone();
             s.rear_size = size;
         }
@@ -91,11 +103,22 @@ impl From<SetupFile> for Setup {
 /// Whether `w` looks like a kart tire size: "10x4.60-5", "11x7.10-5", "4.50/10.0-5".
 pub fn is_tire_size(w: &str) -> bool {
     let w = w.to_lowercase();
-    (w.contains('x') || w.contains('/')) && w.contains('-') && w.chars().next().is_some_and(|c| c.is_ascii_digit())
+    (w.contains('x') || w.contains('/'))
+        && w.contains('-')
+        && w.chars().next().is_some_and(|c| c.is_ascii_digit())
 }
 
 /// Common kart tire sizes, offered in the size fields.
-pub const TIRE_SIZES: [&str; 8] = ["10x4.00-5", "10x4.50-5", "10x4.60-5", "11x5.00-5", "11x6.00-5", "11x6.50-5", "11x7.10-5", "11x7.10-6"];
+pub const TIRE_SIZES: [&str; 8] = [
+    "10x4.00-5",
+    "10x4.50-5",
+    "10x4.60-5",
+    "11x5.00-5",
+    "11x6.00-5",
+    "11x6.50-5",
+    "11x7.10-5",
+    "11x7.10-6",
+];
 
 /// How to reach one of a setup's fields.
 type Field = fn(&Setup) -> &String;
@@ -136,7 +159,9 @@ impl Setup {
 
     /// The same apart from notes.
     pub fn same_setup(&self, other: &Setup) -> bool {
-        FIELDS.iter().all(|(_, f)| f(self).trim() == f(other).trim())
+        FIELDS
+            .iter()
+            .all(|(_, f)| f(self).trim() == f(other).trim())
     }
 
     /// The units its pressures were typed in: "psi", or "bar".
@@ -151,7 +176,10 @@ impl Setup {
 
     /// What carries over to the next session (everything but notes).
     pub fn carried(&self) -> Setup {
-        Setup { notes: String::new(), ..self.clone() }
+        Setup {
+            notes: String::new(),
+            ..self.clone()
+        }
     }
 
     /// "Rear sprocket 80 → 81" for each field that differs from `before`.
@@ -160,7 +188,13 @@ impl Setup {
             .iter()
             .filter(|(_, f)| f(self).trim() != f(before).trim())
             .map(|(label, f)| {
-                let show = |v: &str| if v.trim().is_empty() { "—".to_string() } else { v.trim().to_string() };
+                let show = |v: &str| {
+                    if v.trim().is_empty() {
+                        "—".to_string()
+                    } else {
+                        v.trim().to_string()
+                    }
+                };
                 format!("{label} {} → {}", show(f(before)), show(f(self)))
             })
             .collect()
@@ -188,11 +222,17 @@ impl Setup {
         let (psi, lb) = (self.pressure_unit(), self.weight_unit());
         match (t(&self.front_psi), t(&self.rear_psi)) {
             (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} {psi}")),
-            (f, r) if !f.is_empty() || !r.is_empty() => parts.push(format!("{} / {} {psi} front/rear", or_dash(&f), or_dash(&r))),
+            (f, r) if !f.is_empty() || !r.is_empty() => parts.push(format!(
+                "{} / {} {psi} front/rear",
+                or_dash(&f),
+                or_dash(&r)
+            )),
             _ => {}
         }
         match (t(&self.weight_lb), t(&self.ballast_lb)) {
-            (w, b) if !w.is_empty() && !b.is_empty() => parts.push(format!("{w} {lb} ({b} {lb} ballast)")),
+            (w, b) if !w.is_empty() && !b.is_empty() => {
+                parts.push(format!("{w} {lb} ({b} {lb} ballast)"))
+            }
             (w, _) if !w.is_empty() => parts.push(format!("{w} {lb}")),
             (_, b) if !b.is_empty() => parts.push(format!("{b} {lb} ballast")),
             _ => {}
@@ -212,7 +252,11 @@ impl Setup {
 
     /// The rear tire's size (older sheets: the tire text, which held it).
     pub fn rear_tire(&self) -> &str {
-        if self.rear_size.trim().is_empty() { &self.tires } else { &self.rear_size }
+        if self.rear_size.trim().is_empty() {
+            &self.tires
+        } else {
+            &self.rear_size
+        }
     }
 }
 
@@ -224,7 +268,9 @@ fn or_dash(s: &str) -> &str {
 pub fn number(s: &str) -> Option<f64> {
     let start = s.find(|c: char| c.is_ascii_digit())?;
     let rest = &s[start..];
-    let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(rest.len());
     rest[..end].parse().ok().filter(|v: &f64| *v > 0.0)
 }
 
@@ -233,8 +279,14 @@ pub fn tire_diameter_in(tires: &str) -> Option<f64> {
     let lower = tires.to_lowercase();
     let x = lower.find('x')?;
     let before = lower[..x].trim_end();
-    let start = before.rfind(|c: char| !(c.is_ascii_digit() || c == '.')).map(|i| i + 1).unwrap_or(0);
-    before[start..].parse().ok().filter(|d: &f64| (6.0..=16.0).contains(d))
+    let start = before
+        .rfind(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    before[start..]
+        .parse()
+        .ok()
+        .filter(|d: &f64| (6.0..=16.0).contains(d))
 }
 
 /// Name of the speed channel worked out from RPM, for sessions without GPS.
@@ -244,7 +296,17 @@ pub const SPEED_FROM_RPM: &str = "Speed (from RPM)";
 /// about speed: about 3,500 rpm on a kart 2-stroke, lower on a 4-stroke.
 pub fn typical_clutch_rpm(engine: &str) -> f64 {
     let e = engine.to_lowercase();
-    let four_stroke = ["lo206", "briggs", "tillotson", "honda", "predator", "clone", "gx"].iter().any(|k| e.contains(k));
+    let four_stroke = [
+        "lo206",
+        "briggs",
+        "tillotson",
+        "honda",
+        "predator",
+        "clone",
+        "gx",
+    ]
+    .iter()
+    .any(|k| e.contains(k));
     if four_stroke { 2200.0 } else { 3500.0 }
 }
 
@@ -256,13 +318,22 @@ pub fn is_calculated(name: &str) -> bool {
 /// Adds speed worked out from RPM to library session `i` when it has no GPS
 /// speed: from its setup (gearing, rear tire) and its kart's engine and
 /// clutch. Before units are converted, so it's converted with the rest.
-pub fn add_speed_from_rpm(session: &mut aim_xrk::Session, lib: &Library, baselines: &Baselines, i: usize, kart: Option<&crate::profiles::Kart>) {
+pub fn add_speed_from_rpm(
+    session: &mut aim_xrk::Session,
+    lib: &Library,
+    baselines: &Baselines,
+    i: usize,
+    kart: Option<&crate::profiles::Kart>,
+) {
     if session.channel("GPS Speed").is_some() {
         return;
     }
     let engine = kart.map(|k| k.engine.clone()).unwrap_or_default();
     let clutch = kart.and_then(|k| number(&k.clutch_rpm));
-    if let Some(ch) = resolve(lib, baselines).get(i).and_then(|r| speed_from_rpm(session, &r.setup, &engine, clutch)) {
+    if let Some(ch) = resolve(lib, baselines)
+        .get(i)
+        .and_then(|r| speed_from_rpm(session, &r.setup, &engine, clutch))
+    {
         session.channels.push(ch);
     }
 }
@@ -277,14 +348,26 @@ pub fn is_shifter(engine: &str) -> bool {
 /// a session with no GPS speed on a single-gear kart; None without RPM, without
 /// that setup, or for a shifter.
 /// `clutch_rpm`: the kart's own clutch engagement, else the engine's typical one.
-pub fn speed_from_rpm(session: &aim_xrk::Session, setup: &Setup, engine: &str, clutch_rpm: Option<f64>) -> Option<aim_xrk::Channel> {
+pub fn speed_from_rpm(
+    session: &aim_xrk::Session,
+    setup: &Setup,
+    engine: &str,
+    clutch_rpm: Option<f64>,
+) -> Option<aim_xrk::Channel> {
     if session.channel("GPS Speed").is_some() || is_shifter(engine) {
         return None;
     }
     let clutch_in = clutch_rpm.unwrap_or_else(|| typical_clutch_rpm(engine));
     let per_kmh = setup.expected_rpm_per_kmh()?;
-    let rpm = session.channels.iter().find(|c| (c.name == "RPM" || c.name == "Engine") && c.values.len() > 10)?;
-    let values = rpm.values.iter().map(|&r| if r < clutch_in { 0.0 } else { r / per_kmh }).collect();
+    let rpm = session
+        .channels
+        .iter()
+        .find(|c| (c.name == "RPM" || c.name == "Engine") && c.values.len() > 10)?;
+    let values = rpm
+        .values
+        .iter()
+        .map(|&r| if r < clutch_in { 0.0 } else { r / per_kmh })
+        .collect();
     Some(aim_xrk::Channel {
         name: SPEED_FROM_RPM.into(),
         group: None,
@@ -347,7 +430,10 @@ impl Baselines {
     fn at(&self, key: &str, stamp: &str) -> (usize, Option<Setup>) {
         let past = self.past.get(key).map(Vec::as_slice).unwrap_or_default();
         let some = |s: &Setup| Some(s.clone()).filter(|s| *s != Setup::default());
-        match past.iter().position(|p| !stamp.is_empty() && stamp <= p.until.as_str()) {
+        match past
+            .iter()
+            .position(|p| !stamp.is_empty() && stamp <= p.until.as_str())
+        {
             Some(k) => (k, some(&past[k].setup)),
             None => (past.len(), self.loggers.get(key).and_then(some)),
         }
@@ -399,8 +485,21 @@ fn chronological(lib: &Library) -> Vec<usize> {
     order
 }
 
-fn resolve_with(own: &[Option<Setup>], loggers: &[String], stamps: &[String], order: &[usize], baselines: &Baselines) -> Vec<Resolved> {
-    let mut out = vec![Resolved { setup: Setup::default(), source: Source::Unknown, changes: vec![] }; own.len()];
+fn resolve_with(
+    own: &[Option<Setup>],
+    loggers: &[String],
+    stamps: &[String],
+    order: &[usize],
+    baselines: &Baselines,
+) -> Vec<Resolved> {
+    let mut out = vec![
+        Resolved {
+            setup: Setup::default(),
+            source: Source::Unknown,
+            changes: vec![]
+        };
+        own.len()
+    ];
     // Per logger: the setup in force, where it came from, and under which baseline.
     let mut current: BTreeMap<&str, (Setup, Source, usize)> = BTreeMap::new();
     for &i in order {
@@ -414,16 +513,31 @@ fn resolve_with(own: &[Option<Setup>], loggers: &[String], stamps: &[String], or
         };
         out[i] = match &own[i] {
             Some(sheet) => {
-                let changes = before.as_ref().map(|(b, _)| sheet.changes_from(b)).unwrap_or_default();
+                let changes = before
+                    .as_ref()
+                    .map(|(b, _)| sheet.changes_from(b))
+                    .unwrap_or_default();
                 current.insert(logger, (sheet.carried(), Source::From(i), era));
-                Resolved { setup: sheet.clone(), source: Source::Own, changes }
+                Resolved {
+                    setup: sheet.clone(),
+                    source: Source::Own,
+                    changes,
+                }
             }
             None => match before {
                 Some((setup, source)) => {
                     current.insert(logger, (setup.clone(), source.clone(), era));
-                    Resolved { setup, source, changes: vec![] }
+                    Resolved {
+                        setup,
+                        source,
+                        changes: vec![],
+                    }
                 }
-                None => Resolved { setup: Setup::default(), source: Source::Unknown, changes: vec![] },
+                None => Resolved {
+                    setup: Setup::default(),
+                    source: Source::Unknown,
+                    changes: vec![],
+                },
             },
         };
     }
@@ -434,13 +548,24 @@ fn resolve_with(own: &[Option<Setup>], loggers: &[String], stamps: &[String], or
 pub fn before(lib: &Library, baselines: &Baselines, i: usize) -> Setup {
     let mut own: Vec<Option<Setup>> = lib.sessions.iter().map(|s| s.setup.clone()).collect();
     own[i] = None;
-    resolve_with(&own, &keys(lib), &stamps(lib), &chronological(lib), baselines)[i].setup.carried()
+    resolve_with(
+        &own,
+        &keys(lib),
+        &stamps(lib),
+        &chronological(lib),
+        baselines,
+    )[i]
+        .setup
+        .carried()
 }
 
 /// What each session's setup carries over within: its kart (whichever
 /// MyChron it had then), or for a session on no kart, its MyChron.
 fn keys(lib: &Library) -> Vec<String> {
-    lib.sessions.iter().map(|s| s.kart.map(kart_key).unwrap_or_else(|| s.logger.clone())).collect()
+    lib.sessions
+        .iter()
+        .map(|s| s.kart.map(kart_key).unwrap_or_else(|| s.logger.clone()))
+        .collect()
 }
 
 /// The setup in force on `kart` (the kart the MyChron downloading now is
@@ -449,11 +574,16 @@ pub fn latest(lib: &Library, baselines: &Baselines, logger: &str, kart: Option<u
     let resolved = resolve(lib, baselines);
     let key = kart.map(kart_key).unwrap_or_else(|| logger.to_string());
     let keys = keys(lib);
-    let newest = chronological(lib).into_iter().rev().find(|&i| keys[i] == key);
+    let newest = chronological(lib)
+        .into_iter()
+        .rev()
+        .find(|&i| keys[i] == key);
     // A baseline changed since the newest session is what runs now.
     let now = baselines.past.get(&key).map_or(0, Vec::len);
     match newest {
-        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => Some(resolved[i].setup.carried()),
+        Some(i) if baselines.at(&key, &lib.sessions[i].start()).0 == now => {
+            Some(resolved[i].setup.carried())
+        }
         _ => baselines.loggers.get(&key).map(|b| b.carried()),
     }
     .unwrap_or_default()
@@ -469,7 +599,10 @@ pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
         .zip(&gps.speed_kmh)
         .filter(|(_, v)| **v > 30.0)
         .filter_map(|(&t, &v)| {
-            let i = rpm.times_ms.partition_point(|&x| x < t).min(rpm.values.len().checked_sub(1)?);
+            let i = rpm
+                .times_ms
+                .partition_point(|&x| x < t)
+                .min(rpm.values.len().checked_sub(1)?);
             Some(rpm.values[i] / v)
         })
         .filter(|x| x.is_finite() && *x > 0.0)
@@ -485,17 +618,34 @@ pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
 mod tests {
     #[test]
     fn old_sheets_move_the_tire_size_out_of_the_tires_text() {
-        let s: Setup = serde_json::from_str(r#"{"tires": "MG Yellow 10x4.60-5 SM2", "drive_teeth": "10"}"#).unwrap();
-        assert_eq!((s.tires.as_str(), s.front_size.as_str(), s.rear_size.as_str()), ("MG Yellow SM2", "10x4.60-5", "10x4.60-5"));
+        let s: Setup =
+            serde_json::from_str(r#"{"tires": "MG Yellow 10x4.60-5 SM2", "drive_teeth": "10"}"#)
+                .unwrap();
+        assert_eq!(
+            (
+                s.tires.as_str(),
+                s.front_size.as_str(),
+                s.rear_size.as_str()
+            ),
+            ("MG Yellow SM2", "10x4.60-5", "10x4.60-5")
+        );
         // New sheets keep what they say.
-        let s: Setup = serde_json::from_str(r#"{"tires": "MG Red", "front_size": "10x4.50-5", "rear_size": "11x7.10-5"}"#).unwrap();
+        let s: Setup = serde_json::from_str(
+            r#"{"tires": "MG Red", "front_size": "10x4.50-5", "rear_size": "11x7.10-5"}"#,
+        )
+        .unwrap();
         assert_eq!((s.tires.as_str(), s.rear_tire()), ("MG Red", "11x7.10-5"));
     }
 
     use super::*;
 
     fn gearing(drive: &str, driven: &str) -> Setup {
-        Setup { drive_teeth: drive.into(), driven_teeth: driven.into(), tires: "MG Yellow 10x4.60-5 SM2".into(), ..Default::default() }
+        Setup {
+            drive_teeth: drive.into(),
+            driven_teeth: driven.into(),
+            tires: "MG Yellow 10x4.60-5 SM2".into(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -523,12 +673,25 @@ mod tests {
     #[test]
     fn a_changed_baseline_applies_from_then_on() {
         // Three sessions on 80, then the baseline changed to 82, then two more.
-        let mut kart = crate::profiles::Kart { baseline: gearing("10", "80"), ..Default::default() };
+        let mut kart = crate::profiles::Kart {
+            baseline: gearing("10", "80"),
+            ..Default::default()
+        };
         kart.change_baseline(gearing("10", "82"), Some("2026-10-11 02:21:31".into()));
         let mut baselines = Baselines::default();
         baselines.loggers.insert("K".into(), kart.baseline.clone());
-        baselines.past.insert("K".into(), kart.past_baselines.clone());
-        let stamps: Vec<String> = ["2026-10-10 14:00:00", "2026-10-11 01:00:00", "2026-10-11 02:21:31", "2026-10-18 10:00:00", "2026-10-18 11:00:00"].map(String::from).to_vec();
+        baselines
+            .past
+            .insert("K".into(), kart.past_baselines.clone());
+        let stamps: Vec<String> = [
+            "2026-10-10 14:00:00",
+            "2026-10-11 01:00:00",
+            "2026-10-11 02:21:31",
+            "2026-10-18 10:00:00",
+            "2026-10-18 11:00:00",
+        ]
+        .map(String::from)
+        .to_vec();
         let loggers = vec!["K".to_string(); 5];
         // The second session had its own sheet (81): it carries on only until the baseline change.
         let own = vec![None, Some(gearing("10", "81")), None, None, None];
@@ -541,7 +704,10 @@ mod tests {
         assert_eq!(kart.past_baselines.len(), 1);
         assert_eq!(kart.past_baselines[0].setup.driven_teeth, "80");
         // A kart with no sessions yet just takes the new baseline.
-        let mut fresh = crate::profiles::Kart { baseline: gearing("10", "80"), ..Default::default() };
+        let mut fresh = crate::profiles::Kart {
+            baseline: gearing("10", "80"),
+            ..Default::default()
+        };
         fresh.change_baseline(gearing("10", "82"), None);
         assert!(fresh.past_baselines.is_empty());
     }
@@ -567,10 +733,15 @@ mod tests {
     #[test]
     fn a_sheet_keeps_the_units_it_was_typed_in() {
         // Every sheet from before units were kept was typed in psi and lb.
-        let old: Setup = serde_json::from_str(r#"{ "front_psi": "10", "weight_lb": "250" }"#).unwrap();
+        let old: Setup =
+            serde_json::from_str(r#"{ "front_psi": "10", "weight_lb": "250" }"#).unwrap();
         assert_eq!((old.pressure_unit(), old.weight_unit()), ("psi", "lb"));
         assert!(!serde_json::to_string(&old).unwrap().contains("metric"));
-        let metric = Setup { front_psi: "0.7".into(), metric: true, ..Default::default() };
+        let metric = Setup {
+            front_psi: "0.7".into(),
+            metric: true,
+            ..Default::default()
+        };
         let back: Setup = serde_json::from_str(&serde_json::to_string(&metric).unwrap()).unwrap();
         assert_eq!((back.pressure_unit(), back.weight_unit()), ("bar", "kg"));
         assert!(back.carried().metric);

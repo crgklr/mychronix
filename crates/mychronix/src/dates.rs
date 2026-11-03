@@ -4,8 +4,29 @@
 
 use aim_xrk::summary::Date;
 
-const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const DAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
 
 /// "Oct".
 pub fn short_month(m: u8) -> &'static str {
@@ -35,7 +56,13 @@ pub fn day_numeric(d: Date) -> String {
 
 /// "Saturday, October 17, 2026".
 pub fn long(d: Date) -> String {
-    format!("{}, {} {}, {}", DAYS[weekday(d)], MONTHS[(d.month.clamp(1, 12) - 1) as usize], d.day, d.year)
+    format!(
+        "{}, {} {}, {}",
+        DAYS[weekday(d)],
+        MONTHS[(d.month.clamp(1, 12) - 1) as usize],
+        d.day,
+        d.year
+    )
 }
 
 /// "Oct 17" from a session start like "2026-10-17 14:19:05" ("" when it isn't one).
@@ -57,7 +84,11 @@ pub fn stamp_words(stamp: &str) -> String {
 fn stamp_date(stamp: &str) -> Option<Date> {
     let mut p = stamp.get(..10)?.split('-').map(|x| x.parse::<u16>().ok());
     let (year, month, day) = (p.next()??, p.next()??, p.next()??);
-    (1..=12).contains(&month).then_some(Date { year, month: month as u8, day: day as u8 })
+    (1..=12).contains(&month).then_some(Date {
+        year,
+        month: month as u8,
+        day: day as u8,
+    })
 }
 
 /// Days since 1970-01-01 (Howard Hinnant's days_from_civil).
@@ -95,20 +126,32 @@ pub fn week_start(d: Date) -> Date {
 /// Today on this computer's clock (local time: a race-day evening is still that day).
 pub fn today() -> Date {
     let d = jiff::Zoned::now().date();
-    Date { year: d.year() as u16, month: d.month() as u8, day: d.day() as u8 }
+    Date {
+        year: d.year() as u16,
+        month: d.month() as u8,
+        day: d.day() as u8,
+    }
 }
 
 /// "10/17/2026" as written in the US, or "2026-10-17" (also "2026-10-7").
 pub fn parse_date(s: &str) -> Option<Date> {
     let s = s.trim();
-    let (sep, us) = if s.contains('/') { ('/', true) } else { ('-', false) };
+    let (sep, us) = if s.contains('/') {
+        ('/', true)
+    } else {
+        ('-', false)
+    };
     let mut p = s.split(sep).map(|x| x.trim().parse::<u16>().ok());
     let (a, b, c) = (p.next()??, p.next()??, p.next()??);
     let (year, month, day) = if us { (c, a, b) } else { (a, b, c) };
     if p.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1990 {
         return None;
     }
-    let d = Date { year, month: month as u8, day: day as u8 };
+    let d = Date {
+        year,
+        month: month as u8,
+        day: day as u8,
+    };
     // Reject days the month doesn't have (e.g. 31 September).
     (from_days(days(d)) == d).then_some(d)
 }
@@ -130,12 +173,19 @@ pub fn clock_time(t: &str) -> String {
 
 fn format_time(t: &str, h24: bool) -> String {
     let mut p = t.split(':');
-    let (Some(Ok(h)), Some(m)) = (p.next().map(|h| h.trim().parse::<u32>()), p.next()) else { return t.to_string() };
+    let (Some(Ok(h)), Some(m)) = (p.next().map(|h| h.trim().parse::<u32>()), p.next()) else {
+        return t.to_string();
+    };
     let m = m.get(..2).unwrap_or(m);
     if h24 {
         return format!("{h:02}:{m}");
     }
-    let (h12, ampm) = match h { 0 => (12, "AM"), 1..=11 => (h, "AM"), 12 => (12, "PM"), _ => (h - 12, "PM") };
+    let (h12, ampm) = match h {
+        0 => (12, "AM"),
+        1..=11 => (h, "AM"),
+        12 => (12, "PM"),
+        _ => (h - 12, "PM"),
+    };
     format!("{h12}:{m} {ampm}")
 }
 
@@ -153,7 +203,12 @@ mod tests {
 
     #[test]
     fn days_round_trip() {
-        for date in [d(1970, 1, 1), d(2000, 2, 29), d(2026, 10, 10), d(2026, 12, 31)] {
+        for date in [
+            d(1970, 1, 1),
+            d(2000, 2, 29),
+            d(2026, 10, 10),
+            d(2026, 12, 31),
+        ] {
             assert_eq!(from_days(days(date)), date);
         }
         assert_eq!(days(d(1970, 1, 2)), 1);
@@ -186,14 +241,32 @@ mod tests {
 
     #[test]
     fn dates_read_the_same_everywhere() {
-        let d = Date { year: 2026, month: 10, day: 31 };
+        let d = Date {
+            year: 2026,
+            month: 10,
+            day: 31,
+        };
         assert_eq!(long(d), "Saturday, October 31, 2026");
         assert_eq!(us_short(d), "Oct 31, 2026");
         assert_eq!(month_day(d), "Oct 31");
         assert_eq!(day_month_day(d), "Sat, Oct 31");
         assert_eq!(day_numeric(d), "Sat 10/31");
         assert_eq!(stamp_month_day("2026-10-31 08:58:10"), "Oct 31");
-        assert_eq!(long(Date { year: 2024, month: 2, day: 29 }), "Thursday, February 29, 2024");
-        assert_eq!(long(Date { year: 2000, month: 1, day: 1 }), "Saturday, January 1, 2000");
+        assert_eq!(
+            long(Date {
+                year: 2024,
+                month: 2,
+                day: 29
+            }),
+            "Thursday, February 29, 2024"
+        );
+        assert_eq!(
+            long(Date {
+                year: 2000,
+                month: 1,
+                day: 1
+            }),
+            "Saturday, January 1, 2000"
+        );
     }
 }

@@ -26,7 +26,9 @@ impl Favorites {
         if !self.guids.remove(guid) {
             self.guids.insert(guid.to_string());
         }
-        let Some(path) = Self::path() else { return Ok(()) };
+        let Some(path) = Self::path() else {
+            return Ok(());
+        };
         crate::storage::save(&path, self)
     }
 }

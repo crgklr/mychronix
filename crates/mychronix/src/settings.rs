@@ -40,7 +40,16 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { units: None, clock: None, weather: true, update_check: true, aim_tracks: true, mcp: false, track_widths: Default::default(), other: Default::default() }
+        Self {
+            units: None,
+            clock: None,
+            weather: true,
+            update_check: true,
+            aim_tracks: true,
+            mcp: false,
+            track_widths: Default::default(),
+            other: Default::default(),
+        }
     }
 }
 
@@ -68,7 +77,8 @@ pub fn change(f: impl FnOnce(&mut Settings)) -> std::io::Result<()> {
     if let Ok(mut g) = SETTINGS.write() {
         *g = Some(s.clone());
     }
-    let path = crate::paths::data("settings.json").ok_or_else(|| std::io::Error::other("no home folder"))?;
+    let path = crate::paths::data("settings.json")
+        .ok_or_else(|| std::io::Error::other("no home folder"))?;
     log::info!("settings changed: {s:?}");
     crate::storage::save(&path, &s)
 }
@@ -84,14 +94,26 @@ fn apply(s: &Settings) {
         Some("24") => true,
         Some("12") => false,
         // 12-hour where it's the everyday clock, 24-hour elsewhere.
-        _ => !matches!(crate::countries::system_country().as_deref(), Some("US") | Some("CA") | Some("AU") | Some("NZ") | Some("PH") | Some("IN") | Some("EG") | Some("SA")),
+        _ => !matches!(
+            crate::countries::system_country().as_deref(),
+            Some("US")
+                | Some("CA")
+                | Some("AU")
+                | Some("NZ")
+                | Some("PH")
+                | Some("IN")
+                | Some("EG")
+                | Some("SA")
+        ),
     };
     CLOCK_24.store(h24, Ordering::Relaxed);
     crate::units::set(s.units.as_deref());
 }
 
 fn load() -> Settings {
-    let Some(path) = crate::paths::data("settings.json") else { return Settings::default() };
+    let Some(path) = crate::paths::data("settings.json") else {
+        return Settings::default();
+    };
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Settings::default(),
@@ -130,6 +152,9 @@ mod tests {
     fn unknown_settings_survive_a_save() {
         let s = parse(r#"{ "weather": false, "maps": false }"#).unwrap();
         let back = serde_json::to_string(&s).unwrap();
-        assert!(back.contains(r#""maps":false"#) && back.contains(r#""weather":false"#), "{back}");
+        assert!(
+            back.contains(r#""maps":false"#) && back.contains(r#""weather":false"#),
+            "{back}"
+        );
     }
 }

@@ -32,12 +32,17 @@ fn parts(file: &[u8]) -> Result<Parts<'_>> {
     }
     let mut pos = 8;
     let mut take = || -> Result<&[u8]> {
-        let n = u32::from_le_bytes(file.get(pos..pos + 4).ok_or_else(bad)?.try_into().unwrap()) as usize;
+        let n = u32::from_le_bytes(file.get(pos..pos + 4).ok_or_else(bad)?.try_into().unwrap())
+            as usize;
         let part = file.get(pos + 4..pos + 4 + n).ok_or_else(bad)?;
         pos += 4 + n;
         Ok(part)
     };
-    Ok(Parts { header: take()?, laps: take()?, data: take()? })
+    Ok(Parts {
+        header: take()?,
+        laps: take()?,
+        data: take()?,
+    })
 }
 
 fn u16_at(b: &[u8], o: usize) -> Option<u16> {
@@ -45,13 +50,22 @@ fn u16_at(b: &[u8], o: usize) -> Option<u16> {
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    b.get(o..o + 4)
+        .map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
 }
 
 fn text_at(b: &[u8], o: usize, max: usize) -> Option<String> {
     let s = b.get(o..(o + max).min(b.len()))?;
-    let end = s.iter().position(|&c| c == 0 || c == 0xFF).unwrap_or(s.len());
-    let t: String = s[..end].iter().map(|&c| c as char).collect::<String>().trim().to_string();
+    let end = s
+        .iter()
+        .position(|&c| c == 0 || c == 0xFF)
+        .unwrap_or(s.len());
+    let t: String = s[..end]
+        .iter()
+        .map(|&c| c as char)
+        .collect::<String>()
+        .trim()
+        .to_string();
     (!t.is_empty()).then_some(t)
 }
 
@@ -69,7 +83,12 @@ struct Def {
 }
 
 const fn def(num: u8, freq: u8, sensor: u16, name: &'static str) -> Def {
-    Def { num, freq, sensor, name }
+    Def {
+        num,
+        freq,
+        sensor,
+        name,
+    }
 }
 
 /// RaceStudio 2's default channels for each MyChron 4 model and expansion.
@@ -112,7 +131,12 @@ fn defs(code: u16) -> &'static [Def] {
         def(12, 2, 600, "EboxAnalog3"),
     ];
     // The channels expansion.
-    const CHANNELS: [Def; 4] = [def(96, 2, 600, "M4ChExp1"), def(97, 2, 600, "M4ChExp2"), def(98, 2, 600, "M4ChExp3"), def(99, 2, 600, "M4ChExp4")];
+    const CHANNELS: [Def; 4] = [
+        def(96, 2, 600, "M4ChExp1"),
+        def(97, 2, 600, "M4ChExp2"),
+        def(98, 2, 600, "M4ChExp3"),
+        def(99, 2, 600, "M4ChExp4"),
+    ];
     // The 660 (drag racing): 50 Hz, exhaust and head temperatures; the
     // "Europe" version (20001) has a speed input where the 660 has SHAFT.
     const M4_660: [Def; 8] = [
@@ -163,7 +187,10 @@ fn recorded(h: &[u8]) -> Vec<Def> {
             0 | 2 | 3 => true,
             1 => b(0x0E) & 2 != 0,
             19 => matches!(model, 59 | 60 | 104 | 107) && b(0x0F) & 1 != 0,
-            20 => matches!(model, 59 | 60) || (matches!(model, 101 | 104 | 106 | 107) && flags16 & 0x200 != 0),
+            20 => {
+                matches!(model, 59 | 60)
+                    || (matches!(model, 101 | 104 | 106 | 107) && flags16 & 0x200 != 0)
+            }
             13 | 15 => (firmware > 0x3126 || matches!(model, 59 | 60)) && b(0x10) & 2 != 0,
             4 => expansion > 101 && b(0x0E) & 1 != 0,
             5 => expansion > 101 && b(0x0E) & 0x80 != 0,
@@ -178,12 +205,20 @@ fn recorded(h: &[u8]) -> Vec<Def> {
         }
     };
     // A 660 on newer firmware without bit 0 of byte 0x11 is the Europe version.
-    let base = if matches!(model, 59 | 60) && firmware > 0x4203 && b(0x11) & 1 == 0 { 20001 } else { model };
+    let base = if matches!(model, 59 | 60) && firmware > 0x4203 && b(0x11) & 1 == 0 {
+        20001
+    } else {
+        model
+    };
     let mut codes = vec![base, expansion];
     if b(0x10) & 0x10 != 0 {
         codes.push(108);
     }
-    let mut v: Vec<Def> = codes.iter().flat_map(|&c| defs(c).iter().copied()).filter(|d| on(d.num)).collect();
+    let mut v: Vec<Def> = codes
+        .iter()
+        .flat_map(|&c| defs(c).iter().copied())
+        .filter(|d| on(d.num))
+        .collect();
     v.sort_by_key(|d| d.num);
     v.dedup_by_key(|d| d.num);
     v
@@ -200,7 +235,9 @@ fn cycle_order(chans: &[Def]) -> Vec<usize> {
     for (k, c) in chans.iter().enumerate() {
         let Some(hz) = rate_hz(c.freq) else { continue };
         let step = (1000 / hz) as f32 * per_ms;
-        let Some(first) = slots.iter().position(|s| s.is_none()) else { break };
+        let Some(first) = slots.iter().position(|s| s.is_none()) else {
+            break;
+        };
         slots[first] = Some(k);
         placed[k] = 1;
         let mut pos = first as f32;
@@ -251,9 +288,16 @@ fn samples(h: &[u8], data: &[u8]) -> Result<Samples> {
     let chans = recorded(h);
     let order = cycle_order(&chans);
     if order.is_empty() {
-        return Err(Error::Parse("this MyChron 4 run lists no channels Mychronix knows".into()));
+        return Err(Error::Parse(
+            "this MyChron 4 run lists no channels Mychronix knows".into(),
+        ));
     }
-    let w: Vec<u16> = data.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
+    let w: Vec<u16> = data
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| u16::from_le_bytes(c))
+        .collect();
     let mut raw = vec![Vec::new(); chans.len()];
     let (mut i, mut slot) = (0usize, 0usize);
     let (mut markers, mut misplaced) = (0usize, 0usize);
@@ -316,8 +360,14 @@ pub fn read_imd(file: &[u8]) -> Result<Session> {
     }
     let header = file.get(0x14000..0x14100).ok_or_else(bad)?;
     // Lap records run from the lap address to the data address (+136, +140).
-    let (laps_at, data_at) = (u32_at(header, 136).ok_or_else(bad)?, u32_at(header, 140).ok_or_else(bad)?);
-    let lap_bytes = data_at.checked_sub(laps_at).filter(|&n| n % 64 == 0 && n <= 0x30000).ok_or_else(bad)? as usize;
+    let (laps_at, data_at) = (
+        u32_at(header, 136).ok_or_else(bad)?,
+        u32_at(header, 140).ok_or_else(bad)?,
+    );
+    let lap_bytes = data_at
+        .checked_sub(laps_at)
+        .filter(|&n| n % 64 == 0 && n <= 0x30000)
+        .ok_or_else(bad)? as usize;
     let laps = file.get(0x20000..0x20000 + lap_bytes).ok_or_else(bad)?;
     let data_len = u32_at(header, 150).ok_or_else(bad)? as usize;
     let data = file.get(0x50000..).ok_or_else(bad)?;
@@ -332,16 +382,31 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
     let mut laps = Vec::new();
     let mut t = 0i64;
     for (k, rec) in p.laps.as_chunks::<64>().0.iter().enumerate() {
-        let Some(cs) = u32_at(rec, 4).filter(|&c| c > 0 && c < 0x7FFF_FFFF) else { continue };
+        let Some(cs) = u32_at(rec, 4).filter(|&c| c > 0 && c < 0x7FFF_FFFF) else {
+            continue;
+        };
         let ms = cs as i64 * 10;
-        laps.push(Lap { number: k as i32 + 1, start_ms: t, end_ms: t + ms });
+        laps.push(Lap {
+            number: k as i32 + 1,
+            start_ms: t,
+            end_ms: t + ms,
+        });
         t += ms;
     }
 
     let s = samples(h, p.data)?;
     // Nominal sample times, scaled to the laps when they cover the run.
-    let span = s.chans.iter().zip(&s.raw).filter_map(|(c, r)| Some(r.len() as f64 * 1000.0 / rate_hz(c.freq)? as f64)).fold(0.0, f64::max);
-    let stretch = if span > 0.0 && t > 0 { (t as f64 / span).clamp(0.95, 1.05) } else { 1.0 };
+    let span = s
+        .chans
+        .iter()
+        .zip(&s.raw)
+        .filter_map(|(c, r)| Some(r.len() as f64 * 1000.0 / rate_hz(c.freq)? as f64))
+        .fold(0.0, f64::max);
+    let stretch = if span > 0.0 && t > 0 {
+        (t as f64 / span).clamp(0.95, 1.05)
+    } else {
+        1.0
+    };
     let channels: Vec<Channel> = s
         .chans
         .iter()
@@ -356,7 +421,15 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
                 .filter(|(_, r)| !unplugged && !is_error(**r))
                 .map(|(i, &r)| ((i as f64 * step * stretch).round() as i64, sc.apply(r)))
                 .unzip();
-            Some(Channel { name: c.name.into(), group: None, units: sc.units.into(), decimals: sc.decimals, interpolate: true, times_ms, values })
+            Some(Channel {
+                name: c.name.into(),
+                group: None,
+                units: sc.units.into(),
+                decimals: sc.decimals,
+                interpolate: true,
+                times_ms,
+                values,
+            })
         })
         .collect();
 
@@ -365,8 +438,18 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
     let stamp = h.get(0x9A..0xA1);
     let (date, time) = match stamp {
         Some(b) if bcd(b[3]) > 0 && bcd(b[5]) > 0 => (
-            Some(format!("{:02}/{:02}/{}", bcd(b[5]), bcd(b[3]), 2000 + bcd(b[6]))),
-            Some(format!("{:02}:{:02}:{:02}", bcd(b[2]), bcd(b[1]), bcd(b[0]))),
+            Some(format!(
+                "{:02}/{:02}/{}",
+                bcd(b[5]),
+                bcd(b[3]),
+                2000 + bcd(b[6])
+            )),
+            Some(format!(
+                "{:02}:{:02}:{:02}",
+                bcd(b[2]),
+                bcd(b[1]),
+                bcd(b[0])
+            )),
         ),
         _ => (None, None),
     };
@@ -379,7 +462,9 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
         device: Some("MyChron 4".into()),
         logger_id: u32_at(h, 0x78).filter(|&n| n > 0),
         logger_model_id: u16_at(h, 0x7C),
-        logger_model: u16_at(h, 0x7C).and_then(crate::mychron_model).map(str::to_string),
+        logger_model: u16_at(h, 0x7C)
+            .and_then(crate::mychron_model)
+            .map(str::to_string),
         vehicle: None,
         imu_mount: None,
         laps_from_gps: None,
@@ -387,21 +472,46 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
     if channels.iter().all(|c| c.values.is_empty()) && laps.is_empty() {
         return Err(Error::Parse("the downloaded run holds no data".into()));
     }
-    Ok(Session { info, channels, laps, gps: None })
+    Ok(Session {
+        info,
+        channels,
+        laps,
+        gps: None,
+    })
 }
 
 /// The list-view summary of a `.mc4` or `.imd`.
 pub fn summary(path: &std::path::Path) -> Result<crate::summary::SessionSummary> {
     let bytes = std::fs::read(path)?;
-    let s = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("imd")) { read_imd(&bytes)? } else { read(&bytes)? };
+    let s = if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("imd"))
+    {
+        read_imd(&bytes)?
+    } else {
+        read(&bytes)?
+    };
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned());
     let date = s.info.date.as_deref().and_then(|d| {
         let p: Vec<u32> = d.split('/').filter_map(|x| x.parse().ok()).collect();
-        (p.len() == 3).then(|| crate::summary::Date { year: p[2] as u16, month: p[0] as u8, day: p[1] as u8 })
+        (p.len() == 3).then(|| crate::summary::Date {
+            year: p[2] as u16,
+            month: p[0] as u8,
+            day: p[1] as u8,
+        })
     });
     let best = s.best_lap(crate::laps::MIN_LAP_MS);
-    let duration = s.channels.iter().filter_map(|c| c.times_ms.last()).max().copied().max(s.laps.last().map(|l| l.end_ms));
-    let max_rpm = s.channel("Engine").and_then(|c| c.values.iter().copied().reduce(f64::max)).map(|v| v as u32);
+    let duration = s
+        .channels
+        .iter()
+        .filter_map(|c| c.times_ms.last())
+        .max()
+        .copied()
+        .max(s.laps.last().map(|l| l.end_ms));
+    let max_rpm = s
+        .channel("Engine")
+        .and_then(|c| c.values.iter().copied().reduce(f64::max))
+        .map(|v| v as u32);
     Ok(crate::summary::SessionSummary {
         number: file.as_deref().and_then(crate::summary::session_number),
         file,
@@ -467,7 +577,10 @@ mod tests {
         assert_eq!(s.channels.len(), 4);
         assert_eq!(s.info.date.as_deref(), Some("09/19/2026"));
         assert_eq!(s.info.time.as_deref(), Some("07:31:51"));
-        assert_eq!((s.info.logger_id, s.info.driver.as_deref()), (Some(123456), Some("ANN")));
+        assert_eq!(
+            (s.info.logger_id, s.info.driver.as_deref()),
+            (Some(123456), Some("ANN"))
+        );
         assert_eq!(s.laps[0].duration_ms(), 2000);
     }
 
@@ -485,7 +598,10 @@ mod tests {
 
     fn names(h: &[u8]) -> Vec<&'static str> {
         let chans = recorded(h);
-        cycle_order(&chans).into_iter().map(|k| chans[k].name).collect()
+        cycle_order(&chans)
+            .into_iter()
+            .map(|k| chans[k].name)
+            .collect()
     }
 
     #[test]
@@ -493,7 +609,17 @@ mod tests {
         // RPM, temperature, logger temperature, battery, then nine RPM/temperature pairs.
         let n = names(&header(106, 0, 0x02, 0, 0, 0));
         assert_eq!(n.len(), 22);
-        assert_eq!(&n[..6], &["Engine", "Temperature", "Datalogger_Temp", "Battery", "Engine", "Temperature"]);
+        assert_eq!(
+            &n[..6],
+            &[
+                "Engine",
+                "Temperature",
+                "Datalogger_Temp",
+                "Battery",
+                "Engine",
+                "Temperature"
+            ]
+        );
         assert!(n[4..].chunks(2).all(|p| p == ["Engine", "Temperature"]));
     }
 
@@ -502,14 +628,56 @@ mod tests {
         // 2T with a second temperature, lambda and the channels expansion (inputs 1 and 3).
         let chans = recorded(&header(107, 0, 0x02, 0x01, 0x12, 0b0101));
         let got: Vec<_> = chans.iter().map(|c| c.name).collect();
-        assert_eq!(got, ["Engine", "Temp_1", "Datalogger_Temp", "Battery", "Lambda", "Lambda_Temp", "Temp_2", "M4ChExp1", "M4ChExp3"]);
+        assert_eq!(
+            got,
+            [
+                "Engine",
+                "Temp_1",
+                "Datalogger_Temp",
+                "Battery",
+                "Lambda",
+                "Lambda_Temp",
+                "Temp_2",
+                "M4ChExp1",
+                "M4ChExp3"
+            ]
+        );
         // 7 channels at 10 Hz and 2 at 1 Hz: 72 samples a second, slow ones in the first frame.
         let n = names(&header(107, 0, 0x02, 0x01, 0x12, 0b0101));
         assert_eq!(n.len(), 72);
-        assert_eq!(&n[..9], &["Engine", "Temp_1", "Datalogger_Temp", "Battery", "Lambda", "Lambda_Temp", "Temp_2", "M4ChExp1", "M4ChExp3"]);
+        assert_eq!(
+            &n[..9],
+            &[
+                "Engine",
+                "Temp_1",
+                "Datalogger_Temp",
+                "Battery",
+                "Lambda",
+                "Lambda_Temp",
+                "Temp_2",
+                "M4ChExp1",
+                "M4ChExp3"
+            ]
+        );
         // Extreme expansion box: speed, gear, lateral g and the box temperatures.
-        let got: Vec<_> = recorded(&header(106, 103, 0x8F, 0, 0, 0)).iter().map(|c| c.name).collect();
-        assert_eq!(got, ["Engine", "Temperature", "Datalogger_Temp", "Battery", "Speed", "Calculated_Gear", "LatAcc", "EBoxTemp1", "EBoxTemp2"]);
+        let got: Vec<_> = recorded(&header(106, 103, 0x8F, 0, 0, 0))
+            .iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(
+            got,
+            [
+                "Engine",
+                "Temperature",
+                "Datalogger_Temp",
+                "Battery",
+                "Speed",
+                "Calculated_Gear",
+                "LatAcc",
+                "EBoxTemp1",
+                "EBoxTemp2"
+            ]
+        );
     }
 
     #[test]
@@ -548,7 +716,9 @@ mod tests {
         let h = header(106, 0, 0x02, 0, 0, 0);
         let chans = recorded(&h);
         let order = cycle_order(&chans);
-        let announce = [0xD401u16, 0x0B00, 0x1234, 0x5678, 0x9ABC, 0x0001, 0x0002, 0x0003, 0x0004];
+        let announce = [
+            0xD401u16, 0x0B00, 0x1234, 0x5678, 0x9ABC, 0x0001, 0x0002, 0x0003, 0x0004,
+        ];
         let mut w: Vec<u16> = announce.to_vec();
         for cycle in 0..4u16 {
             if cycle > 0 {
@@ -557,7 +727,13 @@ mod tests {
             if cycle == 2 {
                 w.extend(announce);
             }
-            w.extend(order.iter().map(|&k| if chans[k].name == "Engine" { 7000 + cycle } else { 2400 }));
+            w.extend(order.iter().map(|&k| {
+                if chans[k].name == "Engine" {
+                    7000 + cycle
+                } else {
+                    2400
+                }
+            }));
         }
         let data: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
         let s = read(&file(&h, &[], &data)).unwrap();
@@ -574,7 +750,10 @@ mod tests {
         let n = names(&h);
         assert_eq!(n.iter().filter(|&&c| c == "RPM").count(), 50);
         assert_eq!(n.iter().filter(|&&c| c == "LoggerT").count(), 1);
-        assert_eq!(&n[..6], &["RPM", "EGT", "LoggerT", "Battery", "CHT", "SHAFT"]);
+        assert_eq!(
+            &n[..6],
+            &["RPM", "EGT", "LoggerT", "Battery", "CHT", "SHAFT"]
+        );
         // Newer firmware: the Europe version, with speed instead of SHAFT.
         let mut h = header(60, 0, 0x02, 0x01, 0, 0);
         h[0x76..0x78].copy_from_slice(&[0x59, 0x32]);

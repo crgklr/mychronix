@@ -29,11 +29,22 @@ impl Beacon {
     pub fn parse(address: Ipv4Addr, round_trip: Duration, raw: Vec<u8>) -> Result<Self, Error> {
         // u32 length at 0 (0xec = 236), the logger's IPv4 at 8 (big-endian),
         // and the logger id at 96 inside the record that starts "idn" at 84.
-        if raw.len() < 100 || u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize != raw.len() {
-            return Err(Error::Protocol(format!("unexpected aim-ka reply of {} bytes", raw.len())));
+        if raw.len() < 100
+            || u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize != raw.len()
+        {
+            return Err(Error::Protocol(format!(
+                "unexpected aim-ka reply of {} bytes",
+                raw.len()
+            )));
         }
-        let logger_id = (&raw[84..87] == b"idn").then(|| u32::from_le_bytes(raw[96..100].try_into().unwrap()));
-        Ok(Self { address, logger_id, round_trip, raw })
+        let logger_id =
+            (&raw[84..87] == b"idn").then(|| u32::from_le_bytes(raw[96..100].try_into().unwrap()));
+        Ok(Self {
+            address,
+            logger_id,
+            round_trip,
+            raw,
+        })
     }
 }
 
@@ -51,13 +62,23 @@ pub fn probe(target: Ipv4Addr, timeout: Duration) -> Result<Beacon, Error> {
     loop {
         let sent = Instant::now();
         socket.send_to(PING, SocketAddrV4::new(target, DISCOVERY_PORT))?;
-        socket.set_read_timeout(Some(Duration::from_millis(500).min(deadline.saturating_duration_since(sent).max(Duration::from_millis(1)))))?;
+        socket.set_read_timeout(Some(
+            Duration::from_millis(500).min(
+                deadline
+                    .saturating_duration_since(sent)
+                    .max(Duration::from_millis(1)),
+            ),
+        ))?;
         match socket.recv_from(&mut buf) {
             Ok((n, std::net::SocketAddr::V4(from))) if *from.ip() == target => {
                 return Beacon::parse(*from.ip(), sent.elapsed(), buf[..n].to_vec());
             }
             Ok(_) => {}
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
             Err(e) => return Err(e.into()),
         }
         if Instant::now() >= deadline {
@@ -83,7 +104,12 @@ mod tests {
 
     #[test]
     fn parses_logger_id() {
-        let b = Beacon::parse(AP_ADDRESS, Duration::from_millis(3), sample_reply(12_345_678)).unwrap();
+        let b = Beacon::parse(
+            AP_ADDRESS,
+            Duration::from_millis(3),
+            sample_reply(12_345_678),
+        )
+        .unwrap();
         assert_eq!(b.logger_id, Some(12_345_678));
     }
 

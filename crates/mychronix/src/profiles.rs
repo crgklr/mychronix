@@ -66,8 +66,18 @@ pub fn parse_birthday(s: &str) -> Option<aim_xrk::summary::Date> {
         return Some(d);
     }
     let mut parts = s.split('/').map(|p| p.trim().parse::<u32>().ok());
-    let (Some(Some(m)), Some(Some(d)), Some(Some(y)), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return None };
-    ((1..=12).contains(&m) && (1..=31).contains(&d) && (1900..=2100).contains(&y)).then_some(aim_xrk::summary::Date { year: y as u16, month: m as u8, day: d as u8 })
+    let (Some(Some(m)), Some(Some(d)), Some(Some(y)), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+    ((1..=12).contains(&m) && (1..=31).contains(&d) && (1900..=2100).contains(&y)).then_some(
+        aim_xrk::summary::Date {
+            year: y as u16,
+            month: m as u8,
+            day: d as u8,
+        },
+    )
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -126,7 +136,10 @@ impl Kart {
             // Two changes with no session between them: the first never applied to anything.
             match self.past_baselines.last_mut() {
                 Some(p) if p.until == until => {}
-                _ => self.past_baselines.push(PastBaseline { setup: self.baseline.clone(), until }),
+                _ => self.past_baselines.push(PastBaseline {
+                    setup: self.baseline.clone(),
+                    until,
+                }),
             }
         }
         self.baseline = new;
@@ -156,7 +169,13 @@ pub fn moved_now(newest: String) -> String {
 
 pub fn stamp(date: Option<aim_xrk::summary::Date>, time: Option<&str>) -> String {
     match date {
-        Some(d) => format!("{:04}-{:02}-{:02} {}", d.year, d.month, d.day, time.unwrap_or("00:00:00")),
+        Some(d) => format!(
+            "{:04}-{:02}-{:02} {}",
+            d.year,
+            d.month,
+            d.day,
+            time.unwrap_or("00:00:00")
+        ),
         None => String::new(),
     }
 }
@@ -164,7 +183,9 @@ pub fn stamp(date: Option<aim_xrk::summary::Date>, time: Option<&str>) -> String
 impl Kart {
     /// Every MyChron that has been on it, the current one first.
     pub fn all_loggers(&self) -> impl Iterator<Item = &String> {
-        std::iter::once(&self.logger).chain(self.past.iter().rev().map(|p| &p.logger)).filter(|l| !l.is_empty())
+        std::iter::once(&self.logger)
+            .chain(self.past.iter().rev().map(|p| &p.logger))
+            .filter(|l| !l.is_empty())
     }
 
     /// Takes its MyChron off; its sessions up to `until` stay this kart's.
@@ -179,9 +200,36 @@ impl Kart {
 /// Racing engines offered when adding a kart, by maker: the ones with a
 /// picture. Anything else is entered as "Other engine".
 pub const ENGINES: [(&str, &[&str]); 8] = [
-    ("BRP-Rotax", &["Rotax 125 Micro MAX", "Rotax 125 Mini MAX", "Rotax 125 Junior MAX", "Rotax 125 Senior MAX"]),
-    ("IAME / Parilla", &["IAME Micro Swift", "IAME Mini Swift", "IAME X30 Mini", "IAME X30 Junior", "IAME X30 Senior", "IAME KA100", "IAME X30 Super Shifter 175"]),
-    ("Vortex", &["Vortex Mini ROK", "Vortex ROK VLR", "Vortex ROK GP", "Vortex Shifter ROK"]),
+    (
+        "BRP-Rotax",
+        &[
+            "Rotax 125 Micro MAX",
+            "Rotax 125 Mini MAX",
+            "Rotax 125 Junior MAX",
+            "Rotax 125 Senior MAX",
+        ],
+    ),
+    (
+        "IAME / Parilla",
+        &[
+            "IAME Micro Swift",
+            "IAME Mini Swift",
+            "IAME X30 Mini",
+            "IAME X30 Junior",
+            "IAME X30 Senior",
+            "IAME KA100",
+            "IAME X30 Super Shifter 175",
+        ],
+    ),
+    (
+        "Vortex",
+        &[
+            "Vortex Mini ROK",
+            "Vortex ROK VLR",
+            "Vortex ROK GP",
+            "Vortex Shifter ROK",
+        ],
+    ),
     ("Comer", &["Comer C50", "Comer C51", "Comer C52"]),
     ("Briggs & Stratton", &["Briggs & Stratton LO206"]),
     ("Tillotson", &["Tillotson T225RS"]),
@@ -191,7 +239,10 @@ pub const ENGINES: [(&str, &[&str]); 8] = [
 
 /// Whether `engine` is one of [`ENGINES`].
 pub fn is_known_engine(engine: &str) -> bool {
-    ENGINES.iter().flat_map(|(_, e)| e.iter()).any(|e| e.eq_ignore_ascii_case(engine.trim()))
+    ENGINES
+        .iter()
+        .flat_map(|(_, e)| e.iter())
+        .any(|e| e.eq_ignore_ascii_case(engine.trim()))
 }
 
 /// A picture of `engine` as (uri, PNG bytes): `~/Mychronix/engines/<name>.png`
@@ -240,7 +291,11 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
         ("iame-x30-mini", "iame-x30", IAME_X30),
         ("iame-x30-junior", "iame-x30", IAME_X30),
         ("iame-x30-senior", "iame-x30", IAME_X30),
-        ("iame-x30-super-shifter-175", "iame-super-shifter-175", IAME_SHIFTER),
+        (
+            "iame-x30-super-shifter-175",
+            "iame-super-shifter-175",
+            IAME_SHIFTER,
+        ),
         ("rotax-125-micro-max", "rotax-mini-max", ROTAX_MINI),
         ("rotax-125-mini-max", "rotax-mini-max", ROTAX_MINI),
         ("rotax-125-junior-max", "rotax-max", ROTAX_MAX),
@@ -308,7 +363,10 @@ impl Profiles {
         let loggers: Vec<String> = self.loggers.keys().cloned().collect();
         for logger in loggers {
             let old = self.loggers[&logger].clone();
-            if old.driver.trim().is_empty() && old.kart.trim().is_empty() && old.engine.trim().is_empty() {
+            if old.driver.trim().is_empty()
+                && old.kart.trim().is_empty()
+                && old.engine.trim().is_empty()
+            {
                 continue;
             }
             let driver = (!old.driver.trim().is_empty()).then(|| self.driver_named(&old.driver));
@@ -316,7 +374,11 @@ impl Profiles {
                 let id = self.next_kart_id();
                 self.karts.push(Kart {
                     id,
-                    name: if old.kart.trim().is_empty() { "Kart".into() } else { old.kart.trim().into() },
+                    name: if old.kart.trim().is_empty() {
+                        "Kart".into()
+                    } else {
+                        old.kart.trim().into()
+                    },
                     engine: old.engine.trim().into(),
                     driver,
                     logger: logger.clone(),
@@ -336,11 +398,19 @@ impl Profiles {
     /// The driver called `name` (any case), added if there isn't one.
     pub fn driver_named(&mut self, name: &str) -> u32 {
         let name = name.trim();
-        if let Some(d) = self.drivers.iter().find(|d| d.name.eq_ignore_ascii_case(name)) {
+        if let Some(d) = self
+            .drivers
+            .iter()
+            .find(|d| d.name.eq_ignore_ascii_case(name))
+        {
             return d.id;
         }
         let id = self.drivers.iter().map(|d| d.id).max().unwrap_or(0) + 1;
-        self.drivers.push(Driver { id, name: name.into(), ..Default::default() });
+        self.drivers.push(Driver {
+            id,
+            name: name.into(),
+            ..Default::default()
+        });
         id
     }
 
@@ -350,7 +420,10 @@ impl Profiles {
 
     pub fn driver_name(&self, id: Option<u32>) -> Option<&str> {
         let id = id?;
-        self.drivers.iter().find(|d| d.id == id).map(|d| d.name.as_str())
+        self.drivers
+            .iter()
+            .find(|d| d.id == id)
+            .map(|d| d.name.as_str())
     }
 
     /// The kart a logger is on, else the last one it was on (removed karts
@@ -359,12 +432,23 @@ impl Profiles {
         if logger.is_empty() {
             return None;
         }
-        self.karts.iter().find(|k| k.logger == logger).or_else(|| self.last_kart_of(logger).map(|(k, _)| k))
+        self.karts
+            .iter()
+            .find(|k| k.logger == logger)
+            .or_else(|| self.last_kart_of(logger).map(|(k, _)| k))
     }
 
     /// The kart `logger` was last on before, and when it came off.
     pub fn last_kart_of(&self, logger: &str) -> Option<(&Kart, &str)> {
-        self.karts.iter().flat_map(|k| k.past.iter().filter(|p| p.logger == logger).map(move |p| (k, p.until.as_str()))).max_by(|a, b| a.1.cmp(b.1))
+        self.karts
+            .iter()
+            .flat_map(|k| {
+                k.past
+                    .iter()
+                    .filter(|p| p.logger == logger)
+                    .map(move |p| (k, p.until.as_str()))
+            })
+            .max_by(|a, b| a.1.cmp(b.1))
     }
 
     /// The kart a session from `logger` that started at `when` (see [`stamp`])
@@ -379,9 +463,22 @@ impl Profiles {
             return current.or_else(|| self.kart_on(logger));
         }
         // The earliest time it came off a kart that's not before the session.
-        let mut spans: Vec<(&str, &Kart)> = self.karts.iter().flat_map(|k| k.past.iter().filter(|p| p.logger == logger).map(move |p| (p.until.as_str(), k))).collect();
+        let mut spans: Vec<(&str, &Kart)> = self
+            .karts
+            .iter()
+            .flat_map(|k| {
+                k.past
+                    .iter()
+                    .filter(|p| p.logger == logger)
+                    .map(move |p| (p.until.as_str(), k))
+            })
+            .collect();
         spans.sort_by(|a, b| a.0.cmp(b.0));
-        spans.into_iter().find(|(until, _)| when <= *until).map(|(_, k)| k).or(current)
+        spans
+            .into_iter()
+            .find(|(until, _)| when <= *until)
+            .map(|(_, k)| k)
+            .or(current)
     }
 
     /// The Garage's karts (not removed).
@@ -391,23 +488,35 @@ impl Profiles {
 
     /// The kart in the Garage that `logger` is on now.
     pub fn mounted_on(&self, logger: &str) -> Option<&Kart> {
-        (!logger.is_empty()).then(|| self.garage_karts().find(|k| k.logger == logger)).flatten()
+        (!logger.is_empty())
+            .then(|| self.garage_karts().find(|k| k.logger == logger))
+            .flatten()
     }
 
     /// Whether `logger` has been on one of the karts (now or before).
     pub fn knows_logger(&self, logger: &str) -> bool {
-        self.karts.iter().any(|k| k.all_loggers().any(|l| l == logger))
+        self.karts
+            .iter()
+            .any(|k| k.all_loggers().any(|l| l == logger))
     }
 
     /// Puts `logger` on kart `kart`. The MyChron it replaces, and the kart
     /// this MyChron leaves, keep their sessions up to now: `newest(logger)` is
     /// the start of a MyChron's newest session (see [`stamp`]).
     pub fn mount(&mut self, logger: &str, kart: u32, newest: &dyn Fn(&str) -> String) {
-        if self.karts.iter().any(|k| k.id == kart && k.logger == logger) {
+        if self
+            .karts
+            .iter()
+            .any(|k| k.id == kart && k.logger == logger)
+        {
             return;
         }
         let until = newest(logger);
-        for k in self.karts.iter_mut().filter(|k| k.id != kart && k.logger == logger) {
+        for k in self
+            .karts
+            .iter_mut()
+            .filter(|k| k.id != kart && k.logger == logger)
+        {
             k.unmount(until.clone());
         }
         if let Some(k) = self.karts.iter_mut().find(|k| k.id == kart) {
@@ -446,7 +555,11 @@ impl Profiles {
     pub fn delete_driver(&mut self, driver: u32) {
         self.drivers.retain(|d| d.id != driver);
         self.karts.retain(|k| k.driver != Some(driver));
-        let known: Vec<String> = self.karts.iter().flat_map(|k| k.all_loggers().cloned()).collect();
+        let known: Vec<String> = self
+            .karts
+            .iter()
+            .flat_map(|k| k.all_loggers().cloned())
+            .collect();
         self.loggers.retain(|l, _| known.contains(l));
         self.snoozed.retain(|l, _| known.contains(l));
     }
@@ -456,7 +569,10 @@ impl Profiles {
         let defaults = self.loggers.get(logger).cloned().unwrap_or_default();
         let kart = self.kart_on(logger);
         LoggerProfile {
-            driver: kart.and_then(|k| self.driver_name(k.driver)).unwrap_or_default().to_string(),
+            driver: kart
+                .and_then(|k| self.driver_name(k.driver))
+                .unwrap_or_default()
+                .to_string(),
             kart: kart.map(|k| k.name.clone()).unwrap_or_default(),
             engine: kart.map(|k| k.engine.clone()).unwrap_or_default(),
             championship: defaults.championship,
@@ -468,7 +584,15 @@ impl Profiles {
     /// Remembers what a download was entered as. The logger is now on the kart
     /// named (added if new, with the driver as its usual driver); a kart that
     /// had this logger before no longer does.
-    pub fn note_download(&mut self, logger: &str, driver: &str, kart: &str, championship: &str, track: Option<&str>, newest: &dyn Fn(&str) -> String) {
+    pub fn note_download(
+        &mut self,
+        logger: &str,
+        driver: &str,
+        kart: &str,
+        championship: &str,
+        track: Option<&str>,
+        newest: &dyn Fn(&str) -> String,
+    ) {
         let entry = self.loggers.entry(logger.to_string()).or_default();
         entry.championship = championship.to_string();
         if let Some(t) = track {
@@ -479,11 +603,20 @@ impl Profiles {
         if kart.is_empty() {
             return;
         }
-        let k = match self.karts.iter().position(|k| k.name.eq_ignore_ascii_case(kart)) {
+        let k = match self
+            .karts
+            .iter()
+            .position(|k| k.name.eq_ignore_ascii_case(kart))
+        {
             Some(k) => k,
             None => {
                 let id = self.next_kart_id();
-                self.karts.push(Kart { id, name: kart.into(), driver, ..Default::default() });
+                self.karts.push(Kart {
+                    id,
+                    name: kart.into(),
+                    driver,
+                    ..Default::default()
+                });
                 self.karts.len() - 1
             }
         };
@@ -496,7 +629,9 @@ impl Profiles {
     }
 
     pub fn save(&self) -> std::io::Result<()> {
-        let Some(path) = Self::path() else { return Ok(()) };
+        let Some(path) = Self::path() else {
+            return Ok(());
+        };
         // The day's first save keeps yesterday's drivers and karts aside.
         crate::storage::back_up_daily(&path, 7);
         crate::storage::save(&path, self)
@@ -517,17 +652,45 @@ mod tests {
         let mut p = Profiles::default();
         p.loggers.insert(
             "1".into(),
-            LoggerProfile { driver: "Ann".into(), kart: "Cadet".into(), engine: "IAME Mini Swift".into(), championship: "Club".into(), track: "Club Circuit".into(), ..Default::default() },
+            LoggerProfile {
+                driver: "Ann".into(),
+                kart: "Cadet".into(),
+                engine: "IAME Mini Swift".into(),
+                championship: "Club".into(),
+                track: "Club Circuit".into(),
+                ..Default::default()
+            },
         );
         let mut baselines = BTreeMap::new();
-        baselines.insert("1".to_string(), crate::setup::Setup { driven_teeth: "80".into(), ..Default::default() });
+        baselines.insert(
+            "1".to_string(),
+            crate::setup::Setup {
+                driven_teeth: "80".into(),
+                ..Default::default()
+            },
+        );
         assert!(p.migrate(&baselines));
         assert!(!p.migrate(&baselines));
-        assert_eq!(p.drivers, [Driver { id: 1, name: "Ann".into(), ..Default::default() }]);
+        assert_eq!(
+            p.drivers,
+            [Driver {
+                id: 1,
+                name: "Ann".into(),
+                ..Default::default()
+            }]
+        );
         assert_eq!(p.karts.len(), 1);
         assert_eq!(p.karts[0].baseline.driven_teeth, "80");
         let lp = p.get("1").unwrap();
-        assert_eq!((lp.driver.as_str(), lp.kart.as_str(), lp.engine.as_str(), lp.championship.as_str()), ("Ann", "Cadet", "IAME Mini Swift", "Club"));
+        assert_eq!(
+            (
+                lp.driver.as_str(),
+                lp.kart.as_str(),
+                lp.engine.as_str(),
+                lp.championship.as_str()
+            ),
+            ("Ann", "Cadet", "IAME Mini Swift", "Club")
+        );
     }
 
     #[test]
@@ -553,16 +716,37 @@ mod tests {
         assert!(uri("IAME KA100").is_some_and(|u| u.ends_with("iame-ka100.png")));
         assert!(uri("Vortex Mini ROK").is_some_and(|u| u.ends_with("vortex-mini-rok.png")));
         assert!(uri("Vortex ROK VLR").is_some_and(|u| u.ends_with("vortex-rok-vlr.png")));
-        for (engine, file) in [("Vortex Shifter ROK", "vortex-shifter-rok.png"), ("Tillotson T225RS", "tillotson-t225rs.png"), ("Predator Ghost 212", "predator-ghost-212.png"), ("Predator 79", "predator-79.png"), ("Briggs & Stratton LO206", "briggs-lo206.png"), ("Vortex ROK GP", "vortex-rok-gp.png"), ("Comer C50", "comer-c50.png"), ("Comer C51", "comer-c51.png"), ("Comer C52", "comer-c52.png"), ("Honda GX200", "honda-gx200.png")] {
+        for (engine, file) in [
+            ("Vortex Shifter ROK", "vortex-shifter-rok.png"),
+            ("Tillotson T225RS", "tillotson-t225rs.png"),
+            ("Predator Ghost 212", "predator-ghost-212.png"),
+            ("Predator 79", "predator-79.png"),
+            ("Briggs & Stratton LO206", "briggs-lo206.png"),
+            ("Vortex ROK GP", "vortex-rok-gp.png"),
+            ("Comer C50", "comer-c50.png"),
+            ("Comer C51", "comer-c51.png"),
+            ("Comer C52", "comer-c52.png"),
+            ("Honda GX200", "honda-gx200.png"),
+        ] {
             assert!(uri(engine).is_some_and(|u| u.ends_with(file)), "{engine}");
         }
-        assert!(uri("IAME X30 Super Shifter 175").is_some_and(|u| u.ends_with("iame-super-shifter-175.png")));
+        assert!(
+            uri("IAME X30 Super Shifter 175")
+                .is_some_and(|u| u.ends_with("iame-super-shifter-175.png"))
+        );
     }
 
     #[test]
     fn ages_from_birthdays() {
-        let d = |born: &str| Driver { born: born.into(), ..Default::default() };
-        let today = aim_xrk::summary::Date { year: 2026, month: 10, day: 12 };
+        let d = |born: &str| Driver {
+            born: born.into(),
+            ..Default::default()
+        };
+        let today = aim_xrk::summary::Date {
+            year: 2026,
+            month: 10,
+            day: 12,
+        };
         assert_eq!(d("2017-03-14").age(today), Some(9));
         assert_eq!(d("10/13/2016").age(today), Some(9));
         assert_eq!(d("10/12/2016").age(today), Some(10));
@@ -573,7 +757,9 @@ mod tests {
     #[test]
     fn a_download_moves_the_mychron_to_the_kart_named() {
         let mut p = Profiles::default();
-        p.note_download("1", "Ann", "Cadet", "Club", Some("Club Circuit"), &|_| String::new());
+        p.note_download("1", "Ann", "Cadet", "Club", Some("Club Circuit"), &|_| {
+            String::new()
+        });
         assert_eq!(p.kart_on("1").map(|k| k.name.as_str()), Some("Cadet"));
         // Moved to a new kart, driven this time by someone else: the kart keeps no logger,
         // the new kart gets it, and the usual driver of an existing kart isn't changed.
@@ -581,7 +767,10 @@ mod tests {
         assert_eq!(p.karts[0].logger, "");
         assert_eq!(p.kart_on("1").map(|k| k.name.as_str()), Some("Spare"));
         p.note_download("1", "Bob", "cadet", "Club", None, &|_| String::new());
-        assert_eq!(p.kart_on("1").and_then(|k| p.driver_name(k.driver)), Some("Ann"));
+        assert_eq!(
+            p.kart_on("1").and_then(|k| p.driver_name(k.driver)),
+            Some("Ann")
+        );
         assert_eq!(p.loggers["1"].track, "Club Circuit");
         assert_eq!(p.drivers.len(), 2);
     }
@@ -589,31 +778,69 @@ mod tests {
     fn two_drivers() -> Profiles {
         let mut p = Profiles::default();
         let (a, b) = (p.driver_named("Ann"), p.driver_named("Bo"));
-        p.karts.push(Kart { id: 1, name: "Ann's kart".into(), driver: Some(a), logger: "5555".into(), ..Default::default() });
-        p.karts.push(Kart { id: 2, name: "Bo's kart".into(), driver: Some(b), logger: "4444".into(), ..Default::default() });
+        p.karts.push(Kart {
+            id: 1,
+            name: "Ann's kart".into(),
+            driver: Some(a),
+            logger: "5555".into(),
+            ..Default::default()
+        });
+        p.karts.push(Kart {
+            id: 2,
+            name: "Bo's kart".into(),
+            driver: Some(b),
+            logger: "4444".into(),
+            ..Default::default()
+        });
         p
     }
 
     /// The newest session start each MyChron had downloaded "so far".
     fn newest(at: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> String {
-        move |l: &str| at.iter().find(|x| x.0 == l).map(|x| x.1.to_string()).unwrap_or_default()
+        move |l: &str| {
+            at.iter()
+                .find(|x| x.0 == l)
+                .map(|x| x.1.to_string())
+                .unwrap_or_default()
+        }
     }
 
     #[test]
     fn a_handed_down_mychron_splits_its_sessions_by_time() {
         // Ann's MyChron 5 (5555) goes to Bo; Ann gets a 6 (6666), Bo's 4 (4444) retires.
         let mut p = two_drivers();
-        let so_far = newest(&[("5555", "2026-12-20 10:00:00"), ("4444", "2026-12-21 09:00:00")]);
+        let so_far = newest(&[
+            ("5555", "2026-12-20 10:00:00"),
+            ("4444", "2026-12-21 09:00:00"),
+        ]);
         p.mount("6666", 1, &so_far);
-        assert_eq!(p.karts[0].past, [PastMyChron { logger: "5555".into(), until: "2026-12-20 10:00:00".into() }]);
+        assert_eq!(
+            p.karts[0].past,
+            [PastMyChron {
+                logger: "5555".into(),
+                until: "2026-12-20 10:00:00".into()
+            }]
+        );
         // Bo's race with the formatted 5 (before anything was set up) has no kart yet.
         assert!(p.kart_for("5555", "2026-12-27 11:00:00").is_none());
         p.mount("5555", 2, &so_far);
         // Ann's old sessions stay Ann's; the new ones are Bo's; Bo's MyChron 4 stays Bo's.
-        assert_eq!(p.kart_for("5555", "2026-12-20 10:00:00").map(|k| k.id), Some(1));
-        assert_eq!(p.kart_for("5555", "2026-12-27 11:00:00").map(|k| k.id), Some(2));
-        assert_eq!(p.kart_for("4444", "2026-12-21 09:00:00").map(|k| k.id), Some(2));
-        assert_eq!(p.kart_for("6666", "2026-12-28 09:00:00").map(|k| k.id), Some(1));
+        assert_eq!(
+            p.kart_for("5555", "2026-12-20 10:00:00").map(|k| k.id),
+            Some(1)
+        );
+        assert_eq!(
+            p.kart_for("5555", "2026-12-27 11:00:00").map(|k| k.id),
+            Some(2)
+        );
+        assert_eq!(
+            p.kart_for("4444", "2026-12-21 09:00:00").map(|k| k.id),
+            Some(2)
+        );
+        assert_eq!(
+            p.kart_for("6666", "2026-12-28 09:00:00").map(|k| k.id),
+            Some(1)
+        );
     }
 
     #[test]
@@ -622,10 +849,21 @@ mod tests {
         let so_far = newest(&[("5555", "2026-12-20 10:00:00")]);
         p.mount("6666", 1, &so_far);
         let ann = p.drivers[0].id;
-        p.karts.push(Kart { id: 3, name: "Ann's new kart".into(), driver: Some(ann), ..Default::default() });
+        p.karts.push(Kart {
+            id: 3,
+            name: "Ann's new kart".into(),
+            driver: Some(ann),
+            ..Default::default()
+        });
         p.mount("5555", 3, &so_far);
-        assert_eq!(p.kart_for("5555", "2026-12-01 10:00:00").map(|k| k.id), Some(1));
-        assert_eq!(p.kart_for("5555", "2027-01-05 10:00:00").map(|k| k.id), Some(3));
+        assert_eq!(
+            p.kart_for("5555", "2026-12-01 10:00:00").map(|k| k.id),
+            Some(1)
+        );
+        assert_eq!(
+            p.kart_for("5555", "2027-01-05 10:00:00").map(|k| k.id),
+            Some(3)
+        );
     }
 
     #[test]
@@ -633,10 +871,16 @@ mod tests {
         let mut p = two_drivers();
         p.remove_kart(1);
         assert_eq!(p.garage_karts().count(), 1);
-        assert_eq!(p.kart_for("5555", "2026-10-01 10:00:00").map(|k| k.id), Some(1));
+        assert_eq!(
+            p.kart_for("5555", "2026-10-01 10:00:00").map(|k| k.id),
+            Some(1)
+        );
         p.remove_logger("4444", &newest(&[("4444", "2026-10-11 02:21:31")]));
         assert!(p.mounted_on("4444").is_none());
-        assert_eq!(p.kart_for("4444", "2026-10-11 02:21:31").map(|k| k.id), Some(2));
+        assert_eq!(
+            p.kart_for("4444", "2026-10-11 02:21:31").map(|k| k.id),
+            Some(2)
+        );
         // Anything it records later is asked about.
         assert!(p.kart_for("4444", "2026-11-01 10:00:00").is_none());
         assert!(p.knows_logger("4444"));
@@ -656,15 +900,25 @@ mod tests {
     fn a_move_in_the_garage_leaves_sessions_not_yet_downloaded_with_the_old_kart() {
         let mut p = Profiles::default();
         for id in [1, 2] {
-            p.karts.push(Kart { id, name: format!("Kart {id}"), ..Default::default() });
+            p.karts.push(Kart {
+                id,
+                name: format!("Kart {id}"),
+                ..Default::default()
+            });
         }
         p.mount("5555", 1, &|_: &str| String::new());
         // Saturday's race was downloaded up to the morning; the afternoon is still on the MyChron.
         let newest = "2020-06-06 09:00:00".to_string();
         // Moved to kart 2 in the Garage the next day, before downloading.
         p.mount("5555", 2, &|_: &str| moved_now(newest.clone()));
-        assert_eq!(p.kart_for("5555", "2020-06-06 14:00:00").map(|k| k.id), Some(1));
+        assert_eq!(
+            p.kart_for("5555", "2020-06-06 14:00:00").map(|k| k.id),
+            Some(1)
+        );
         // Sessions recorded after the move are kart 2's.
-        assert_eq!(p.kart_for("5555", "2999-01-01 10:00:00").map(|k| k.id), Some(2));
+        assert_eq!(
+            p.kart_for("5555", "2999-01-01 10:00:00").map(|k| k.id),
+            Some(2)
+        );
     }
 }

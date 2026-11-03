@@ -22,9 +22,16 @@ impl Sectors {
             return None;
         }
         let start = start_finish
-            .and_then(|sf| (0..path.len()).min_by(|&a, &b| path[a].distance_m(&sf).total_cmp(&path[b].distance_m(&sf))))
+            .and_then(|sf| {
+                (0..path.len())
+                    .min_by(|&a, &b| path[a].distance_m(&sf).total_cmp(&path[b].distance_m(&sf)))
+            })
             .unwrap_or(0);
-        let mut rotated: Vec<LatLon> = path[start..].iter().chain(&path[..start]).copied().collect();
+        let mut rotated: Vec<LatLon> = path[start..]
+            .iter()
+            .chain(&path[..start])
+            .copied()
+            .collect();
         // Close the loop so the last sector ends back at the line.
         if rotated[0].distance_m(&rotated[rotated.len() - 1]) > 1.0 {
             rotated.push(rotated[0]);
@@ -35,9 +42,16 @@ impl Sectors {
         }
         let total = *cumulative.last().unwrap();
         let boundaries = (1..count)
-            .map(|k| cumulative.partition_point(|&d| d < total * k as f64 / count as f64).min(rotated.len() - 1))
+            .map(|k| {
+                cumulative
+                    .partition_point(|&d| d < total * k as f64 / count as f64)
+                    .min(rotated.len() - 1)
+            })
             .collect();
-        Some(Self { path: rotated, boundaries })
+        Some(Self {
+            path: rotated,
+            boundaries,
+        })
     }
 
     pub fn count(&self) -> usize {
@@ -54,7 +68,13 @@ impl Sectors {
 /// covering [lap_start_ms, lap_end_ms]. Each split is timed where the kart
 /// passes closest to it, interpolated between samples; splits must be passed
 /// in order.
-pub fn sector_times(times_ms: &[i64], points: &[LatLon], lap_start_ms: i64, lap_end_ms: i64, splits: &[LatLon]) -> Option<Vec<i64>> {
+pub fn sector_times(
+    times_ms: &[i64],
+    points: &[LatLon],
+    lap_start_ms: i64,
+    lap_end_ms: i64,
+    splits: &[LatLon],
+) -> Option<Vec<i64>> {
     let lo = times_ms.partition_point(|&t| t < lap_start_ms);
     let hi = times_ms.partition_point(|&t| t <= lap_end_ms);
     if hi < lo + 4 {
@@ -64,7 +84,11 @@ pub fn sector_times(times_ms: &[i64], points: &[LatLon], lap_start_ms: i64, lap_
     let mut from = lo;
     for split in splits {
         // Closest sample to the split, searching forward from the last one.
-        let best = (from..hi).min_by(|&a, &b| points[a].distance_m(split).total_cmp(&points[b].distance_m(split)))?;
+        let best = (from..hi).min_by(|&a, &b| {
+            points[a]
+                .distance_m(split)
+                .total_cmp(&points[b].distance_m(split))
+        })?;
         if points[best].distance_m(split) > 30.0 {
             return None; // this lap never came near the split (e.g. a pit lap)
         }
@@ -72,7 +96,10 @@ pub fn sector_times(times_ms: &[i64], points: &[LatLon], lap_start_ms: i64, lap_
         from = best;
     }
     crossings.push(lap_end_ms as f64);
-    let times: Vec<i64> = crossings.windows(2).map(|w| (w[1] - w[0]).round() as i64).collect();
+    let times: Vec<i64> = crossings
+        .windows(2)
+        .map(|w| (w[1] - w[0]).round() as i64)
+        .collect();
     times.iter().all(|&t| t > 0).then_some(times)
 }
 
@@ -82,16 +109,31 @@ fn refine(times_ms: &[i64], points: &[LatLon], i: usize, target: &LatLon) -> f64
     let neighbor = [i.checked_sub(1), (i + 1 < points.len()).then_some(i + 1)]
         .into_iter()
         .flatten()
-        .min_by(|&a, &b| points[a].distance_m(target).total_cmp(&points[b].distance_m(target)));
-    let Some(j) = neighbor else { return times_ms[i] as f64 };
+        .min_by(|&a, &b| {
+            points[a]
+                .distance_m(target)
+                .total_cmp(&points[b].distance_m(target))
+        });
+    let Some(j) = neighbor else {
+        return times_ms[i] as f64;
+    };
     let (a, b) = if j < i { (j, i) } else { (i, j) };
     // Flat local coordinates in meters around `a`.
     let kx = 111_320.0 * points[a].lat.to_radians().cos();
-    let to_xy = |p: &LatLon| ((p.lon - points[a].lon) * kx, (p.lat - points[a].lat) * 110_540.0);
+    let to_xy = |p: &LatLon| {
+        (
+            (p.lon - points[a].lon) * kx,
+            (p.lat - points[a].lat) * 110_540.0,
+        )
+    };
     let (bx, by) = to_xy(&points[b]);
     let (tx, ty) = to_xy(target);
     let len2 = bx * bx + by * by;
-    let f = if len2 > 0.0 { ((tx * bx + ty * by) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    let f = if len2 > 0.0 {
+        ((tx * bx + ty * by) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     times_ms[a] as f64 + f * (times_ms[b] - times_ms[a]) as f64
 }
 
@@ -104,7 +146,10 @@ mod tests {
         (0..n)
             .map(|k| {
                 let a = std::f64::consts::TAU * k as f64 / n as f64;
-                LatLon { lat: 45.0 + 100.0 * a.sin() / 110_540.0, lon: 9.0 + 100.0 * a.cos() / (111_320.0 * 45f64.to_radians().cos()) }
+                LatLon {
+                    lat: 45.0 + 100.0 * a.sin() / 110_540.0,
+                    lon: 9.0 + 100.0 * a.cos() / (111_320.0 * 45f64.to_radians().cos()),
+                }
             })
             .collect()
     }
@@ -116,7 +161,9 @@ mod tests {
         assert_eq!(s.count(), 3);
         assert_eq!(s.path[0], path[30]);
         // Thirds of 121 closed-loop points land about 40 points apart.
-        assert!((s.boundaries[0] as i64 - 40).abs() <= 1 && (s.boundaries[1] as i64 - 80).abs() <= 1);
+        assert!(
+            (s.boundaries[0] as i64 - 40).abs() <= 1 && (s.boundaries[1] as i64 - 80).abs() <= 1
+        );
     }
 
     #[test]
@@ -148,7 +195,10 @@ mod tests {
     fn lap_that_misses_a_split_has_no_times() {
         let samples = circle(200);
         let times: Vec<i64> = (0..200).map(|k| k * 40).collect();
-        let far = LatLon { lat: 46.0, lon: 9.0 };
+        let far = LatLon {
+            lat: 46.0,
+            lon: 9.0,
+        };
         assert!(sector_times(&times, &samples, 0, 8_000, &[far]).is_none());
     }
 }

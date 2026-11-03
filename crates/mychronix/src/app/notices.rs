@@ -44,7 +44,12 @@ impl Notices {
         }
         // The same thing again: shown once, afresh.
         self.list.retain(|n| n.text != text);
-        self.list.push(Notice { tone, text, action: None, shown: None });
+        self.list.push(Notice {
+            tone,
+            text,
+            action: None,
+            shown: None,
+        });
         if self.list.len() > MOST {
             self.list.remove(0);
         }
@@ -83,12 +88,21 @@ impl App {
         for n in &mut self.notices.list {
             n.shown.get_or_insert(now);
         }
-        self.notices.list.retain(|n| matches!(n.tone, Tone::Warning | Tone::Error) || now - n.shown.unwrap_or(now) < STAYS_S);
+        self.notices.list.retain(|n| {
+            matches!(n.tone, Tone::Warning | Tone::Error) || now - n.shown.unwrap_or(now) < STAYS_S
+        });
         if self.notices.list.is_empty() {
             return;
         }
         // Wake up to fade the next one out.
-        if let Some(left) = self.notices.list.iter().filter(|n| matches!(n.tone, Tone::Info | Tone::Success)).map(|n| STAYS_S - (now - n.shown.unwrap_or(now))).reduce(f64::min) {
+        if let Some(left) = self
+            .notices
+            .list
+            .iter()
+            .filter(|n| matches!(n.tone, Tone::Info | Tone::Success))
+            .map(|n| STAYS_S - (now - n.shown.unwrap_or(now)))
+            .reduce(f64::min)
+        {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(left.max(0.05)));
         }
         let (mut dismiss, mut go) = (None, None);
@@ -109,7 +123,12 @@ impl App {
                         .fill(SURFACE_ACTIVE)
                         .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
                         .corner_radius(CornerRadius::same(12))
-                        .shadow(egui::epaint::Shadow { offset: [0, 4], blur: 18, spread: 0, color: Color32::from_black_alpha(90) })
+                        .shadow(egui::epaint::Shadow {
+                            offset: [0, 4],
+                            blur: 18,
+                            spread: 0,
+                            color: Color32::from_black_alpha(90),
+                        })
                         .inner_margin(Margin::symmetric(14, 11))
                         .show(ui, |ui| {
                             ui.set_max_width(420.0);
@@ -119,15 +138,33 @@ impl App {
                                 ui.vertical(|ui| {
                                     ui.set_max_width(340.0);
                                     ui.spacing_mut().item_spacing.y = 6.0;
-                                    ui.add(egui::Label::new(RichText::new(&n.text).font(regular(13.5)).color(TEXT)).wrap());
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&n.text).font(regular(13.5)).color(TEXT),
+                                        )
+                                        .wrap(),
+                                    );
                                     if let Some((label, page)) = n.action
-                                        && ui.add(egui::Label::new(RichText::new(label).font(medium(13.5)).color(theme::ACCENT)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                                        && ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(label)
+                                                        .font(medium(13.5))
+                                                        .color(theme::ACCENT),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .clicked()
                                     {
                                         go = Some(page);
                                         dismiss = Some(k);
                                     }
                                 });
-                                let x = ui.add(Icon::X.image(SECONDARY, 12.0).sense(Sense::click())).on_hover_text("Dismiss").on_hover_cursor(egui::CursorIcon::PointingHand);
+                                let x = ui
+                                    .add(Icon::X.image(SECONDARY, 12.0).sense(Sense::click()))
+                                    .on_hover_text("Dismiss")
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                                 if x.clicked() {
                                     dismiss = Some(k);
                                 }

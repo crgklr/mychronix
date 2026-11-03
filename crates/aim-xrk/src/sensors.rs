@@ -16,7 +16,11 @@ pub struct Scale {
 
 impl Scale {
     pub fn apply(&self, raw: u16) -> f64 {
-        let r = if self.signed { raw as i16 as f64 } else { raw as f64 };
+        let r = if self.signed {
+            raw as i16 as f64
+        } else {
+            raw as f64
+        };
         self.a1 * r + self.a0
     }
 }
@@ -24,11 +28,21 @@ impl Scale {
 /// Decimals that show one raw step.
 fn decimals(a1: f64) -> u8 {
     let a = a1.abs();
-    if a == 0.0 || a >= 1.0 { 0 } else { (-a.log10()).ceil().clamp(0.0, 4.0) as u8 }
+    if a == 0.0 || a >= 1.0 {
+        0
+    } else {
+        (-a.log10()).ceil().clamp(0.0, 4.0) as u8
+    }
 }
 
 fn linear(units: &'static str, a1: f64, a0: f64, signed: bool) -> Scale {
-    Scale { units, decimals: decimals(a1), a1, a0, signed }
+    Scale {
+        units,
+        decimals: decimals(a1),
+        a1,
+        a0,
+        signed,
+    }
 }
 
 /// The scaling for sensor `code`. `calibration` is the channel's own pair
@@ -43,24 +57,45 @@ pub fn scale(code: u16, calibration: Option<(f64, f64)>) -> Option<Scale> {
         // Thermocouples and on-board accelerometers can read below zero.
         96 | 405 | 406 | 413 | 414 => linear(units, a1, a0, true),
         // A GPS module's accelerations in g, angles in degrees.
-        3003 | 3004 => Scale { decimals: 2, ..linear("g", a1 / G, a0 / G, false) },
-        3005 | 3006 => Scale { decimals: 1, ..linear("deg", a1 * deg, a0 * deg, false) },
-        3007 => Scale { decimals: 1, ..linear("deg/s", a1 * deg, a0 * deg, false) },
+        3003 | 3004 => Scale {
+            decimals: 2,
+            ..linear("g", a1 / G, a0 / G, false)
+        },
+        3005 | 3006 => Scale {
+            decimals: 1,
+            ..linear("deg", a1 * deg, a0 * deg, false)
+        },
+        3007 => Scale {
+            decimals: 1,
+            ..linear("deg/s", a1 * deg, a0 * deg, false)
+        },
         // Analog accelerometers, calibrated per channel: zero in counts, and a
         // gain where 40 g spans `gain` counts (fitted against GPS g-forces).
         10 | 11 | 78 | 79 | 198 | 401..=404 => {
             let (zero, gain) = calibration?;
             // Without a gain, AiM Solo DL files read 440 counts a g (Lapline's
             // finding), signed like the gain.
-            let k = if gain.abs() > 1.0 { 40.0 / gain } else if gain < 0.0 { -1.0 / 440.0 } else { 1.0 / 440.0 };
-            Scale { decimals: 2, ..linear("g", k, -k * zero, false) }
+            let k = if gain.abs() > 1.0 {
+                40.0 / gain
+            } else if gain < 0.0 {
+                -1.0 / 440.0
+            } else {
+                1.0 / 440.0
+            };
+            Scale {
+                decimals: 2,
+                ..linear("g", k, -k * zero, false)
+            }
         }
         // Imported data: each channel's raw range spans its own min..max
         // (the calibration slots hold them).
         999 => {
             let (lo, hi) = calibration.filter(|c| c.1 > c.0)?;
             let a1 = (hi - lo) / 65535.0;
-            Scale { decimals: decimals(a1).min(3), ..linear("", a1, lo, false) }
+            Scale {
+                decimals: decimals(a1).min(3),
+                ..linear("", a1, lo, false)
+            }
         }
         // Linear potentiometers: calibrated per channel in a way not worked out yet.
         7 | 8 | 30 => return None,

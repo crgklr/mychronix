@@ -8,19 +8,33 @@ const STRETCHES: usize = 8;
 
 /// The gap (s) at `d` meters, from `time_gap`'s [meters, seconds] samples.
 fn gap_at(gaps: &[[f64; 2]], d: f64) -> f64 {
-    let i = gaps.partition_point(|p| p[0] < d).clamp(1, gaps.len().max(2) - 1);
+    let i = gaps
+        .partition_point(|p| p[0] < d)
+        .clamp(1, gaps.len().max(2) - 1);
     let (a, b) = (gaps[i - 1], gaps[i]);
-    let f = if b[0] > a[0] { ((d - a[0]) / (b[0] - a[0])).clamp(0.0, 1.0) } else { 0.0 };
+    let f = if b[0] > a[0] {
+        ((d - a[0]) / (b[0] - a[0])).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     a[1] + (b[1] - a[1]) * f
 }
 
 /// "+0.12" / "−0.08" seconds.
 fn signed(s: f64) -> String {
-    if s >= 0.0 { format!("+{s:.2}") } else { format!("−{:.2}", -s) }
+    if s >= 0.0 {
+        format!("+{s:.2}")
+    } else {
+        format!("−{:.2}", -s)
+    }
 }
 
 impl App {
-    pub(super) fn compare_breakdown(&mut self, ui: &mut Ui, reference: &crate::compare::DistanceProfile) {
+    pub(super) fn compare_breakdown(
+        &mut self,
+        ui: &mut Ui,
+        reference: &crate::compare::DistanceProfile,
+    ) {
         let laps = self.comparison.laps.clone();
         let Some(ref_lap) = laps.first() else { return };
         let ref_ms = ref_lap.lap.duration_ms();

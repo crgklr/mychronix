@@ -25,7 +25,9 @@ struct Block<'a> {
 }
 
 fn is_header(data: &[u8], i: usize) -> bool {
-    data.get(i..i + 4).is_some_and(|h| h[0].is_ascii_uppercase() && h[1].is_ascii_uppercase() && h[2] == 0x58 && h[3] == 0x02)
+    data.get(i..i + 4).is_some_and(|h| {
+        h[0].is_ascii_uppercase() && h[1].is_ascii_uppercase() && h[2] == 0x58 && h[3] == 0x02
+    })
 }
 
 /// The blocks before the samples, and the samples.
@@ -47,7 +49,9 @@ fn blocks(data: &[u8]) -> Result<(Vec<Block<'_>>, &[u8])> {
         }
     }
     if starts.first() != Some(&0) {
-        return Err(Error::Parse("not a RaceStudio 2 .drk file (or a version this can't read yet)".into()));
+        return Err(Error::Parse(
+            "not a RaceStudio 2 .drk file (or a version this can't read yet)".into(),
+        ));
     }
     // RR starts with a table of 4 KB blocks, each with its own RR header (as
     // many as the first word says, though RaceStudio 2 can compact them away
@@ -66,7 +70,10 @@ fn blocks(data: &[u8]) -> Result<(Vec<Block<'_>>, &[u8])> {
         .filter(|&(_, &s)| &data[s..s + 2] != b"RR")
         .map(|(k, &s)| {
             let end = starts.get(k + 1).copied().unwrap_or(data.len());
-            Block { tag: [data[s], data[s + 1]], data: &data[(s + 0x20).min(end)..end] }
+            Block {
+                tag: [data[s], data[s + 1]],
+                data: &data[(s + 0x20).min(end)..end],
+            }
         })
         .collect();
     Ok((blocks, samples))
@@ -77,13 +84,19 @@ fn u16_at(b: &[u8], o: usize) -> Option<u16> {
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    b.get(o..o + 4)
+        .map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
 }
 
 fn text_at(b: &[u8], o: usize, max: usize) -> Option<String> {
     let s = b.get(o..(o + max).min(b.len()))?;
     let s = &s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())];
-    let s: String = s.iter().map(|&c| c as char).collect::<String>().trim().to_string();
+    let s: String = s
+        .iter()
+        .map(|&c| c as char)
+        .collect::<String>()
+        .trim()
+        .to_string();
     (!s.is_empty()).then_some(s)
 }
 
@@ -103,12 +116,22 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
         .filter_map(|b| Some((u32_at(b.data, 0x76)?, u32_at(b.data, 0x04)?)))
         .filter(|&(ms, ticks)| ms > 0 && ticks > 0)
         .collect();
-    let (ms_sum, tick_sum) = laps_raw.iter().fold((0u64, 0u64), |a, &(m, t)| (a.0 + m as u64, a.1 + t as u64));
-    let ms_per_tick = if tick_sum > 0 { ms_sum as f64 / tick_sum as f64 } else { 1.0 };
+    let (ms_sum, tick_sum) = laps_raw
+        .iter()
+        .fold((0u64, 0u64), |a, &(m, t)| (a.0 + m as u64, a.1 + t as u64));
+    let ms_per_tick = if tick_sum > 0 {
+        ms_sum as f64 / tick_sum as f64
+    } else {
+        1.0
+    };
     let mut laps = Vec::new();
     let mut t = 0i64;
     for (k, &(ms, _)) in laps_raw.iter().enumerate() {
-        laps.push(Lap { number: k as i32 + 1, start_ms: t, end_ms: t + ms as i64 });
+        laps.push(Lap {
+            number: k as i32 + 1,
+            start_ms: t,
+            end_ms: t + ms as i64,
+        });
         t += ms as i64;
     }
     let total_ms = t;
@@ -119,10 +142,17 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
     }
     let mut pos = 0;
     let mut channels = Vec::new();
-    let fast_n = blocks.iter().filter(|b| &b.tag == b"MM").filter_map(|b| u32_at(b.data, 0x48)).max().unwrap_or(0);
+    let fast_n = blocks
+        .iter()
+        .filter(|b| &b.tag == b"MM")
+        .filter_map(|b| u32_at(b.data, 0x48))
+        .max()
+        .unwrap_or(0);
     for b in blocks.iter().filter(|b| &b.tag == b"MM") {
         // GPS channels as MyChron 5/6 logs name them ("GPS Speed").
-        let name = text_at(b.data, 0, 20).unwrap_or_else(|| "Channel".into()).replace("GPS_", "GPS ");
+        let name = text_at(b.data, 0, 20)
+            .unwrap_or_else(|| "Channel".into())
+            .replace("GPS_", "GPS ");
         let n = u32_at(b.data, 0x48).unwrap_or(0) as usize;
         let raw: Vec<u16> = (0..n).filter_map(|i| u16_at(rr, pos + i * 2)).collect();
         pos += n * 2;
@@ -132,7 +162,9 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
         let mut raw = raw;
         raw.truncate(raw.len().saturating_sub(TRAILER));
         if raw.len() + TRAILER < n {
-            return Err(Error::Parse(format!("the .drk's samples for {name} are cut short")));
+            return Err(Error::Parse(format!(
+                "the .drk's samples for {name} are cut short"
+            )));
         }
         // Ticks between samples (1000 a second): from the channel's rate code at
         // 0x46, else slow channels record a tenth as often as the fastest.
@@ -144,27 +176,47 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
         // Scaling by the channel's AiM sensor code (at 0x40), with its own
         // calibration (zero and gain, floats at 0x5C and 0x60) for sensors
         // calibrated per channel. Unknown sensors keep their raw counts.
-        let f32_at = |o: usize| b.data.get(o..o + 4).map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]) as f64);
+        let f32_at = |o: usize| {
+            b.data
+                .get(o..o + 4)
+                .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]) as f64)
+        };
         let calibration = f32_at(0x5C).zip(f32_at(0x60));
         let sc = u16_at(b.data, 0x40).and_then(|c| scale(c, calibration));
         // Mostly "nothing connected" (a few stray zeros aside): no sensor fitted.
         let unplugged = raw.iter().filter(|&&r| is_error(r)).count() * 10 >= raw.len() * 9;
         // Readings past the channel's full scale (a float at 0x50) are glitches,
         // e.g. single RPM samples of 35,000.
-        let full_scale = b.data.get(0x50..0x54).map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]) as f64).filter(|v| *v > 0.0);
+        let full_scale = b
+            .data
+            .get(0x50..0x54)
+            .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]) as f64)
+            .filter(|v| *v > 0.0);
         let (times_ms, values): (Vec<i64>, Vec<f64>) = raw
             .iter()
             .enumerate()
             .filter(|(_, r)| !unplugged && !is_error(**r))
-            .map(|(i, &r)| ((i as f64 * step_ticks * ms_per_tick).round() as i64, sc.map_or(r as f64, |sc| sc.apply(r))))
+            .map(|(i, &r)| {
+                (
+                    (i as f64 * step_ticks * ms_per_tick).round() as i64,
+                    sc.map_or(r as f64, |sc| sc.apply(r)),
+                )
+            })
             // RPM readings far past full scale are glitches (other channels'
             // full scale can be in other units than their values).
-            .filter(|(_, v)| sc.is_none_or(|sc| sc.units != "rpm") || full_scale.is_none_or(|f| *v <= f * 1.25))
+            .filter(|(_, v)| {
+                sc.is_none_or(|sc| sc.units != "rpm") || full_scale.is_none_or(|f| *v <= f * 1.25)
+            })
             .unzip();
-        let (mut units, decimals) = sc.map_or((String::new(), 0), |sc| (sc.units.to_string(), sc.decimals));
+        let (mut units, decimals) =
+            sc.map_or((String::new(), 0), |sc| (sc.units.to_string(), sc.decimals));
         // Imported channels carry their unit as text where others have a code.
         if u16_at(b.data, 0x40) == Some(999) {
-            let text: String = b.data[0x14..0x20].iter().take_while(|&&c| c != 0).map(|&c| c as char).collect();
+            let text: String = b.data[0x14..0x20]
+                .iter()
+                .take_while(|&&c| c != 0)
+                .map(|&c| c as char)
+                .collect();
             let text = text.trim();
             if !text.is_empty() && !text.starts_with(|c: char| c.is_ascii_digit()) {
                 units = match text {
@@ -175,13 +227,25 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
                 };
             }
         }
-        channels.push(Channel { name, group: None, units, decimals, interpolate: true, times_ms, values });
+        channels.push(Channel {
+            name,
+            group: None,
+            units,
+            decimals,
+            interpolate: true,
+            times_ms,
+            values,
+        });
     }
     let _ = total_ms;
 
     // Names from PP (track at 0x28, driver at 0x50); date and time from RD.
     let pp = find(b"PP").map(|b| b.data).unwrap_or(&[]);
-    let rd = blocks.get(1).filter(|b| &b.tag == b"RD").map(|b| b.data).unwrap_or(&[]);
+    let rd = blocks
+        .get(1)
+        .filter(|b| &b.tag == b"RD")
+        .map(|b| b.data)
+        .unwrap_or(&[]);
     let stamp = text_at(rd, 0x0c, 20); // "11-10-26 02:21:31"
     let (date, time) = match stamp.as_deref().and_then(|s| s.split_once(' ')) {
         Some((d, t)) => {
@@ -209,13 +273,28 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
         logger_model: model_id.and_then(crate::mychron_model).map(str::to_string),
         ..Default::default()
     };
-    Ok((Session { info, channels, laps, gps: None }, ms_per_tick))
+    Ok((
+        Session {
+            info,
+            channels,
+            laps,
+            gps: None,
+        },
+        ms_per_tick,
+    ))
 }
 
 /// A file beside `path` with the same name and extension `ext` (any case).
 fn companion(path: &std::path::Path, ext: &str) -> Option<std::path::PathBuf> {
     let stem = path.file_stem()?;
-    std::fs::read_dir(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."))).ok()?.filter_map(|e| e.ok().map(|e| e.path())).find(|p| {
+    std::fs::read_dir(
+        path.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new(".")),
+    )
+    .ok()?
+    .filter_map(|e| e.ok().map(|e| e.path()))
+    .find(|p| {
         p.file_stem() == Some(stem) && p.extension().is_some_and(|x| x.eq_ignore_ascii_case(ext))
     })
 }
@@ -226,12 +305,19 @@ fn companion(path: &std::path::Path, ext: &str) -> Option<std::path::PathBuf> {
 /// is damaged, its `.bak` (RaceStudio 2 Analysis's copy of the original) or
 /// the `.imd` instead.
 pub fn open(path: &std::path::Path) -> Result<Session> {
-    let imd = || companion(path, "imd").and_then(|p| std::fs::read(p).ok()).and_then(|d| crate::mc4::read_imd(&d).ok());
+    let imd = || {
+        companion(path, "imd")
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|d| crate::mc4::read_imd(&d).ok())
+    };
     let (mut s, ms_per_tick) = match read_with_clock(&std::fs::read(path)?) {
         Ok(x) => x,
         Err(e) => {
             // RaceStudio 2 Analysis's backup of the original .drk, else the raw download.
-            if let Some(x) = companion(path, "bak").and_then(|p| std::fs::read(p).ok()).and_then(|d| read_with_clock(&d).ok()) {
+            if let Some(x) = companion(path, "bak")
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|d| read_with_clock(&d).ok())
+            {
                 log::warn!("{}: {e}; read its .bak instead", path.display());
                 x
             } else if let Some(s) = imd() {
@@ -243,20 +329,37 @@ pub fn open(path: &std::path::Path) -> Result<Session> {
         }
     };
     if let Some(raw) = imd() {
-        let engine = |s: &Session| s.channel("Engine").map(|c| c.values.clone()).unwrap_or_default();
+        let engine = |s: &Session| {
+            s.channel("Engine")
+                .map(|c| c.values.clone())
+                .unwrap_or_default()
+        };
         let (a, b) = (engine(&s), engine(&raw));
         let n = a.len().min(b.len());
         let differ = (0..n).filter(|&i| (a[i] - b[i]).abs() > 1e-9).count();
         if s.laps.len() != raw.laps.len() || differ > 0 || a.len().abs_diff(b.len()) > 12 {
-            log::warn!("{}: its .imd disagrees ({} vs {} laps, {differ} RPM samples differ)", path.display(), s.laps.len(), raw.laps.len());
+            log::warn!(
+                "{}: its .imd disagrees ({} vs {} laps, {differ} RPM samples differ)",
+                path.display(),
+                s.laps.len(),
+                raw.laps.len()
+            );
         }
     }
     // Positions from the processed .gpk, with the receiver's own speed and
     // heading from the .rrk; either alone will do.
     let read = |ext| companion(path, ext).and_then(|p| std::fs::read(p).ok());
-    let raw = read("rrk").map(|d| crate::rs2gps::read_rrk(&d)).unwrap_or_default();
-    let processed = read("gpk").map(|d| crate::rs2gps::read_gpk(&d)).unwrap_or_default();
-    let fixes = if processed.len() >= 10 { crate::rs2gps::with_velocity(processed, &raw) } else { raw };
+    let raw = read("rrk")
+        .map(|d| crate::rs2gps::read_rrk(&d))
+        .unwrap_or_default();
+    let processed = read("gpk")
+        .map(|d| crate::rs2gps::read_gpk(&d))
+        .unwrap_or_default();
+    let fixes = if processed.len() >= 10 {
+        crate::rs2gps::with_velocity(processed, &raw)
+    } else {
+        raw
+    };
     let fixes = Some(fixes).filter(|f| f.len() >= 10);
     if let Some(fixes) = fixes {
         // The fixes carry a time on the logger's clock: its ticks (scaled like
@@ -268,12 +371,24 @@ pub fn open(path: &std::path::Path) -> Result<Session> {
         if let Some(sp) = s.channel("GPS Speed") {
             let half = fixes.len() / 2;
             let fit = |k: f64| -> Option<(i64, i64, f64)> {
-                let (a, b) = (crate::rs2gps::best_offset(&fixes[..half], k, sp)?, crate::rs2gps::best_offset(&fixes[half..], k, sp)?);
-                (a.1 > 0.9 && b.1 > 0.9).then_some(((a.0 - b.0).abs(), (a.0 + b.0) / 2, a.1.min(b.1)))
+                let (a, b) = (
+                    crate::rs2gps::best_offset(&fixes[..half], k, sp)?,
+                    crate::rs2gps::best_offset(&fixes[half..], k, sp)?,
+                );
+                (a.1 > 0.9 && b.1 > 0.9).then_some((
+                    (a.0 - b.0).abs(),
+                    (a.0 + b.0) / 2,
+                    a.1.min(b.1),
+                ))
             };
-            let candidates = [ms_per_tick, 1.0].into_iter().filter_map(|k| Some((k, fit(k)?)));
+            let candidates = [ms_per_tick, 1.0]
+                .into_iter()
+                .filter_map(|k| Some((k, fit(k)?)));
             if let Some((k, (_, off, r))) = candidates.min_by_key(|(_, f)| f.0) {
-                log::info!("{}: GPS positions at {k:.5} ms per tick, shifted {off} ms (speed match {r:.3})", path.display());
+                log::info!(
+                    "{}: GPS positions at {k:.5} ms per tick, shifted {off} ms (speed match {r:.3})",
+                    path.display()
+                );
                 (scale, offset) = (k, off);
             }
         }
@@ -289,12 +404,25 @@ pub fn summary(path: &std::path::Path) -> Result<crate::summary::SessionSummary>
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned());
     let date = s.info.date.as_deref().and_then(|d| {
         let p: Vec<u32> = d.split('/').filter_map(|x| x.parse().ok()).collect();
-        (p.len() == 3).then(|| crate::summary::Date { year: p[2] as u16, month: p[0] as u8, day: p[1] as u8 })
+        (p.len() == 3).then(|| crate::summary::Date {
+            year: p[2] as u16,
+            month: p[0] as u8,
+            day: p[1] as u8,
+        })
     });
     // The same best lap as everywhere else (not the out-lap or in-lap, nor one cut short).
     let best = s.best_lap(crate::laps::MIN_LAP_MS);
-    let duration = s.channels.iter().filter_map(|c| c.times_ms.last()).max().copied().max(s.laps.last().map(|l| l.end_ms));
-    let max_rpm = s.channel("Engine").and_then(|c| c.values.iter().copied().reduce(f64::max)).map(|v| v as u32);
+    let duration = s
+        .channels
+        .iter()
+        .filter_map(|c| c.times_ms.last())
+        .max()
+        .copied()
+        .max(s.laps.last().map(|l| l.end_ms));
+    let max_rpm = s
+        .channel("Engine")
+        .and_then(|c| c.values.iter().copied().reduce(f64::max))
+        .map(|v| v as u32);
     Ok(crate::summary::SessionSummary {
         number: file.as_deref().and_then(crate::summary::session_number),
         file,
@@ -365,9 +493,15 @@ mod tests {
     fn reads_channels_laps_and_names() {
         let s = read(&sample()).unwrap();
         assert_eq!(s.info.venue.as_deref(), Some("NKA"));
-        assert_eq!((s.info.logger_id, s.info.logger_model.as_deref()), (Some(123456), Some("MyChron 4")));
+        assert_eq!(
+            (s.info.logger_id, s.info.logger_model.as_deref()),
+            (Some(123456), Some("MyChron 4"))
+        );
         assert_eq!(s.info.date.as_deref(), Some("10/11/2026"));
-        assert_eq!(s.laps.iter().map(|l| l.duration_ms()).collect::<Vec<_>>(), [1000, 2000]);
+        assert_eq!(
+            s.laps.iter().map(|l| l.duration_ms()).collect::<Vec<_>>(),
+            [1000, 2000]
+        );
         let e = &s.channels[0];
         assert_eq!(e.values, [5000.0, 6000.0]); // the "nothing connected" sample is dropped
         assert_eq!(e.times_ms, [0, 101]); // 100 ticks at 1000/990 ms per tick

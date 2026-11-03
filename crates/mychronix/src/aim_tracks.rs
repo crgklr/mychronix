@@ -33,11 +33,18 @@ const WORKERS: usize = 16;
 pub enum Event {
     /// The track list was saved for the first time (outlines still coming).
     List,
-    Progress { done: usize, total: usize },
+    Progress {
+        done: usize,
+        total: usize,
+    },
     /// Finished; `changed` tracks were new or updated.
-    Finished { changed: usize },
+    Finished {
+        changed: usize,
+    },
     /// Couldn't finish (no connection, or the server said no); tried again next start.
-    Failed { offline: bool },
+    Failed {
+        offline: bool,
+    },
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -53,7 +60,9 @@ pub fn dir() -> Option<PathBuf> {
 
 /// The saved track list, once there is one.
 pub fn list_path() -> Option<PathBuf> {
-    dir().map(|d| d.join("aim_tracks.ria")).filter(|p| p.exists())
+    dir()
+        .map(|d| d.join("aim_tracks.ria"))
+        .filter(|p| p.exists())
 }
 
 /// Where a MyChron 5/6's own copy of AiM's list (`0:/tkk/al.ria`: names and
@@ -74,7 +83,10 @@ fn enabled() -> bool {
 /// A track id as AiM writes them: eight lowercase letters and digits. Anything
 /// else is skipped, so a list can't name a file outside the folder.
 fn is_id(id: &str) -> bool {
-    id.len() == 8 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    id.len() == 8
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
 /// Each record of a `.ria`, by track id.
@@ -83,7 +95,9 @@ fn records(buf: &[u8]) -> HashMap<String, &[u8]> {
         .0
         .iter()
         .filter_map(|r| {
-            let id = String::from_utf8_lossy(&r[56..64]).trim_end_matches('\0').to_string();
+            let id = String::from_utf8_lossy(&r[56..64])
+                .trim_end_matches('\0')
+                .to_string();
             is_id(&id).then_some((id, r.as_slice()))
         })
         .collect()
@@ -92,7 +106,11 @@ fn records(buf: &[u8]) -> HashMap<String, &[u8]> {
 /// The tracks to download: new ones, changed ones, and any whose file is missing.
 fn wanted(old: &[u8], new: &[u8], has_file: impl Fn(&str) -> bool) -> Vec<String> {
     let old = records(old);
-    let mut ids: Vec<String> = records(new).into_iter().filter(|(id, r)| old.get(id) != Some(r) || !has_file(id)).map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = records(new)
+        .into_iter()
+        .filter(|(id, r)| old.get(id) != Some(r) || !has_file(id))
+        .map(|(id, _)| id)
+        .collect();
     ids.sort();
     ids
 }
@@ -162,14 +180,21 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
         return Ok(0);
     }
     let r = r.error_for_status().map_err(|e| e.to_string())?;
-    let etag = r.headers().get(reqwest::header::ETAG).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let etag = r
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     let new = r.bytes().map_err(offline)?.to_vec();
     if new.is_empty() || new.len() % RIA_RECORD != 0 || aim_track::parse_ria(&new).is_err() {
         return Err(format!("unexpected track list ({} bytes)", new.len()).into());
     }
     let need = wanted(&old, &new, |id| dir.join(format!("{id}.tkk")).exists());
     let total = need.len();
-    log::info!("AiM tracks: {} in the list, {total} to download", new.len() / RIA_RECORD);
+    log::info!(
+        "AiM tracks: {} in the list, {total} to download",
+        new.len() / RIA_RECORD
+    );
 
     // On the first run, save the list now so the tracks show while their outlines arrive.
     if old.is_empty() {
@@ -183,15 +208,20 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
     let stop = Arc::new(AtomicBool::new(false));
     let workers: Vec<_> = (0..WORKERS)
         .map(|_| {
-            let (queue, done, failed, stop) = (queue.clone(), done.clone(), failed.clone(), stop.clone());
+            let (queue, done, failed, stop) =
+                (queue.clone(), done.clone(), failed.clone(), stop.clone());
             let (client, dir, tx, ctx) = (client.clone(), dir.clone(), tx.clone(), ctx.clone());
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
-                    let Some(id) = queue.lock().unwrap().next() else { break };
+                    let Some(id) = queue.lock().unwrap().next() else {
+                        break;
+                    };
                     match client.get(format!("{BASE}Tracks/{id}.tkk")).send() {
                         Ok(r) if r.status().is_success() => match r.bytes() {
                             Ok(b) if !b.is_empty() => {
-                                if let Err(e) = crate::storage::write_atomic(&dir.join(format!("{id}.tkk")), &b) {
+                                if let Err(e) =
+                                    crate::storage::write_atomic(&dir.join(format!("{id}.tkk")), &b)
+                                {
                                     log::warn!("AiM tracks: couldn't save {id}.tkk: {e}");
                                     failed.fetch_add(1, Ordering::Relaxed);
                                 }
@@ -201,10 +231,15 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
                             }
                         },
                         // Listed but not on the server: nothing to fetch, not an error.
-                        Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => log::debug!("AiM tracks: {id}.tkk not on the server"),
+                        Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+                            log::debug!("AiM tracks: {id}.tkk not on the server")
+                        }
                         // Busy or refusing: stop for now rather than keep asking.
                         Ok(r) => {
-                            log::info!("AiM tracks: server answered {} for {id}.tkk; stopping", r.status());
+                            log::info!(
+                                "AiM tracks: server answered {} for {id}.tkk; stopping",
+                                r.status()
+                            );
                             stop.store(true, Ordering::Relaxed);
                         }
                         Err(e) => {
@@ -229,7 +264,10 @@ fn sync(tx: &mpsc::Sender<Event>, ctx: &eframe::egui::Context) -> Result<usize, 
     let failed = failed.load(Ordering::Relaxed);
     if stop.load(Ordering::Relaxed) || failed > 0 {
         let left = total - done.load(Ordering::Relaxed) + failed;
-        return Err(Stopped(format!("{left} tracks still to download"), failed > 0));
+        return Err(Stopped(
+            format!("{left} tracks still to download"),
+            failed > 0,
+        ));
     }
 
     // Tracks AiM removed.
@@ -257,8 +295,19 @@ mod tests {
 
     #[test]
     fn only_new_changed_and_missing_tracks_are_wanted() {
-        let old = [record("aaaa0001", "One"), record("aaaa0002", "Two"), record("aaaa0003", "Three")].concat();
-        let new = [record("aaaa0002", "Two"), record("aaaa0001", "One, renamed"), record("aaaa0004", "Four"), record("aaaa0003", "Three")].concat();
+        let old = [
+            record("aaaa0001", "One"),
+            record("aaaa0002", "Two"),
+            record("aaaa0003", "Three"),
+        ]
+        .concat();
+        let new = [
+            record("aaaa0002", "Two"),
+            record("aaaa0001", "One, renamed"),
+            record("aaaa0004", "Four"),
+            record("aaaa0003", "Three"),
+        ]
+        .concat();
         // Three's file is missing; order in the list doesn't matter.
         let want = wanted(&old, &new, |id| id != "aaaa0003");
         assert_eq!(want, ["aaaa0001", "aaaa0003", "aaaa0004"]);

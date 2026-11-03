@@ -24,7 +24,13 @@ pub struct Row {
 
 /// Best time per split over the included rows.
 pub fn best_splits(rows: &[&Row], n: usize) -> Vec<Option<i64>> {
-    (0..n).map(|k| rows.iter().filter_map(|r| r.splits.as_ref().map(|s| s[k])).min()).collect()
+    (0..n)
+        .map(|k| {
+            rows.iter()
+                .filter_map(|r| r.splits.as_ref().map(|s| s[k]))
+                .min()
+        })
+        .collect()
 }
 
 /// Sum of the best splits: the lap you'd do putting your best of each together.
@@ -45,19 +51,31 @@ pub fn best_rolling(rows: &[Row], included: &[bool], n: usize) -> Option<(i64, u
                 if !consecutive {
                     runs.push(Vec::new());
                 }
-                runs.last_mut().unwrap().extend(s.iter().enumerate().map(|(k, &t)| (ri, k, t)));
+                runs.last_mut()
+                    .unwrap()
+                    .extend(s.iter().enumerate().map(|(k, &t)| (ri, k, t)));
             }
             _ => runs.push(Vec::new()),
         }
     }
     runs.iter()
         .filter(|run| run.len() >= n)
-        .flat_map(|run| run.windows(n).map(|w| (w.iter().map(|x| x.2).sum::<i64>(), w[0].0, w[0].1)))
+        .flat_map(|run| {
+            run.windows(n)
+                .map(|w| (w.iter().map(|x| x.2).sum::<i64>(), w[0].0, w[0].1))
+        })
         .min_by_key(|x| x.0)
 }
 
 /// The value a cell shows, in ms.
-pub fn cell(row: &[i64], k: usize, values: Values, cumulative: bool, best: &[Option<i64>], best_lap: Option<&[i64]>) -> Option<i64> {
+pub fn cell(
+    row: &[i64],
+    k: usize,
+    values: Values,
+    cumulative: bool,
+    best: &[Option<i64>],
+    best_lap: Option<&[i64]>,
+) -> Option<i64> {
     let reference: Option<Vec<i64>> = match values {
         Values::Times => None,
         Values::VsBestSplit => best.iter().copied().collect(),
@@ -82,8 +100,17 @@ pub fn stats(values: &[i64]) -> Option<(f64, f64, i64, f64)> {
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     let mid = sorted.len() / 2;
-    let median = if sorted.len().is_multiple_of(2) { (sorted[mid - 1] + sorted[mid]) as f64 / 2.0 } else { sorted[mid] as f64 };
-    let sd = (values.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n).sqrt();
+    let median = if sorted.len().is_multiple_of(2) {
+        (sorted[mid - 1] + sorted[mid]) as f64 / 2.0
+    } else {
+        sorted[mid] as f64
+    };
+    let sd = (values
+        .iter()
+        .map(|&v| (v as f64 - mean).powi(2))
+        .sum::<f64>()
+        / n)
+        .sqrt();
     Some((mean, median, *sorted.last().unwrap(), sd))
 }
 
@@ -92,21 +119,35 @@ mod tests {
     use super::*;
 
     fn row(n: i32, s: &[i64]) -> Row {
-        Row { lap_number: n, lap_ms: s.iter().sum(), splits: Some(s.to_vec()) }
+        Row {
+            lap_number: n,
+            lap_ms: s.iter().sum(),
+            splits: Some(s.to_vec()),
+        }
     }
 
     #[test]
     fn theoretical_and_rolling() {
-        let rows = vec![row(2, &[10_000, 12_000, 9_000]), row(3, &[11_000, 10_500, 9_500]), row(4, &[10_200, 11_000, 8_800])];
+        let rows = vec![
+            row(2, &[10_000, 12_000, 9_000]),
+            row(3, &[11_000, 10_500, 9_500]),
+            row(4, &[10_200, 11_000, 8_800]),
+        ];
         let refs: Vec<&Row> = rows.iter().collect();
         let best = best_splits(&refs, 3);
         assert_eq!(best, [Some(10_000), Some(10_500), Some(8_800)]);
         assert_eq!(best_theoretical(&best), Some(29_300));
         // Best three splits in a row: lap 3's 10.5 + 9.5 then lap 4's 10.2 = 30.2,
         // vs lap 2 (31.0), lap 3 (31.0), lap 4 (30.0) — lap 4 itself wins.
-        assert_eq!(best_rolling(&rows, &[true, true, true], 3), Some((30_000, 2, 0)));
+        assert_eq!(
+            best_rolling(&rows, &[true, true, true], 3),
+            Some((30_000, 2, 0))
+        );
         // Leave lap 4 out: the best run is lap 2's last split into lap 3: 9.0 + 11.0 + 10.5.
-        assert_eq!(best_rolling(&rows, &[true, true, false], 3), Some((30_500, 0, 2)));
+        assert_eq!(
+            best_rolling(&rows, &[true, true, false], 3),
+            Some((30_500, 0, 2))
+        );
     }
 
     #[test]
@@ -123,12 +164,30 @@ mod tests {
         let best = [Some(10_000), Some(10_500), Some(8_800)];
         let best_lap = [10_200, 11_000, 8_800];
         let r = [11_000, 10_500, 9_500];
-        assert_eq!(cell(&r, 1, Values::Times, false, &best, Some(&best_lap)), Some(10_500));
-        assert_eq!(cell(&r, 1, Values::Times, true, &best, Some(&best_lap)), Some(21_500));
-        assert_eq!(cell(&r, 0, Values::VsBestSplit, false, &best, Some(&best_lap)), Some(1_000));
-        assert_eq!(cell(&r, 2, Values::VsBestSplit, true, &best, Some(&best_lap)), Some(1_700));
-        assert_eq!(cell(&r, 1, Values::VsBestLap, false, &best, Some(&best_lap)), Some(-500));
-        assert_eq!(cell(&r, 2, Values::VsBestLap, true, &best, Some(&best_lap)), Some(1_000));
+        assert_eq!(
+            cell(&r, 1, Values::Times, false, &best, Some(&best_lap)),
+            Some(10_500)
+        );
+        assert_eq!(
+            cell(&r, 1, Values::Times, true, &best, Some(&best_lap)),
+            Some(21_500)
+        );
+        assert_eq!(
+            cell(&r, 0, Values::VsBestSplit, false, &best, Some(&best_lap)),
+            Some(1_000)
+        );
+        assert_eq!(
+            cell(&r, 2, Values::VsBestSplit, true, &best, Some(&best_lap)),
+            Some(1_700)
+        );
+        assert_eq!(
+            cell(&r, 1, Values::VsBestLap, false, &best, Some(&best_lap)),
+            Some(-500)
+        );
+        assert_eq!(
+            cell(&r, 2, Values::VsBestLap, true, &best, Some(&best_lap)),
+            Some(1_000)
+        );
     }
 
     #[test]

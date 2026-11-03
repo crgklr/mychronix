@@ -36,11 +36,16 @@ fn to_lat_lon(x: f64, y: f64, z: f64) -> (f64, f64) {
 fn enu_axes(lat: f64, lon: f64) -> [[f64; 3]; 3] {
     let (sp, cp) = lat.to_radians().sin_cos();
     let (sl, cl) = lon.to_radians().sin_cos();
-    [[-sl, cl, 0.0], [-sp * cl, -sp * sl, cp], [cp * cl, cp * sl, sp]]
+    [
+        [-sl, cl, 0.0],
+        [-sp * cl, -sp * sl, cp],
+        [cp * cl, cp * sl, sp],
+    ]
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    b.get(o..o + 4)
+        .map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
 }
 
 fn i32_at(b: &[u8], o: usize) -> Option<i32> {
@@ -48,7 +53,8 @@ fn i32_at(b: &[u8], o: usize) -> Option<i32> {
 }
 
 fn f64_at(b: &[u8], o: usize) -> Option<f64> {
-    b.get(o..o + 8).map(|x| f64::from_le_bytes(x.try_into().unwrap()))
+    b.get(o..o + 8)
+        .map(|x| f64::from_le_bytes(x.try_into().unwrap()))
 }
 
 /// Each record of `tag` that holds data (not the section header, whose
@@ -85,7 +91,13 @@ pub fn read_rrk(data: &[u8]) -> Vec<Fix> {
             let [e, n, _] = enu_axes(lat, lon);
             let ve = e[0] * vx + e[1] * vy + e[2] * vz;
             let vn = n[0] * vx + n[1] * vy + n[2] * vz;
-            Some(Fix { ticks, lat, lon, speed_kmh: Some(ve.hypot(vn) * 3.6), heading: Some(ve.atan2(vn).to_degrees().rem_euclid(360.0)) })
+            Some(Fix {
+                ticks,
+                lat,
+                lon,
+                speed_kmh: Some(ve.hypot(vn) * 3.6),
+                heading: Some(ve.atan2(vn).to_degrees().rem_euclid(360.0)),
+            })
         })
         .filter(|f| f.lat.is_finite() && f.lon.is_finite() && (f.lat != 0.0 || f.lon != 0.0))
         .collect()
@@ -95,10 +107,18 @@ pub fn read_rrk(data: &[u8]) -> Vec<Fix> {
 pub fn read_gpk(data: &[u8]) -> Vec<Fix> {
     // The reference point: the PROV record whose three doubles at +14 are a
     // point on the earth's surface (earth-centered meters).
-    let on_earth = |p: &(f64, f64, f64)| (6.3e6..6.4e6).contains(&(p.0.powi(2) + p.1.powi(2) + p.2.powi(2)).sqrt());
+    let on_earth = |p: &(f64, f64, f64)| {
+        (6.3e6..6.4e6).contains(&(p.0.powi(2) + p.1.powi(2) + p.2.powi(2)).sqrt())
+    };
     let Some(origin) = (0..data.len().saturating_sub(4))
         .filter(|&i| &data[i..i + 4] == b"PROV")
-        .filter_map(|at| Some((f64_at(data, at + 14)?, f64_at(data, at + 22)?, f64_at(data, at + 30)?)))
+        .filter_map(|at| {
+            Some((
+                f64_at(data, at + 14)?,
+                f64_at(data, at + 22)?,
+                f64_at(data, at + 30)?,
+            ))
+        })
         .find(on_earth)
     else {
         return Vec::new();
@@ -108,7 +128,11 @@ pub fn read_gpk(data: &[u8]) -> Vec<Fix> {
     records(data, b"PSOL")
         .filter_map(|at| {
             let ticks = u32_at(data, at + 4)?;
-            let (de, dn, du) = (f64_at(data, at + 16)?, f64_at(data, at + 24)?, f64_at(data, at + 32)?);
+            let (de, dn, du) = (
+                f64_at(data, at + 16)?,
+                f64_at(data, at + 24)?,
+                f64_at(data, at + 32)?,
+            );
             if !(de.abs() < 1e5 && dn.abs() < 1e5 && du.abs() < 1e5) {
                 return None;
             }
@@ -116,7 +140,13 @@ pub fn read_gpk(data: &[u8]) -> Vec<Fix> {
             let y = origin.1 + e[1] * de + n[1] * dn + u[1] * du;
             let z = origin.2 + e[2] * de + n[2] * dn + u[2] * du;
             let (lat, lon) = to_lat_lon(x, y, z);
-            Some(Fix { ticks, lat, lon, speed_kmh: None, heading: None })
+            Some(Fix {
+                ticks,
+                lat,
+                lon,
+                speed_kmh: None,
+                heading: None,
+            })
         })
         .collect()
 }
@@ -137,7 +167,11 @@ pub fn with_velocity(mut track: Vec<Fix>, raw: &[Fix]) -> Vec<Fix> {
         if b.ticks.saturating_sub(a.ticks) > 1000 || f.ticks < a.ticks || f.ticks > b.ticks {
             continue;
         }
-        let w = if b.ticks > a.ticks { (f.ticks - a.ticks) as f64 / (b.ticks - a.ticks) as f64 } else { 0.0 };
+        let w = if b.ticks > a.ticks {
+            (f.ticks - a.ticks) as f64 / (b.ticks - a.ticks) as f64
+        } else {
+            0.0
+        };
         let (sa, sb) = (a.speed_kmh.unwrap(), b.speed_kmh.unwrap());
         f.speed_kmh = Some(sa + (sb - sa) * w);
         f.heading = if w < 0.5 { a.heading } else { b.heading };
@@ -170,8 +204,15 @@ pub fn track(fixes: &[Fix], ms_per_tick: f64, offset_ms: i64) -> GpsTrack {
         let dt = (ms(&fixes[b]) - ms(&fixes[a])) as f64 / 1000.0;
         let (de, dn) = meters(&fixes[a], &fixes[b]);
         let f = &fixes[k];
-        let speed = f.speed_kmh.unwrap_or(if dt > 0.0 { de.hypot(dn) / dt * 3.6 } else { 0.0 });
-        heading.push(f.heading.unwrap_or(de.atan2(dn).to_degrees().rem_euclid(360.0)));
+        let speed = f.speed_kmh.unwrap_or(if dt > 0.0 {
+            de.hypot(dn) / dt * 3.6
+        } else {
+            0.0
+        });
+        heading.push(
+            f.heading
+                .unwrap_or(de.atan2(dn).to_degrees().rem_euclid(360.0)),
+        );
         t.times_ms.push(ms(f));
         t.latitude.push(f.lat);
         t.longitude.push(f.lon);
@@ -184,7 +225,8 @@ pub fn track(fixes: &[Fix], ms_per_tick: f64, offset_ms: i64) -> GpsTrack {
         let dh = ((heading[b] - heading[a] + 540.0).rem_euclid(360.0)) - 180.0;
         // Heading means little when nearly stopped.
         let moving = t.speed_kmh[k] > 5.0;
-        t.yaw_rate_dps.push(if dt > 0.0 && moving { dh / dt } else { 0.0 });
+        t.yaw_rate_dps
+            .push(if dt > 0.0 && moving { dh / dt } else { 0.0 });
     }
     t
 }
@@ -202,16 +244,33 @@ pub fn best_offset(fixes: &[Fix], ms_per_tick: f64, speed: &crate::Channel) -> O
         (i > 0 && i < speed.times_ms.len()).then(|| speed.values[i])
     };
     let corr = |off: i64| -> Option<f64> {
-        let pairs: Vec<(f64, f64)> = base.times_ms.iter().zip(&base.speed_kmh).filter_map(|(&t, &v)| Some((v, at(t + off)?))).collect();
+        let pairs: Vec<(f64, f64)> = base
+            .times_ms
+            .iter()
+            .zip(&base.speed_kmh)
+            .filter_map(|(&t, &v)| Some((v, at(t + off)?)))
+            .collect();
         if pairs.len() < 50 {
             return None;
         }
         let n = pairs.len() as f64;
-        let (mx, my) = (pairs.iter().map(|p| p.0).sum::<f64>() / n, pairs.iter().map(|p| p.1).sum::<f64>() / n);
-        let (sxy, sxx, syy) = pairs.iter().fold((0.0, 0.0, 0.0), |a, p| (a.0 + (p.0 - mx) * (p.1 - my), a.1 + (p.0 - mx).powi(2), a.2 + (p.1 - my).powi(2)));
+        let (mx, my) = (
+            pairs.iter().map(|p| p.0).sum::<f64>() / n,
+            pairs.iter().map(|p| p.1).sum::<f64>() / n,
+        );
+        let (sxy, sxx, syy) = pairs.iter().fold((0.0, 0.0, 0.0), |a, p| {
+            (
+                a.0 + (p.0 - mx) * (p.1 - my),
+                a.1 + (p.0 - mx).powi(2),
+                a.2 + (p.1 - my).powi(2),
+            )
+        });
         (sxx > 0.0 && syy > 0.0).then(|| sxy / (sxx * syy).sqrt())
     };
-    (-3000..=3000).step_by(25).filter_map(|off| Some((off as i64, corr(off as i64)?))).max_by(|a, b| a.1.total_cmp(&b.1))
+    (-3000..=3000)
+        .step_by(25)
+        .filter_map(|off| Some((off as i64, corr(off as i64)?)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
 }
 
 #[cfg(test)]
@@ -222,14 +281,25 @@ mod tests {
     fn earth_centered_to_degrees() {
         // A point at the Ottobiano circuit, Italy.
         let (lat, lon) = to_lat_lon(4_451_510.40, 690_429.26, 4_500_352.11);
-        assert!((lat - 45.164_533).abs() < 1e-5 && (lon - 8.816_328).abs() < 1e-5, "{lat} {lon}");
+        assert!(
+            (lat - 45.164_533).abs() < 1e-5 && (lon - 8.816_328).abs() < 1e-5,
+            "{lat} {lon}"
+        );
     }
 
     #[test]
     fn track_speed_and_heading_from_positions() {
         // Due east at 20 m/s, a fix every 125 ticks.
         let fixes: Vec<Fix> = (0..20)
-            .map(|k| Fix { ticks: k * 125, lat: 45.0, lon: 8.0 + k as f64 * 2.5 / (6_371_000.0 * 45f64.to_radians().cos()) * 180.0 / std::f64::consts::PI, speed_kmh: None, heading: None })
+            .map(|k| Fix {
+                ticks: k * 125,
+                lat: 45.0,
+                lon: 8.0
+                    + k as f64 * 2.5 / (6_371_000.0 * 45f64.to_radians().cos()) * 180.0
+                        / std::f64::consts::PI,
+                speed_kmh: None,
+                heading: None,
+            })
             .collect();
         let t = track(&fixes, 1.0, 0);
         assert!((t.speed_kmh[10] - 72.0).abs() < 0.5, "{}", t.speed_kmh[10]);

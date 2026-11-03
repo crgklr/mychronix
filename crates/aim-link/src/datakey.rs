@@ -30,7 +30,11 @@ pub enum KeyError {
     Unexpected(String),
 }
 
-const LINUX_HINT: &str = if cfg!(target_os = "linux") { " (on Linux this needs the AiM USB rule: the Device page offers Allow USB access)" } else { "" };
+const LINUX_HINT: &str = if cfg!(target_os = "linux") {
+    " (on Linux this needs the AiM USB rule: the Device page offers Allow USB access)"
+} else {
+    ""
+};
 
 pub type Result<T> = std::result::Result<T, KeyError>;
 
@@ -62,13 +66,25 @@ impl RunInfo {
     pub fn start(&self) -> Option<(String, String)> {
         let b = self.header.get(0x9A..0xA1)?;
         let d = |x: u8| (x >> 4) as u32 * 10 + (x & 0x0F) as u32;
-        (d(b[5]) > 0 && d(b[3]) > 0).then(|| (format!("{:02}/{:02}/{}", d(b[5]), d(b[3]), 2000 + d(b[6])), format!("{:02}:{:02}:{:02}", d(b[2]), d(b[1]), d(b[0]))))
+        (d(b[5]) > 0 && d(b[3]) > 0).then(|| {
+            (
+                format!("{:02}/{:02}/{}", d(b[5]), d(b[3]), 2000 + d(b[6])),
+                format!("{:02}:{:02}:{:02}", d(b[2]), d(b[1]), d(b[0])),
+            )
+        })
     }
 
     /// The file name a download is saved as: "20260919-073151_025.mc4".
     pub fn file_name(&self) -> String {
         match self.start() {
-            Some((date, time)) => format!("{}{}{}-{}_{:03}.mc4", &date[6..10], &date[0..2], &date[3..5], time.replace(':', ""), self.number),
+            Some((date, time)) => format!(
+                "{}{}{}-{}_{:03}.mc4",
+                &date[6..10],
+                &date[0..2],
+                &date[3..5],
+                time.replace(':', ""),
+                self.number
+            ),
             None => format!("run_{:03}.mc4", self.number),
         }
     }
@@ -89,7 +105,10 @@ pub struct DataKey {
 
 /// Whether a data key is plugged in (cheap; doesn't open it).
 pub fn is_present() -> bool {
-    nusb::list_devices().wait().map(|mut d| d.any(|d| d.vendor_id() == VID && d.product_id() == PID)).unwrap_or(false)
+    nusb::list_devices()
+        .wait()
+        .map(|mut d| d.any(|d| d.vendor_id() == VID && d.product_id() == PID))
+        .unwrap_or(false)
 }
 
 fn u16_at(b: &[u8], o: usize) -> Option<u16> {
@@ -97,7 +116,8 @@ fn u16_at(b: &[u8], o: usize) -> Option<u16> {
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+    b.get(o..o + 4)
+        .map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
 }
 
 impl DataKey {
@@ -107,14 +127,24 @@ impl DataKey {
             .map_err(|e| KeyError::Open(e.to_string()))?
             .find(|d| d.vendor_id() == VID && d.product_id() == PID)
             .ok_or(KeyError::NotFound)?;
-        let device = info.open().wait().map_err(|e| KeyError::Open(e.to_string()))?;
+        let device = info
+            .open()
+            .wait()
+            .map_err(|e| KeyError::Open(e.to_string()))?;
         // macOS leaves a device of a class it doesn't know (the key is class
         // 0xDC) unconfigured, so it has no interface to claim yet: select its
         // configuration, as any driver for it would. Linux configures it itself.
         if device.active_configuration().is_err() {
-            let value = device.configurations().next().map(|c| c.configuration_value()).unwrap_or(1);
+            let value = device
+                .configurations()
+                .next()
+                .map(|c| c.configuration_value())
+                .unwrap_or(1);
             log::info!("data key: unconfigured, selecting configuration {value}");
-            device.set_configuration(value).wait().map_err(|e| KeyError::Open(format!("couldn't configure it: {e}")))?;
+            device
+                .set_configuration(value)
+                .wait()
+                .map_err(|e| KeyError::Open(format!("couldn't configure it: {e}")))?;
         }
         // The system publishes the interface a moment after configuring it.
         let mut tries = 0;
@@ -128,7 +158,9 @@ impl DataKey {
                 Err(e) => return Err(KeyError::Open(e.to_string())),
             }
         };
-        let data_in = interface.endpoint::<Bulk, In>(DATA_IN).map_err(|e| KeyError::Open(e.to_string()))?;
+        let data_in = interface
+            .endpoint::<Bulk, In>(DATA_IN)
+            .map_err(|e| KeyError::Open(e.to_string()))?;
         let mut key = DataKey { interface, data_in };
         key.identify()?;
         Ok(key)
@@ -138,7 +170,14 @@ impl DataKey {
     fn vendor(&self, request: u8, index: u16, data: &[u8]) -> Result<()> {
         self.interface
             .control_out(
-                ControlOut { control_type: ControlType::Vendor, recipient: Recipient::Endpoint, request, value: 0, index, data },
+                ControlOut {
+                    control_type: ControlType::Vendor,
+                    recipient: Recipient::Endpoint,
+                    request,
+                    value: 0,
+                    index,
+                    data,
+                },
                 TIMEOUT,
             )
             .wait()
@@ -180,14 +219,22 @@ impl DataKey {
     /// The runs on the key, oldest first.
     pub fn runs(&mut self) -> Result<Vec<RunInfo>> {
         let dir = self.command(0x11, 0, 4096)?;
-        let count = dir.as_chunks::<16>().0.iter().take_while(|e| u16_at(e.as_slice(), 0).is_some_and(|m| m != 0xFFFF && m != 0)).count();
+        let count = dir
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .take_while(|e| u16_at(e.as_slice(), 0).is_some_and(|m| m != 0xFFFF && m != 0))
+            .count();
         let mut runs = Vec::with_capacity(count);
         for index in 0..count as u16 {
             let h = self.command(0x12, index as u32, 256)?;
-            let field = |o| u32_at(&h, o).ok_or_else(|| KeyError::Unexpected("short run header".into()));
+            let field =
+                |o| u32_at(&h, o).ok_or_else(|| KeyError::Unexpected("short run header".into()));
             let (laps_addr, data_addr, data_len) = (field(136)?, field(140)?, field(150)?);
             if data_addr < laps_addr || data_len > 32 << 20 {
-                return Err(KeyError::Unexpected(format!("run {index}'s header doesn't add up")));
+                return Err(KeyError::Unexpected(format!(
+                    "run {index}'s header doesn't add up"
+                )));
             }
             let best = u32_at(&h, 8).filter(|&b| b > 0 && b != 0x7FFF_FFFF);
             let entry = &dir[index as usize * 16..index as usize * 16 + 16];
@@ -207,8 +254,16 @@ impl DataKey {
     }
 
     /// Downloads one run's lap records and samples.
-    pub fn download(&mut self, info: &RunInfo, mut progress: impl FnMut(usize, usize)) -> Result<Run> {
-        let lap_records = self.command(0x13, info.laps_addr, (info.data_addr - info.laps_addr) as usize)?;
+    pub fn download(
+        &mut self,
+        info: &RunInfo,
+        mut progress: impl FnMut(usize, usize),
+    ) -> Result<Run> {
+        let lap_records = self.command(
+            0x13,
+            info.laps_addr,
+            (info.data_addr - info.laps_addr) as usize,
+        )?;
         let total = (info.data_len as usize).div_ceil(64) * 64;
         let mut data = Vec::with_capacity(total);
         while data.len() < total {
@@ -217,7 +272,11 @@ impl DataKey {
             progress(data.len(), total);
         }
         data.truncate(info.data_len as usize);
-        Ok(Run { info: info.clone(), lap_records, data })
+        Ok(Run {
+            info: info.clone(),
+            lap_records,
+            data,
+        })
     }
 }
 

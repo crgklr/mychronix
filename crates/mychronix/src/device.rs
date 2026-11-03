@@ -21,28 +21,56 @@ use serde::{Deserialize, Serialize};
 pub enum Command {
     /// Look for a logger on USB, then at 10.0.0.1, and list AiM networks in range.
     Scan,
-    Join { ssid: String },
+    Join {
+        ssid: String,
+    },
     Leave,
     /// Read the logger's session list (folder listing + summary file), and
     /// copy its new custom tracks, noting which MyChron (serial) they came from.
     /// `dir`: where this logger's sessions are saved, to tell which are new.
-    List { serial: Option<u32>, dir: Option<PathBuf> },
+    List {
+        serial: Option<u32>,
+        dir: Option<PathBuf>,
+    },
     /// Each file with the details to save beside it; `replace` puts a
     /// recording already saved here over its copy instead of beside it.
-    Download { files: Vec<(DirEntry, SessionMeta)>, dir: PathBuf, replace: bool },
+    Download {
+        files: Vec<(DirEntry, SessionMeta)>,
+        dir: PathBuf,
+        replace: bool,
+    },
 }
 
 pub enum Event {
     /// Result of a scan: the logger if one answered (`usb` when it's plugged
     /// in), AiM networks in range, and the current WiFi network.
-    Scanned { logger: Option<Beacon>, usb: bool, networks: Vec<(String, u8)>, current: Option<String> },
-    Joined { ssid: String },
+    Scanned {
+        logger: Option<Beacon>,
+        usb: bool,
+        networks: Vec<(String, u8)>,
+        current: Option<String>,
+    },
+    Joined {
+        ssid: String,
+    },
     Left,
     /// The logger's sessions, plus how many custom tracks were copied from it into the library.
-    Listed { files: Vec<DirEntry>, summaries: Vec<SessionSummary>, tracks: MyChronTracks },
-    Progress { index: usize, count: usize, file: String, done: u64, total: u64 },
+    Listed {
+        files: Vec<DirEntry>,
+        summaries: Vec<SessionSummary>,
+        tracks: MyChronTracks,
+    },
+    Progress {
+        index: usize,
+        count: usize,
+        file: String,
+        done: u64,
+        total: u64,
+    },
     /// Where each session was saved (a reused name is saved beside the old one).
-    Downloaded { saved: Vec<PathBuf> },
+    Downloaded {
+        saved: Vec<PathBuf>,
+    },
     Error(String),
 }
 
@@ -86,13 +114,21 @@ pub fn downloaded(dir: &Path, entry: &DirEntry) -> Option<PathBuf> {
 /// the MyChron's summary of it, else the time it listed the file with. That
 /// one is when the file was written, in UTC (a MyChron 6 listed 12:58:46 for
 /// a session that started at 8:55 EDT), so it's moved to `tz`.
-pub fn start_of(entry: &DirEntry, summary: Option<&SessionSummary>, tz: &jiff::tz::TimeZone) -> String {
+pub fn start_of(
+    entry: &DirEntry,
+    summary: Option<&SessionSummary>,
+    tz: &jiff::tz::TimeZone,
+) -> String {
     if let Some(s) = summary.filter(|s| s.date.is_some()) {
         return crate::profiles::stamp(s.date, s.start_time.as_deref());
     }
     jiff::civil::DateTime::strptime("%m/%d/%Y %H:%M:%S", listed(entry))
         .and_then(|utc| utc.to_zoned(jiff::tz::TimeZone::UTC))
-        .map(|utc| utc.with_time_zone(tz.clone()).strftime("%Y-%m-%d %H:%M:%S").to_string())
+        .map(|utc| {
+            utc.with_time_zone(tz.clone())
+                .strftime("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -102,7 +138,11 @@ pub fn start_of(entry: &DirEntry, summary: Option<&SessionSummary>, tz: &jiff::t
 /// `newest`, the newest session already here. A sheet carries forward, so
 /// one on an older session would change the setups of sessions already
 /// downloaded.
-pub fn setup_target(dir: &Path, files: &[(DirEntry, String)], newest: &str) -> Option<(PathBuf, String)> {
+pub fn setup_target(
+    dir: &Path,
+    files: &[(DirEntry, String)],
+    newest: &str,
+) -> Option<(PathBuf, String)> {
     files
         .iter()
         .filter(|(e, _)| downloaded(dir, e).is_none())
@@ -116,7 +156,14 @@ impl SessionMeta {
     /// its place): a field left blank keeps the old value, and the track link
     /// stays with its track.
     fn over(mut self, old: SessionMeta) -> SessionMeta {
-        for (new, was) in [(&mut self.driver, old.driver), (&mut self.kart, old.kart), (&mut self.championship, old.championship), (&mut self.session_type, old.session_type), (&mut self.comment, old.comment), (&mut self.track, old.track.clone())] {
+        for (new, was) in [
+            (&mut self.driver, old.driver),
+            (&mut self.kart, old.kart),
+            (&mut self.championship, old.championship),
+            (&mut self.session_type, old.session_type),
+            (&mut self.comment, old.comment),
+            (&mut self.track, old.track.clone()),
+        ] {
             if new.trim().is_empty() {
                 *new = was;
             }
@@ -160,18 +207,32 @@ impl Worker {
                     Command::Scan => {
                         // A MyChron plugged in by USB comes first: no WiFi to join.
                         if let Some(logger) = usb_logger() {
-                            send(Event::Scanned { logger: Some(logger), usb: true, networks: Vec::new(), current: current_wifi() });
+                            send(Event::Scanned {
+                                logger: Some(logger),
+                                usb: true,
+                                networks: Vec::new(),
+                                current: current_wifi(),
+                            });
                             continue;
                         }
                         let logger = aim_link::probe(AP_ADDRESS, Duration::from_millis(700)).ok();
-                        let (networks, current) = if logger.is_some() { (Vec::new(), current_wifi()) } else { (aim_networks(), current_wifi()) };
+                        let (networks, current) = if logger.is_some() {
+                            (Vec::new(), current_wifi())
+                        } else {
+                            (aim_networks(), current_wifi())
+                        };
                         log::debug!(
                             "scan: logger {:?}, on WiFi {:?}, MyChron networks {:?}",
                             logger.as_ref().map(|b| (b.logger_id, b.round_trip)),
                             current,
                             networks
                         );
-                        send(Event::Scanned { logger, usb: false, networks, current });
+                        send(Event::Scanned {
+                            logger,
+                            usb: false,
+                            networks,
+                            current,
+                        });
                     }
                     Command::Join { ssid } => {
                         log::info!("joining {ssid}");
@@ -195,11 +256,27 @@ impl Worker {
                         let started = std::time::Instant::now();
                         match list(serial, dir.as_deref()) {
                             Ok((files, summaries, tracks)) => {
-                                log::info!("listed {} files, {} summaries, {} new custom tracks in {:?}", files.len(), summaries.len(), tracks.copied(), started.elapsed());
+                                log::info!(
+                                    "listed {} files, {} summaries, {} new custom tracks in {:?}",
+                                    files.len(),
+                                    summaries.len(),
+                                    tracks.copied(),
+                                    started.elapsed()
+                                );
                                 for f in &files {
-                                    log::debug!("  {} {} bytes {} {}", f.name, f.size, f.date, f.time);
+                                    log::debug!(
+                                        "  {} {} bytes {} {}",
+                                        f.name,
+                                        f.size,
+                                        f.date,
+                                        f.time
+                                    );
                                 }
-                                send(Event::Listed { files, summaries, tracks })
+                                send(Event::Listed {
+                                    files,
+                                    summaries,
+                                    tracks,
+                                })
                             }
                             Err(e) => {
                                 log::error!("listing failed: {e}");
@@ -207,8 +284,21 @@ impl Worker {
                             }
                         }
                     }
-                    Command::Download { files, dir, replace } => {
-                        log::info!("downloading {} sessions to {}{}", files.len(), dir.display(), if replace { ", replacing copies already here" } else { "" });
+                    Command::Download {
+                        files,
+                        dir,
+                        replace,
+                    } => {
+                        log::info!(
+                            "downloading {} sessions to {}{}",
+                            files.len(),
+                            dir.display(),
+                            if replace {
+                                ", replacing copies already here"
+                            } else {
+                                ""
+                            }
+                        );
                         match download(&files, &dir, replace, &send) {
                             Ok(saved) => {
                                 log::info!("downloaded {} sessions", saved.len());
@@ -223,7 +313,10 @@ impl Worker {
                 }
             }
         });
-        Self { tx: cmd_tx, rx: ev_rx }
+        Self {
+            tx: cmd_tx,
+            rx: ev_rx,
+        }
     }
 }
 
@@ -237,7 +330,12 @@ fn usb_logger() -> Option<Beacon> {
     match found {
         Ok(logger_id) => {
             log::debug!("scan: MyChron {logger_id:?} on USB");
-            Some(Beacon { address: std::net::Ipv4Addr::UNSPECIFIED, logger_id, round_trip: started.elapsed(), raw: Vec::new() })
+            Some(Beacon {
+                address: std::net::Ipv4Addr::UNSPECIFIED,
+                logger_id,
+                round_trip: started.elapsed(),
+                raw: Vec::new(),
+            })
         }
         Err(e) => {
             log::warn!("scan: a MyChron is plugged in by USB but didn't answer: {e}");
@@ -250,9 +348,14 @@ fn connect() -> Result<Link, String> {
     Link::connect().map_err(|e| format!("Couldn't connect to the MyChron: {e}"))
 }
 
-fn list(serial: Option<u32>, dir: Option<&Path>) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), String> {
+fn list(
+    serial: Option<u32>,
+    dir: Option<&Path>,
+) -> Result<(Vec<DirEntry>, Vec<SessionSummary>, MyChronTracks), String> {
     let mut logger = connect()?;
-    let listing = logger.list(aim_link::SESSIONS_DIR).map_err(|e| format!("Couldn't list sessions: {e}"))?;
+    let listing = logger
+        .list(aim_link::SESSIONS_DIR)
+        .map_err(|e| format!("Couldn't list sessions: {e}"))?;
     let summaries = listing
         .iter()
         .find(|e| e.name.eq_ignore_ascii_case("summary1.csv"))
@@ -262,12 +365,27 @@ fn list(serial: Option<u32>, dir: Option<&Path>) -> Result<(Vec<DirEntry>, Vec<S
     // The summary file has no usable top speed, so each new session's own
     // small summary (.xri) is read too: it says which were engine warm-ups.
     let mut summaries = summaries;
-    for e in listing.iter().filter(|e| e.is_session() && !listed_twice(&listing, e) && !dir.is_some_and(|d| downloaded(d, e).is_some())).take(60) {
+    for e in listing
+        .iter()
+        .filter(|e| {
+            e.is_session()
+                && !listed_twice(&listing, e)
+                && !dir.is_some_and(|d| downloaded(d, e).is_some())
+        })
+        .take(60)
+    {
         let xri = Path::new(&e.name).with_extension("xri");
         if !listing.iter().any(|f| Path::new(&f.name) == xri) {
             continue;
         }
-        match logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}).map_err(|e| e.to_string()).and_then(|b| aim_xrk::parse_xri(&b).map_err(|e| e.to_string())) {
+        match logger
+            .read_file(
+                &format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()),
+                |_, _| {},
+            )
+            .map_err(|e| e.to_string())
+            .and_then(|b| aim_xrk::parse_xri(&b).map_err(|e| e.to_string()))
+        {
             Ok(mut sum) => {
                 sum.file = Some(e.name.clone());
                 summaries.retain(|s| s.file.as_deref() != Some(e.name.as_str()));
@@ -300,7 +418,10 @@ pub enum TrackCopy {
 
 impl MyChronTracks {
     pub fn copied(&self) -> usize {
-        self.custom.iter().filter(|(_, c)| *c == TrackCopy::Copied).count()
+        self.custom
+            .iter()
+            .filter(|(_, c)| *c == TrackCopy::Copied)
+            .count()
     }
 }
 
@@ -312,14 +433,34 @@ impl MyChronTracks {
 /// listing leaves its folders out), skipping any of AiM's own tracks there.
 /// Beside each copy goes `<id>.mychron`, the serial of the MyChron it came from.
 fn copy_custom_tracks(logger: &mut Link, serial: Option<u32>) -> MyChronTracks {
-    let Some(dir) = crate::paths::data("tracks/custom") else { return MyChronTracks::default() };
-    let mut ids: Vec<String> = logger.read_file("0:/tkk/dev.ria", |_, _| {}).ok().and_then(|b| aim_track::parse_ria(&b).ok()).unwrap_or_default().into_iter().map(|r| r.id).collect();
+    let Some(dir) = crate::paths::data("tracks/custom") else {
+        return MyChronTracks::default();
+    };
+    let mut ids: Vec<String> = logger
+        .read_file("0:/tkk/dev.ria", |_, _| {})
+        .ok()
+        .and_then(|b| aim_track::parse_ria(&b).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
     match logger.list("0:/tkk/o") {
         Ok(entries) => {
             // AiM's own tracks, by AiM's database as downloaded. Not the
             // MyChron's list of them: RaceStudio adds the tracks it sends to that too.
-            let aim: std::collections::HashSet<String> = crate::aim_tracks::list_path().into_iter().filter_map(|p| aim_track::read_ria(p).ok()).flatten().map(|r| r.id).collect();
-            let sent = entries.iter().filter_map(|e| e.name.len().checked_sub(4).filter(|&n| e.name[n..].eq_ignore_ascii_case(".tkk")).map(|n| e.name[..n].to_string()));
+            let aim: std::collections::HashSet<String> = crate::aim_tracks::list_path()
+                .into_iter()
+                .filter_map(|p| aim_track::read_ria(p).ok())
+                .flatten()
+                .map(|r| r.id)
+                .collect();
+            let sent = entries.iter().filter_map(|e| {
+                e.name
+                    .len()
+                    .checked_sub(4)
+                    .filter(|&n| e.name[n..].eq_ignore_ascii_case(".tkk"))
+                    .map(|n| e.name[..n].to_string())
+            });
             for id in sent {
                 if !aim.contains(&id) && !ids.contains(&id) {
                     ids.push(id);
@@ -344,7 +485,10 @@ fn copy_custom_tracks(logger: &mut Link, serial: Option<u32>) -> MyChronTracks {
                 Ok(t) => match crate::storage::write_atomic(&target, &bytes) {
                     Ok(()) => {
                         if let Some(serial) = serial {
-                            let _ = crate::storage::write_atomic(&target.with_extension("mychron"), serial.to_string().as_bytes());
+                            let _ = crate::storage::write_atomic(
+                                &target.with_extension("mychron"),
+                                serial.to_string().as_bytes(),
+                            );
                         }
                         log::info!("copied custom track {} ({id}) from the MyChron", t.name);
                         Ok(t.name)
@@ -371,14 +515,19 @@ fn copy_custom_tracks(logger: &mut Link, serial: Option<u32>) -> MyChronTracks {
 /// computer that has never been online still knows the tracks by name and
 /// start/finish line. Read only when it isn't saved yet (it's ~340 KB).
 fn copy_track_list(logger: &mut Link) {
-    let Some(target) = crate::aim_tracks::mychron_list_target() else { return };
+    let Some(target) = crate::aim_tracks::mychron_list_target() else {
+        return;
+    };
     if target.exists() {
         return;
     }
     match logger.read_file("0:/tkk/al.ria", |_, _| {}) {
         Ok(bytes) if aim_track::parse_ria(&bytes).is_ok_and(|r| !r.is_empty()) => {
             if let Err(e) = crate::storage::write_atomic(&target, &bytes) {
-                log::warn!("couldn't save the MyChron's track list to {}: {e}", target.display());
+                log::warn!(
+                    "couldn't save the MyChron's track list to {}: {e}",
+                    target.display()
+                );
             }
         }
         Ok(_) => log::warn!("the MyChron's track list couldn't be read; not saved"),
@@ -391,7 +540,12 @@ fn copy_track_list(logger: &mut Link) {
 /// canceled download never looks complete. With `replace`, a recording
 /// already saved here goes over its copy, keeping that copy's track link
 /// when the track is the same (its setup and weather stay beside it).
-fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: &impl Fn(Event)) -> Result<Vec<PathBuf>, String> {
+fn download(
+    files: &[(DirEntry, SessionMeta)],
+    dir: &Path,
+    replace: bool,
+    send: &impl Fn(Event),
+) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let mut logger = connect()?;
     let count = files.len();
@@ -399,28 +553,47 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: 
     for (index, (entry, meta)) in files.iter().enumerate() {
         // The name comes from the logger: never let it point outside this folder.
         if !aim_link::is_safe_file_name(&entry.name) {
-            return Err(format!("The MyChron listed a file with an unusable name ({:?}), so it wasn't downloaded.", entry.name));
+            return Err(format!(
+                "The MyChron listed a file with an unusable name ({:?}), so it wasn't downloaded.",
+                entry.name
+            ));
         }
         let path = format!("{}/{}", aim_link::SESSIONS_DIR, entry.name);
         let data = logger
-            .read_file(&path, |done, total| send(Event::Progress { index, count, file: entry.name.clone(), done, total }))
+            .read_file(&path, |done, total| {
+                send(Event::Progress {
+                    index,
+                    count,
+                    file: entry.name.clone(),
+                    done,
+                    total,
+                })
+            })
             .map_err(|e| format!("Downloading {} failed: {e}", entry.name))?;
         let existing = replace.then(|| downloaded(dir, entry)).flatten();
         let target = existing.clone().unwrap_or_else(|| target_for(dir, entry));
-        crate::storage::write_atomic(&target, &data).map_err(|e| format!("Couldn't save {}: {e}", target.display()))?;
+        crate::storage::write_atomic(&target, &data)
+            .map_err(|e| format!("Couldn't save {}: {e}", target.display()))?;
         log::info!("saved {} ({} bytes)", target.display(), data.len());
         // The small summary beside it, used by the Sessions and Tracks pages
         // (without it, Mychronix works the summary out from the session).
         let xri = Path::new(&entry.name).with_extension("xri");
-        match logger.read_file(&format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()), |_, _| {}) {
+        match logger.read_file(
+            &format!("{}/{}", aim_link::SESSIONS_DIR, xri.display()),
+            |_, _| {},
+        ) {
             Ok(bytes) => {
-                if let Err(e) = crate::storage::write_atomic(&target.with_extension("xri"), &bytes) {
+                if let Err(e) = crate::storage::write_atomic(&target.with_extension("xri"), &bytes)
+                {
                     log::warn!("couldn't save the summary beside {}: {e}", target.display());
                 }
             }
             Err(e) => log::warn!("couldn't read {} from the MyChron: {e}", xri.display()),
         }
-        let mut meta = SessionMeta { listed: listed(entry), ..meta.clone() };
+        let mut meta = SessionMeta {
+            listed: listed(entry),
+            ..meta.clone()
+        };
         if let Some(old) = existing.as_ref().and_then(|p| SessionMeta::load(p)) {
             meta = meta.over(old);
         }
@@ -437,7 +610,9 @@ fn download(files: &[(DirEntry, SessionMeta)], dir: &Path, replace: bool, send: 
 // ---------------------------------------------------------------------------
 // WiFi: NetworkManager on Linux; on a Mac you join from the menu bar.
 
-pub use wifi::{JOIN_HINT, paused_networks, restore_after_crash, restore_wifi_now, restore_wifi_on_quit};
+pub use wifi::{
+    JOIN_HINT, paused_networks, restore_after_crash, restore_wifi_now, restore_wifi_on_quit,
+};
 use wifi::{aim_networks, current_wifi, join, leave};
 
 #[cfg(not(target_os = "macos"))]
@@ -446,7 +621,6 @@ mod wifi {
 
     /// What the Device page says while no MyChron answers.
     pub const JOIN_HINT: &str = "Turn on the MyChron and its WiFi. Mychronix keeps looking.";
-
 
     fn restore_file() -> Option<PathBuf> {
         crate::paths::data("wifi-restore.json")
@@ -491,7 +665,18 @@ mod wifi {
 
     /// AiM networks in range (SSID, signal %), strongest first.
     pub(super) fn aim_networks() -> Vec<(String, u8)> {
-        let Ok(out) = nmcli(&["-t", "-f", "SSID,SIGNAL", "device", "wifi", "list", "--rescan", "yes"]) else { return Vec::new() };
+        let Ok(out) = nmcli(&[
+            "-t",
+            "-f",
+            "SSID,SIGNAL",
+            "device",
+            "wifi",
+            "list",
+            "--rescan",
+            "yes",
+        ]) else {
+            return Vec::new();
+        };
         let mut nets: Vec<(String, u8)> = out
             .lines()
             .map(split_terse)
@@ -524,18 +709,37 @@ mod wifi {
         // Already paused by an earlier join that wasn't undone: keep its list
         // and network to go back to, which a fresh look can no longer see.
         let earlier = load_restore().unwrap_or_default();
-        let previous = earlier.previous.or_else(|| current_wifi().filter(|s| !s.starts_with("AiM-")));
+        let previous = earlier
+            .previous
+            .or_else(|| current_wifi().filter(|s| !s.starts_with("AiM-")));
         let mut paused = earlier.paused;
         // Stop other WiFi profiles from pulling the computer back to the internet.
         for line in nmcli(&["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"])?.lines() {
             let f = split_terse(line);
-            let other_wifi = f.len() >= 3 && f[1] == "802-11-wireless" && f[2] == "yes" && f[0] != ssid;
-            if other_wifi && nmcli(&["connection", "modify", &f[0], "connection.autoconnect", "no"]).is_ok() && !paused.contains(&f[0]) {
+            let other_wifi =
+                f.len() >= 3 && f[1] == "802-11-wireless" && f[2] == "yes" && f[0] != ssid;
+            if other_wifi
+                && nmcli(&[
+                    "connection",
+                    "modify",
+                    &f[0],
+                    "connection.autoconnect",
+                    "no",
+                ])
+                .is_ok()
+                && !paused.contains(&f[0])
+            {
                 paused.push(f[0].clone());
             }
         }
-        log::info!("paused auto-connect for {} networks; will go back to {}", paused.len(), previous.as_deref().unwrap_or("whichever reconnects"));
-        if let Some(path) = restore_file() && let Err(e) = crate::storage::save(&path, &Restore { paused, previous }) {
+        log::info!(
+            "paused auto-connect for {} networks; will go back to {}",
+            paused.len(),
+            previous.as_deref().unwrap_or("whichever reconnects")
+        );
+        if let Some(path) = restore_file()
+            && let Err(e) = crate::storage::save(&path, &Restore { paused, previous })
+        {
             log::error!("couldn't save {}: {e}", path.display());
         }
         if let Err(e) = nmcli(&["device", "wifi", "connect", ssid]) {
@@ -568,18 +772,35 @@ mod wifi {
 
     pub(super) fn leave() {
         let Some(path) = restore_file() else { return };
-        let Some(restore) = load_restore() else { return };
+        let Some(restore) = load_restore() else {
+            return;
+        };
         let mut failed = 0;
         for name in &restore.paused {
-            if nmcli(&["connection", "modify", name, "connection.autoconnect", "yes"]).is_err() {
+            if nmcli(&[
+                "connection",
+                "modify",
+                name,
+                "connection.autoconnect",
+                "yes",
+            ])
+            .is_err()
+            {
                 failed += 1;
             }
         }
-        log::info!("turned auto-connect back on for {} of {} networks", restore.paused.len() - failed, restore.paused.len());
+        log::info!(
+            "turned auto-connect back on for {} of {} networks",
+            restore.paused.len() - failed,
+            restore.paused.len()
+        );
         // Still on the MyChron's network: go back. (Already on a network of
         // your choosing: leave it be.)
         if let Some(aim) = current_wifi().filter(|c| c.starts_with("AiM-")) {
-            let back = restore.previous.as_deref().is_some_and(|ssid| nmcli(&["connection", "up", ssid]).is_ok());
+            let back = restore
+                .previous
+                .as_deref()
+                .is_some_and(|ssid| nmcli(&["connection", "up", ssid]).is_ok());
             if !back {
                 // Drop only the MyChron's connection; NetworkManager then joins
                 // the best known network itself. (Disconnecting the WiFi device
@@ -588,7 +809,9 @@ mod wifi {
             }
         }
         // Kept if some couldn't be turned back on, so the next try covers them.
-        if failed == 0 && let Err(e) = std::fs::remove_file(&path) {
+        if failed == 0
+            && let Err(e) = std::fs::remove_file(&path)
+        {
             log::warn!("couldn't remove {}: {e}", path.display());
         }
     }
@@ -602,7 +825,9 @@ mod wifi {
     /// yourself, turn the other networks' auto-connect back on (only once the
     /// computer is off the MyChron's network).
     pub fn restore_after_crash() {
-        if restore_file().is_some_and(|p| p.exists()) && !current_wifi().is_some_and(|s| s.starts_with("AiM-")) {
+        if restore_file().is_some_and(|p| p.exists())
+            && !current_wifi().is_some_and(|s| s.starts_with("AiM-"))
+        {
             leave();
         }
     }
@@ -620,13 +845,20 @@ mod wifi {
 
     fn networksetup(args: &[&str]) -> Result<String, String> {
         log::debug!("networksetup {}", args.join(" "));
-        let out = Process::new("networksetup").args(args).output().map_err(|e| format!("networksetup: {e}"))?;
+        let out = Process::new("networksetup")
+            .args(args)
+            .output()
+            .map_err(|e| format!("networksetup: {e}"))?;
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         // networksetup reports some failures on stdout with a zero exit.
         if out.status.success() && !text.contains("Error") && !text.contains("Could not") {
             Ok(text)
         } else {
-            let err = format!("{}{}", text.trim(), String::from_utf8_lossy(&out.stderr).trim());
+            let err = format!(
+                "{}{}",
+                text.trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
             log::warn!("networksetup {} failed: {err}", args.join(" "));
             Err(err)
         }
@@ -638,7 +870,10 @@ mod wifi {
         let mut lines = out.lines();
         while let Some(line) = lines.next() {
             if line.trim() == "Hardware Port: Wi-Fi" {
-                return lines.next()?.strip_prefix("Device: ").map(|d| d.trim().to_string());
+                return lines
+                    .next()?
+                    .strip_prefix("Device: ")
+                    .map(|d| d.trim().to_string());
             }
         }
         None
@@ -652,12 +887,16 @@ mod wifi {
     /// The current network's name, when macOS shares it (recent versions may not).
     pub(super) fn current_wifi() -> Option<String> {
         let out = networksetup(&["-getairportnetwork", &interface()?]).ok()?;
-        out.trim().strip_prefix("Current Wi-Fi Network: ").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        out.trim()
+            .strip_prefix("Current Wi-Fi Network: ")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 
     pub(super) fn join(ssid: &str) -> Result<(), String> {
         let iface = interface().ok_or("No WiFi on this Mac")?;
-        networksetup(&["-setairportnetwork", &iface, ssid]).map_err(|e| format!("Couldn't join {ssid}: {e}"))?;
+        networksetup(&["-setairportnetwork", &iface, ssid])
+            .map_err(|e| format!("Couldn't join {ssid}: {e}"))?;
         for _ in 0..20 {
             if aim_link::probe(AP_ADDRESS, Duration::from_millis(500)).is_ok() {
                 return Ok(());
@@ -688,7 +927,10 @@ mod tests {
     fn splits_nmcli_terse_fields() {
         use wifi::split_terse;
         assert_eq!(split_terse("AiM-MYC6-345678:72"), ["AiM-MYC6-345678", "72"]);
-        assert_eq!(split_terse(r"Cafe\: Guest:802-11-wireless:yes"), ["Cafe: Guest", "802-11-wireless", "yes"]);
+        assert_eq!(
+            split_terse(r"Cafe\: Guest:802-11-wireless:yes"),
+            ["Cafe: Guest", "802-11-wireless", "yes"]
+        );
     }
 
     #[test]
@@ -700,36 +942,76 @@ mod tests {
 
     #[test]
     fn meta_sits_beside_the_session() {
-        assert_eq!(SessionMeta::path_for(Path::new("/x/a_0035.xrz")), Path::new("/x/a_0035.meta.json"));
+        assert_eq!(
+            SessionMeta::path_for(Path::new("/x/a_0035.xrz")),
+            Path::new("/x/a_0035.meta.json")
+        );
     }
 
     #[test]
     fn downloading_again_keeps_what_was_left_blank() {
-        let old = SessionMeta { driver: "Ann".into(), kart: "Blue".into(), track: "Club".into(), track_guid: Some("g1".into()), comment: "wet".into(), ..Default::default() };
-        let new = SessionMeta { driver: "Ann B".into(), track: "Club".into(), ..Default::default() }.over(old.clone());
-        assert_eq!((new.driver.as_str(), new.kart.as_str(), new.comment.as_str()), ("Ann B", "Blue", "wet"));
+        let old = SessionMeta {
+            driver: "Ann".into(),
+            kart: "Blue".into(),
+            track: "Club".into(),
+            track_guid: Some("g1".into()),
+            comment: "wet".into(),
+            ..Default::default()
+        };
+        let new = SessionMeta {
+            driver: "Ann B".into(),
+            track: "Club".into(),
+            ..Default::default()
+        }
+        .over(old.clone());
+        assert_eq!(
+            (new.driver.as_str(), new.kart.as_str(), new.comment.as_str()),
+            ("Ann B", "Blue", "wet")
+        );
         assert_eq!(new.track_guid.as_deref(), Some("g1"));
         // Another track: its link starts afresh.
-        let moved = SessionMeta { track: "Club North".into(), ..Default::default() }.over(old);
-        assert_eq!((moved.track.as_str(), moved.track_guid), ("Club North", None));
+        let moved = SessionMeta {
+            track: "Club North".into(),
+            ..Default::default()
+        }
+        .over(old);
+        assert_eq!(
+            (moved.track.as_str(), moved.track_guid),
+            ("Club North", None)
+        );
     }
 
     #[test]
     fn a_reused_name_never_overwrites() {
         let dir = std::env::temp_dir().join(format!("mychronix-dl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let entry = |size: u64, time: &str| DirEntry { name: "a_0001.xrz".into(), size, date: "12/27/2026".into(), time: time.into() };
+        let entry = |size: u64, time: &str| DirEntry {
+            name: "a_0001.xrz".into(),
+            size,
+            date: "12/27/2026".into(),
+            time: time.into(),
+        };
         // Ann's a_0001, downloaded earlier.
         let ann = entry(5, "10:00:00");
         std::fs::write(dir.join("a_0001.xrz"), b"anns!").unwrap();
-        SessionMeta { listed: listed(&ann), ..Default::default() }.save(&dir.join("a_0001.xrz")).unwrap();
+        SessionMeta {
+            listed: listed(&ann),
+            ..Default::default()
+        }
+        .save(&dir.join("a_0001.xrz"))
+        .unwrap();
         assert_eq!(downloaded(&dir, &ann), Some(dir.join("a_0001.xrz")));
         // After a format, a different a_0001 (same size even): not downloaded, and saved beside it.
         let bo = entry(5, "15:30:00");
         assert_eq!(downloaded(&dir, &bo), None);
         assert_eq!(target_for(&dir, &bo), dir.join("a_0001-2.xrz"));
         std::fs::write(dir.join("a_0001-2.xrz"), b"bo-s!").unwrap();
-        SessionMeta { listed: listed(&bo), ..Default::default() }.save(&dir.join("a_0001-2.xrz")).unwrap();
+        SessionMeta {
+            listed: listed(&bo),
+            ..Default::default()
+        }
+        .save(&dir.join("a_0001-2.xrz"))
+        .unwrap();
         assert_eq!(downloaded(&dir, &bo), Some(dir.join("a_0001-2.xrz")));
         assert_eq!(std::fs::read(dir.join("a_0001.xrz")).unwrap(), b"anns!");
         assert_eq!(aim_xrk::summary::session_number("a_0001-2.xrz"), Some(1));
@@ -743,10 +1025,20 @@ mod tests {
     fn hrz_twins_are_already_downloaded_and_never_get_the_setup() {
         let dir = std::env::temp_dir().join(format!("mychronix-twin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let entry = |name: &str, size: u64, date: &str, time: &str| DirEntry { name: name.into(), size, date: date.into(), time: time.into() };
+        let entry = |name: &str, size: u64, date: &str, time: &str| DirEntry {
+            name: name.into(),
+            size,
+            date: date.into(),
+            time: time.into(),
+        };
         let old = entry("a_0001.xrz", 5, "09/19/2026", "13:15:26");
         std::fs::write(dir.join("a_0001.xrz"), b"sept!").unwrap();
-        SessionMeta { listed: listed(&old), ..Default::default() }.save(&dir.join("a_0001.xrz")).unwrap();
+        SessionMeta {
+            listed: listed(&old),
+            ..Default::default()
+        }
+        .save(&dir.join("a_0001.xrz"))
+        .unwrap();
         let old_hrz = entry("a_0001.hrz", 5, "09/19/2026", "13:15:26");
         let new = entry("a_0049.xrz", 9, "10/31/2026", "12:58:46");
         let listing = [old.clone(), old_hrz.clone(), new.clone()];
@@ -755,13 +1047,25 @@ mod tests {
         assert!(!listed_twice(&listing, &old));
         assert!(listed_twice(&listing, &old_hrz));
         // Never saved over the .xrz's details.
-        assert_eq!(target_for(&dir, &entry("a_0001.hrz", 7, "11/01/2026", "09:00:00")), dir.join("a_0001-2.hrz"));
+        assert_eq!(
+            target_for(&dir, &entry("a_0001.hrz", 7, "11/01/2026", "09:00:00")),
+            dir.join("a_0001-2.hrz")
+        );
 
         // Even picked along with the new session, the setup goes on the new one
         // (listed in UTC, started 8:58 EDT).
         let edt = jiff::tz::TimeZone::fixed(jiff::tz::offset(-4));
-        let picked: Vec<_> = [old_hrz, new].into_iter().map(|e| { let s = start_of(&e, None, &edt); (e, s) }).collect();
-        assert_eq!(setup_target(&dir, &picked, "2026-10-24 14:47:00"), Some((dir.join("a_0049.xrz"), "2026-10-31 08:58:46".into())));
+        let picked: Vec<_> = [old_hrz, new]
+            .into_iter()
+            .map(|e| {
+                let s = start_of(&e, None, &edt);
+                (e, s)
+            })
+            .collect();
+        assert_eq!(
+            setup_target(&dir, &picked, "2026-10-24 14:47:00"),
+            Some((dir.join("a_0049.xrz"), "2026-10-31 08:58:46".into()))
+        );
         // Nothing newer than what's here: no session gets it.
         assert_eq!(setup_target(&dir, &picked, "2026-11-01 10:00:00"), None);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -772,10 +1076,29 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mychronix-order-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         // After a format the numbering starts again: a_0002 can be older than a_0001.
-        let a = DirEntry { name: "a_0001.xrz".into(), size: 3, date: "10/31/2026".into(), time: "11:05:00".into() };
-        let b = DirEntry { name: "a_0002.xrz".into(), size: 3, date: "10/31/2026".into(), time: "09:03:00".into() };
-        let picked: Vec<_> = [a, b].into_iter().map(|e| { let s = start_of(&e, None, &jiff::tz::TimeZone::UTC); (e, s) }).collect();
-        assert_eq!(setup_target(&dir, &picked, "").map(|(p, _)| p), Some(dir.join("a_0002.xrz")));
+        let a = DirEntry {
+            name: "a_0001.xrz".into(),
+            size: 3,
+            date: "10/31/2026".into(),
+            time: "11:05:00".into(),
+        };
+        let b = DirEntry {
+            name: "a_0002.xrz".into(),
+            size: 3,
+            date: "10/31/2026".into(),
+            time: "09:03:00".into(),
+        };
+        let picked: Vec<_> = [a, b]
+            .into_iter()
+            .map(|e| {
+                let s = start_of(&e, None, &jiff::tz::TimeZone::UTC);
+                (e, s)
+            })
+            .collect();
+        assert_eq!(
+            setup_target(&dir, &picked, "").map(|(p, _)| p),
+            Some(dir.join("a_0002.xrz"))
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

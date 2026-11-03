@@ -20,11 +20,16 @@ pub struct Details {
 }
 
 /// Reads track files on a background thread, sending details as they're read.
-pub fn load_details(files: Vec<(usize, PathBuf)>, ctx: eframe::egui::Context) -> std::sync::mpsc::Receiver<(usize, Details)> {
+pub fn load_details(
+    files: Vec<(usize, PathBuf)>,
+    ctx: eframe::egui::Context,
+) -> std::sync::mpsc::Receiver<(usize, Details)> {
     let (tx, rx) = std::sync::mpsc::channel();
     crate::jobs::spawn("track-details", move || {
         for (i, path) in files {
-            let Ok(t) = aim_track::read_tkk(&path) else { continue };
+            let Ok(t) = aim_track::read_tkk(&path) else {
+                continue;
+            };
             let d = Details {
                 full_name: t.full_name,
                 city: t.info.city,
@@ -55,7 +60,9 @@ impl Library {
     }
 
     pub fn apply_details(&mut self, i: usize, d: Details) {
-        let Some(t) = self.tracks.get_mut(i) else { return };
+        let Some(t) = self.tracks.get_mut(i) else {
+            return;
+        };
         t.full_name = Some(d.full_name).filter(|n| !n.is_empty());
         t.city = d.city;
         t.length_m = t.length_m.or(d.length_m);

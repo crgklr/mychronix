@@ -4,7 +4,6 @@
 use super::*;
 
 impl App {
-
     /// A thin bar at the top when a newer release is out: what's new, download, dismiss.
     pub(super) fn update_bar(&mut self, ui: &mut Ui) {
         // Screenshot runs leave AiM's server alone unless MYCHRONIX_AIM_SYNC=1 (development only).
@@ -35,7 +34,9 @@ impl App {
                     self.aim_tracks_first = true;
                     self.reload_library();
                 }
-                Event::Progress { done, total } => self.aim_tracks_progress = (done < total).then_some((done, total)),
+                Event::Progress { done, total } => {
+                    self.aim_tracks_progress = (done < total).then_some((done, total))
+                }
                 Event::Failed { offline } => {
                     self.aim_tracks_progress = None;
                     self.aim_tracks_offline = offline;
@@ -60,25 +61,45 @@ impl App {
         egui::Panel::top("update")
             .exact_size(38.0)
             .show_separator_line(false)
-            .frame(Frame::new().fill(SURFACE).inner_margin(Margin { left: 16, right: 16 + window_ui::CORNER_W as i8, top: 0, bottom: 0 }))
+            .frame(Frame::new().fill(SURFACE).inner_margin(Margin {
+                left: 16,
+                right: 16 + window_ui::CORNER_W as i8,
+                top: 0,
+                bottom: 0,
+            }))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.add(Icon::Check.image(theme::GOOD, 15.0));
-                    ui.label(RichText::new(format!("Mychronix {} is available", r.version)).font(medium(13.5)).color(TEXT));
-                    ui.label(RichText::new(format!("You have {}.", env!("CARGO_PKG_VERSION"))).size(12.5).color(DIM));
+                    ui.label(
+                        RichText::new(format!("Mychronix {} is available", r.version))
+                            .font(medium(13.5))
+                            .color(TEXT),
+                    );
+                    ui.label(
+                        RichText::new(format!("You have {}.", env!("CARGO_PKG_VERSION")))
+                            .size(12.5)
+                            .color(DIM),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let x = ui.add(Icon::X.image(DIM, 13.0).sense(Sense::click())).on_hover_text("Not now (you'll hear about the next one)");
+                        let x = ui
+                            .add(Icon::X.image(DIM, 13.0).sense(Sense::click()))
+                            .on_hover_text("Not now (you'll hear about the next one)");
                         if x.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
                         if x.clicked() {
                             dismiss = true;
                         }
-                        if chip(ui, "Download", false).on_hover_text("Open the release page in your browser").clicked() {
+                        if chip(ui, "Download", false)
+                            .on_hover_text("Open the release page in your browser")
+                            .clicked()
+                        {
                             crate::update::open_url(&r.url);
                         }
-                        if !r.notes.trim().is_empty() && chip(ui, "What's new", self.update_notes).clicked() {
+                        if !r.notes.trim().is_empty()
+                            && chip(ui, "What's new", self.update_notes).clicked()
+                        {
                             self.update_notes = !self.update_notes;
                         }
                     });
@@ -94,33 +115,63 @@ impl App {
             let mut close = false;
             let closed = look::dialog(ui.ctx(), "whats_new", look::WIDTH, |ui| {
                 use look;
-                look::header(ui, Icon::Download, theme::ACCENT, None, &format!("What's new in {}", r.version), "A newer Mychronix is ready to download.");
-                egui::ScrollArea::vertical().max_height(420.0).id_salt("whats_new_body").show(ui, |ui| {
-                    look::body(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        for line in r.notes.lines() {
-                            let t = line.trim_start_matches('#').trim();
-                            if line.starts_with('#') {
-                                ui.add_space(6.0);
-                                ui.label(RichText::new(t).font(semibold(17.0)).color(TEXT));
-                            } else if !line.trim().is_empty() {
-                                // "**Lead-in:** the rest", the lead-in in bold.
-                                let mut job = egui::text::LayoutJob::default();
-                                let mut add = |t: &str, f: egui::FontId, c: Color32| job.append(t, 0.0, egui::TextFormat { font_id: f, color: c, ..Default::default() });
-                                match line.trim().strip_prefix("**").and_then(|r| r.split_once("**")) {
-                                    Some((lead, rest)) => {
-                                        add(lead, semibold(15.0), TEXT);
-                                        add(&rest.replace("**", ""), regular(15.0), SECONDARY);
+                look::header(
+                    ui,
+                    Icon::Download,
+                    theme::ACCENT,
+                    None,
+                    &format!("What's new in {}", r.version),
+                    "A newer Mychronix is ready to download.",
+                );
+                egui::ScrollArea::vertical()
+                    .max_height(420.0)
+                    .id_salt("whats_new_body")
+                    .show(ui, |ui| {
+                        look::body(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 6.0;
+                            for line in r.notes.lines() {
+                                let t = line.trim_start_matches('#').trim();
+                                if line.starts_with('#') {
+                                    ui.add_space(6.0);
+                                    ui.label(RichText::new(t).font(semibold(17.0)).color(TEXT));
+                                } else if !line.trim().is_empty() {
+                                    // "**Lead-in:** the rest", the lead-in in bold.
+                                    let mut job = egui::text::LayoutJob::default();
+                                    let mut add = |t: &str, f: egui::FontId, c: Color32| {
+                                        job.append(
+                                            t,
+                                            0.0,
+                                            egui::TextFormat {
+                                                font_id: f,
+                                                color: c,
+                                                ..Default::default()
+                                            },
+                                        )
+                                    };
+                                    match line
+                                        .trim()
+                                        .strip_prefix("**")
+                                        .and_then(|r| r.split_once("**"))
+                                    {
+                                        Some((lead, rest)) => {
+                                            add(lead, semibold(15.0), TEXT);
+                                            add(&rest.replace("**", ""), regular(15.0), SECONDARY);
+                                        }
+                                        None => {
+                                            add(&line.replace("**", ""), regular(15.0), SECONDARY)
+                                        }
                                     }
-                                    None => add(&line.replace("**", ""), regular(15.0), SECONDARY),
+                                    job.wrap.max_width = ui.available_width();
+                                    ui.label(job);
                                 }
-                                job.wrap.max_width = ui.available_width();
-                                ui.label(job);
                             }
-                        }
+                        });
                     });
-                });
-                let (l, d) = look::footer(ui, "Not now", ("Download", Some(Icon::Download), look::Kind::Primary, true));
+                let (l, d) = look::footer(
+                    ui,
+                    "Not now",
+                    ("Download", Some(Icon::Download), look::Kind::Primary, true),
+                );
                 if d {
                     crate::update::open_url(&r.url);
                 }
@@ -187,11 +238,14 @@ impl App {
     }
 
     pub(super) fn screenshot(&mut self, ui: &mut Ui) {
-        let Some(path) = self.screenshot_to.clone() else { return };
+        let Some(path) = self.screenshot_to.clone() else {
+            return;
+        };
         self.frames += 1;
         // MYCHRONIX_SCREENSHOT_FRAME delays the shot, e.g. to let map tiles load.
         if self.frames == crate::hooks::get().screenshot_frame {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         let image = ui.ctx().input(|i| {
             i.events.iter().find_map(|e| match e {
@@ -201,7 +255,8 @@ impl App {
         });
         if let Some(image) = image {
             let [w, h] = image.size;
-            if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, image.as_raw().to_vec())
+            if let Some(buf) =
+                image::RgbaImage::from_raw(w as u32, h as u32, image.as_raw().to_vec())
                 && let Err(e) = buf.save(&path)
             {
                 eprintln!("screenshot: {e}");

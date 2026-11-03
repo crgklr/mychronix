@@ -32,8 +32,23 @@ pub(super) struct SensorState {
 
 impl App {
     /// Checks freshly downloaded sessions in the background.
-    pub(super) fn check_downloaded(&mut self, paths: Vec<PathBuf>, logger: &str, ctx: &egui::Context) {
-        let known: Vec<PathBuf> = self.library.as_ref().map(|l| l.sessions.iter().filter(|s| s.logger == logger).map(|s| s.path.clone()).collect()).unwrap_or_default();
+    pub(super) fn check_downloaded(
+        &mut self,
+        paths: Vec<PathBuf>,
+        logger: &str,
+        ctx: &egui::Context,
+    ) {
+        let known: Vec<PathBuf> = self
+            .library
+            .as_ref()
+            .map(|l| {
+                l.sessions
+                    .iter()
+                    .filter(|s| s.logger == logger)
+                    .map(|s| s.path.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         self.sensors.rx = Some(sensor_check::spawn(paths, known, ctx.clone()));
         // Reload the digests once the check has added the new sessions.
         self.sensors.digests = None;
@@ -45,22 +60,41 @@ impl App {
         let path = self.path.clone()?;
         if self.sensors.open.as_ref().is_none_or(|(p, _)| *p != path) {
             let digests = self.sensors.digests.get_or_insert_with(Digests::load);
-            let digest = digests.get(&path).cloned().unwrap_or_else(|| Digest::of(session));
+            let digest = digests
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| Digest::of(session));
             let logger = digest.logger.clone();
             let issues = digests.reportable(&digest);
-            let number = path.file_name().and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
-            self.sensors.open = Some((path, Checked { logger, number, issues }));
+            let number = path
+                .file_name()
+                .and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+            self.sensors.open = Some((
+                path,
+                Checked {
+                    logger,
+                    number,
+                    issues,
+                },
+            ));
         }
         let checked = self.sensors.open.as_ref().map(|(_, c)| c.clone())?;
         let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);
-        let issues: Vec<_> = checked.issues.iter().filter(|i| !ignored.contains(&checked.logger, &i.channel)).cloned().collect();
+        let issues: Vec<_> = checked
+            .issues
+            .iter()
+            .filter(|i| !ignored.contains(&checked.logger, &i.channel))
+            .cloned()
+            .collect();
         (!issues.is_empty()).then_some(Checked { issues, ..checked })
     }
 
     /// Fetches the weather for library sessions `rows` that don't have it yet,
     /// and puts arrived weather into the library.
     pub(super) fn want_weather(&mut self, rows: &[usize], ctx: &egui::Context) {
-        let Some(lib) = self.library.as_mut().map(std::sync::Arc::make_mut) else { return };
+        let Some(lib) = self.library.as_mut().map(std::sync::Arc::make_mut) else {
+            return;
+        };
         if let Some(rx) = &self.sensors.weather_rx {
             loop {
                 match rx.try_recv() {
@@ -87,14 +121,33 @@ impl App {
                 if s.weather.is_some() || self.sensors.weather_asked.contains(&s.path) {
                     return None;
                 }
-                let pos = s.summary.start_finish.or_else(|| s.track.and_then(|t| lib.tracks[t].center).map(|p| (p.lat, p.lon)))?;
+                let pos = s.summary.start_finish.or_else(|| {
+                    s.track
+                        .and_then(|t| lib.tracks[t].center)
+                        .map(|p| (p.lat, p.lon))
+                })?;
                 let date = s.summary.date.map(crate::dates::iso)?;
-                let hour = s.summary.start_time.as_deref().and_then(|t| t.get(..2)).and_then(|h| h.parse().ok()).unwrap_or(12usize).min(23);
-                Some(crate::weather::Want { session: s.path.clone(), lat: pos.0, lon: pos.1, date, hour })
+                let hour = s
+                    .summary
+                    .start_time
+                    .as_deref()
+                    .and_then(|t| t.get(..2))
+                    .and_then(|h| h.parse().ok())
+                    .unwrap_or(12usize)
+                    .min(23);
+                Some(crate::weather::Want {
+                    session: s.path.clone(),
+                    lat: pos.0,
+                    lon: pos.1,
+                    date,
+                    hour,
+                })
             })
             .collect();
         if !wants.is_empty() {
-            self.sensors.weather_asked.extend(wants.iter().map(|w| w.session.clone()));
+            self.sensors
+                .weather_asked
+                .extend(wants.iter().map(|w| w.session.clone()));
             self.sensors.weather_rx = Some(crate::weather::spawn(wants, ctx.clone()));
         }
     }
@@ -105,9 +158,15 @@ impl App {
     /// reloads so the Sessions page, Garage and Events show them.
     pub(super) fn relap_poll(&mut self, ctx: &egui::Context) {
         if self.sensors.digest_rx.is_none() {
-            let pending = self.lib_mut().map(|l| std::mem::take(&mut l.relap_pending)).unwrap_or_default();
+            let pending = self
+                .lib_mut()
+                .map(|l| std::mem::take(&mut l.relap_pending))
+                .unwrap_or_default();
             if !pending.is_empty() {
-                log::info!("looking at {} sessions the logger may not have timed", pending.len());
+                log::info!(
+                    "looking at {} sessions the logger may not have timed",
+                    pending.len()
+                );
                 self.want_digests(pending.into_iter(), ctx);
             }
         } else {
@@ -121,7 +180,11 @@ impl App {
         }
     }
 
-    pub(super) fn want_digests(&mut self, paths: impl Iterator<Item = PathBuf>, ctx: &egui::Context) {
+    pub(super) fn want_digests(
+        &mut self,
+        paths: impl Iterator<Item = PathBuf>,
+        ctx: &egui::Context,
+    ) {
         let digests = self.sensors.digests.get_or_insert_with(Digests::load);
         if let Some(rx) = &self.sensors.digest_rx {
             loop {
@@ -159,13 +222,26 @@ impl App {
     /// The open session's notes, as (short text, explanation, needs attention).
     pub(super) fn open_session_notes(&mut self, session: &Session) -> Vec<(String, String, bool)> {
         use aim_xrk::notes::Note;
-        let Some(path) = self.path.clone() else { return Vec::new() };
+        let Some(path) = self.path.clone() else {
+            return Vec::new();
+        };
         if self.sensors.notes.as_ref().is_none_or(|(p, _)| *p != path) {
             self.sensors.notes = Some((path, aim_xrk::notes::session_notes(session)));
         }
-        let notes = self.sensors.notes.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
+        let notes = self
+            .sensors
+            .notes
+            .as_ref()
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default();
         // The open session's channels are already in display units.
-        let deg = |u: &str| if u.to_uppercase().contains('F') { "°F" } else { "°C" };
+        let deg = |u: &str| {
+            if u.to_uppercase().contains('F') {
+                "°F"
+            } else {
+                "°C"
+            }
+        };
         notes
             .iter()
             .map(|n| match n {
@@ -214,7 +290,9 @@ impl App {
                 self.sensors.report = Some(checked);
             }
         }
-        let Some(checked) = self.sensors.report.take() else { return };
+        let Some(checked) = self.sensors.report.take() else {
+            return;
+        };
         let ignored = self.sensors.ignored.get_or_insert_with(Ignored::load);
         let problems = sensor_check::problems(&checked, ignored);
         let sessions = checked.len();
@@ -223,9 +301,15 @@ impl App {
         let closed = look::dialog(ctx, "sensor_check", look::WIDTH, |ui| {
             use look;
             let (title, sub) = if sessions == 1 {
-                ("A sensor stopped recording", "A sensor that has worked before on this MyChron didn't record properly in this session.")
+                (
+                    "A sensor stopped recording",
+                    "A sensor that has worked before on this MyChron didn't record properly in this session.",
+                )
             } else {
-                ("Sensors stopped recording", "Sensors that have worked before on this MyChron didn't record properly in some of these sessions.")
+                (
+                    "Sensors stopped recording",
+                    "Sensors that have worked before on this MyChron didn't record properly in some of these sessions.",
+                )
             };
             look::header(ui, Icon::TriangleAlert, theme::FAVORITE, None, title, sub);
             look::body(ui, |ui| {
@@ -234,9 +318,33 @@ impl App {
                         ui.add_space(10.0);
                     }
                     ui.label(RichText::new(&p.channel).font(semibold(18.0)).color(TEXT));
-                    ui.add(egui::Label::new(RichText::new(sensor_check::summary(p)).font(regular(15.5)).color(TEXT)).wrap());
-                    ui.add(egui::Label::new(RichText::new(aim_xrk::checks::advice(&p.channel)).font(regular(14.5)).color(SECONDARY)).wrap());
-                    let link = ui.add(egui::Label::new(RichText::new(format!("Don't warn about {} on this MyChron", p.channel)).font(regular(14.5)).color(theme::ACCENT)).sense(Sense::click()));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(sensor_check::summary(p))
+                                .font(regular(15.5))
+                                .color(TEXT),
+                        )
+                        .wrap(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(aim_xrk::checks::advice(&p.channel))
+                                .font(regular(14.5))
+                                .color(SECONDARY),
+                        )
+                        .wrap(),
+                    );
+                    let link = ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "Don't warn about {} on this MyChron",
+                                p.channel
+                            ))
+                            .font(regular(14.5))
+                            .color(theme::ACCENT),
+                        )
+                        .sense(Sense::click()),
+                    );
                     if link.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
@@ -245,7 +353,11 @@ impl App {
                     }
                 }
                 ui.add_space(6.0);
-                look::note(ui, "The sessions are saved either way; only those channels are affected.", DIM);
+                look::note(
+                    ui,
+                    "The sessions are saved either way; only those channels are affected.",
+                    DIM,
+                );
             });
             look::footer_row(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -264,7 +376,11 @@ impl App {
                 self.notices.error(format!("Couldn't save that: {e}"));
             }
         }
-        let still = !sensor_check::problems(&checked, self.sensors.ignored.get_or_insert_with(Ignored::load)).is_empty();
+        let still = !sensor_check::problems(
+            &checked,
+            self.sensors.ignored.get_or_insert_with(Ignored::load),
+        )
+        .is_empty();
         if open && !done && still {
             self.sensors.report = Some(checked);
         }

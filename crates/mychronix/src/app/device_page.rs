@@ -46,7 +46,10 @@ impl App {
     pub(super) fn device_poll(&mut self, ctx: &egui::Context) {
         use crate::device::{Command, Event};
         let ctx = ctx.clone();
-        let worker = self.device.worker.get_or_insert_with(|| crate::device::Worker::spawn(ctx.clone()));
+        let worker = self
+            .device
+            .worker
+            .get_or_insert_with(|| crate::device::Worker::spawn(ctx.clone()));
 
         // Apply whatever the worker has finished.
         let mut events = Vec::new();
@@ -72,16 +75,27 @@ impl App {
         }
         for e in events {
             match e {
-                Event::Scanned { logger, usb, networks, current } => {
+                Event::Scanned {
+                    logger,
+                    usb,
+                    networks,
+                    current,
+                } => {
                     self.device.scanning = false;
                     // Switched to another network some other way (e.g. GNOME's menu):
                     // undo the pause on the other networks' auto-connect.
-                    if self.device.joined.is_some() && current.as_deref().is_some_and(|c| !c.starts_with("AiM-")) {
+                    if self.device.joined.is_some()
+                        && current.as_deref().is_some_and(|c| !c.starts_with("AiM-"))
+                    {
                         let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
-                        self.notices.success(format!("You're back on {}. Your networks will connect automatically again.", current.clone().unwrap_or_default()));
+                        self.notices.success(format!(
+                            "You're back on {}. Your networks will connect automatically again.",
+                            current.clone().unwrap_or_default()
+                        ));
                     }
                     // Newly connected, or moved between USB and WiFi: read the list again.
-                    let newly = logger.is_some() && (self.device.logger.is_none() || usb != self.device.usb);
+                    let newly = logger.is_some()
+                        && (self.device.logger.is_none() || usb != self.device.usb);
                     if logger.is_none() {
                         self.device.tracks = Default::default();
                     }
@@ -93,10 +107,15 @@ impl App {
                         self.device.busy = None;
                     }
                     // Remember which MyChron model this logger is, from its WiFi name.
-                    if let (Some(id), Some(ssid)) = (self.device.logger.as_ref().and_then(|b| b.logger_id), self.device.current_wifi.as_deref().filter(|_| !usb)) {
+                    if let (Some(id), Some(ssid)) = (
+                        self.device.logger.as_ref().and_then(|b| b.logger_id),
+                        self.device.current_wifi.as_deref().filter(|_| !usb),
+                    ) {
                         let model = model_from_ssid(ssid);
                         if model.starts_with("MyChron") {
-                            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+                            let profiles = self
+                                .profiles
+                                .get_or_insert_with(crate::profiles::Profiles::load);
                             let entry = profiles.loggers.entry(id.to_string()).or_default();
                             if entry.model != model {
                                 entry.model = model.to_string();
@@ -108,7 +127,13 @@ impl App {
                         self.device.busy = Some("Reading the session list…".into());
                         let serial = self.device.logger.as_ref().and_then(|b| b.logger_id);
                         let dir = self.logger_dir();
-                        let _ = self.device.worker.as_ref().unwrap().tx.send(Command::List { serial, dir });
+                        let _ = self
+                            .device
+                            .worker
+                            .as_ref()
+                            .unwrap()
+                            .tx
+                            .send(Command::List { serial, dir });
                     }
                 }
                 Event::Joined { ssid } => {
@@ -125,7 +150,11 @@ impl App {
                     self.device.summaries.clear();
                     self.device.busy = None;
                 }
-                Event::Listed { files, summaries, tracks } => {
+                Event::Listed {
+                    files,
+                    summaries,
+                    tracks,
+                } => {
                     let new_tracks = tracks.copied();
                     self.device.tracks = tracks;
                     self.device.files = files;
@@ -136,18 +165,58 @@ impl App {
                         self.notices.success(format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" }));
                     }
                     // New sessions are picked, except engine warm-ups (as RaceStudio does); All new picks those too.
-                    let warm_up = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).is_some_and(listed_warm_up);
-                    self.device.selected = self.new_on_logger().into_iter().filter(|e| !warm_up(&e.name)).map(|e| e.name).collect();
+                    let warm_up = |name: &str| {
+                        self.device
+                            .summaries
+                            .iter()
+                            .find(|s| s.file.as_deref() == Some(name))
+                            .is_some_and(listed_warm_up)
+                    };
+                    self.device.selected = self
+                        .new_on_logger()
+                        .into_iter()
+                        .filter(|e| !warm_up(&e.name))
+                        .map(|e| e.name)
+                        .collect();
                     // Why each session counts as new or already downloaded.
                     let dir = self.logger_dir();
-                    let sessions: Vec<_> = self.device.files.iter().filter(|e| e.is_session()).collect();
-                    log::info!("{} of {} sessions on the logger are new (compared with {:?})", self.device.selected.len(), sessions.len(), dir);
+                    let sessions: Vec<_> = self
+                        .device
+                        .files
+                        .iter()
+                        .filter(|e| e.is_session())
+                        .collect();
+                    log::info!(
+                        "{} of {} sessions on the logger are new (compared with {:?})",
+                        self.device.selected.len(),
+                        sessions.len(),
+                        dir
+                    );
                     for e in sessions {
-                        let local = dir.as_ref().and_then(|d| std::fs::metadata(d.join(&e.name)).ok()).map(|m| m.len());
-                        log::debug!("  {}: logger {} bytes, here {:?} → {}", e.name, e.size, local, if local == Some(e.size) { "downloaded" } else { "new" });
+                        let local = dir
+                            .as_ref()
+                            .and_then(|d| std::fs::metadata(d.join(&e.name)).ok())
+                            .map(|m| m.len());
+                        log::debug!(
+                            "  {}: logger {} bytes, here {:?} → {}",
+                            e.name,
+                            e.size,
+                            local,
+                            if local == Some(e.size) {
+                                "downloaded"
+                            } else {
+                                "new"
+                            }
+                        );
                     }
                 }
-                Event::Progress { index, count, file, done, total } => {
+                Event::Progress {
+                    index,
+                    count,
+                    file,
+                    done,
+                    total,
+                } => {
                     self.device.progress = Some((index, count, file, done, total));
                 }
                 Event::Downloaded { saved } => {
@@ -161,10 +230,18 @@ impl App {
                             self.notices.error("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.");
                         } else if let Err(e) = setup.save(&path) {
                             self.notices.error(format!("Couldn't save the setup: {e}"));
-                        } else if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
+                        } else if let Some(id) =
+                            self.device.logger.as_ref().and_then(|b| b.logger_id)
+                        {
                             // The kart's next setup is now that session's.
-                            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-                            if let Some(k) = profiles.karts.iter_mut().find(|k| k.logger == id.to_string() && k.next_setup.is_some()) {
+                            let profiles = self
+                                .profiles
+                                .get_or_insert_with(crate::profiles::Profiles::load);
+                            if let Some(k) = profiles
+                                .karts
+                                .iter_mut()
+                                .find(|k| k.logger == id.to_string() && k.next_setup.is_some())
+                            {
                                 k.next_setup = None;
                                 self.profiles_changed();
                             }
@@ -185,10 +262,18 @@ impl App {
                         self.device.busy = Some("Reconnecting to your network…".into());
                         let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
                         done.push_str(" Mychronix is reconnecting you to your WiFi.");
-                    } else if cfg!(target_os = "macos") && self.device.current_wifi.as_deref().is_some_and(|w| w.starts_with("AiM-")) {
+                    } else if cfg!(target_os = "macos")
+                        && self
+                            .device
+                            .current_wifi
+                            .as_deref()
+                            .is_some_and(|w| w.starts_with("AiM-"))
+                    {
                         done.push_str(" You can switch back to your WiFi from the menu bar.");
                     }
-                    self.notices.success(done).go_to("Open Sessions", Page::Sessions);
+                    self.notices
+                        .success(done)
+                        .go_to("Open Sessions", Page::Sessions);
                 }
                 Event::Error(msg) => {
                     // A setup typed for a download that failed is offered again next time.
@@ -204,12 +289,16 @@ impl App {
 
         // MYCHRONIX_FAKE_DEVICE=<logger id> shows that logger's downloaded sessions as if it were
         // connected, for checking this page's layout without the MyChron (development only).
-        if self.device.logger.is_none() && let Some(id) = crate::hooks::get().fake_device {
+        if self.device.logger.is_none()
+            && let Some(id) = crate::hooks::get().fake_device
+        {
             let mut raw = vec![0u8; 236];
             raw[0] = 0xec;
             raw[84..87].copy_from_slice(b"idn");
             raw[96..100].copy_from_slice(&id.to_le_bytes());
-            self.device.logger = aim_link::Beacon::parse(AP_ADDRESS_FAKE, std::time::Duration::from_millis(3), raw).ok();
+            self.device.logger =
+                aim_link::Beacon::parse(AP_ADDRESS_FAKE, std::time::Duration::from_millis(3), raw)
+                    .ok();
             self.device.current_wifi = Some(format!("AiM-MYC6-{:06}", id % 1_000_000));
             if let Some(dir) = self.logger_dir() {
                 let mut files = Vec::new();
@@ -219,10 +308,23 @@ impl App {
                     let name = p.file_name().unwrap().to_string_lossy().into_owned();
                     if name.ends_with(".xrz") {
                         // Listed as the download noted it, so saved sessions read as downloaded.
-                        let listed = crate::device::SessionMeta::load(&p).map(|m| m.listed).unwrap_or_default();
-                        let (date, time) = listed.split_once(' ').map(|(d, t)| (d.to_string(), t.to_string())).unwrap_or_default();
-                        files.push(aim_link::DirEntry { name: name.clone(), size: e.metadata().map(|m| m.len()).unwrap_or(0), date, time });
-                        if let Some(mut sum) = std::fs::read(p.with_extension("xri")).ok().and_then(|b| aim_xrk::parse_xri(&b).ok()) {
+                        let listed = crate::device::SessionMeta::load(&p)
+                            .map(|m| m.listed)
+                            .unwrap_or_default();
+                        let (date, time) = listed
+                            .split_once(' ')
+                            .map(|(d, t)| (d.to_string(), t.to_string()))
+                            .unwrap_or_default();
+                        files.push(aim_link::DirEntry {
+                            name: name.clone(),
+                            size: e.metadata().map(|m| m.len()).unwrap_or(0),
+                            date,
+                            time,
+                        });
+                        if let Some(mut sum) = std::fs::read(p.with_extension("xri"))
+                            .ok()
+                            .and_then(|b| aim_xrk::parse_xri(&b).ok())
+                        {
                             sum.file = Some(name);
                             summaries.push(sum);
                         }
@@ -235,12 +337,31 @@ impl App {
                 }
                 self.device.files = files;
                 self.device.summaries = summaries;
-                let warm_up = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).is_some_and(listed_warm_up);
-                self.device.selected = self.new_on_logger().into_iter().filter(|e| !warm_up(&e.name)).map(|e| e.name).collect();
+                let warm_up = |name: &str| {
+                    self.device
+                        .summaries
+                        .iter()
+                        .find(|s| s.file.as_deref() == Some(name))
+                        .is_some_and(listed_warm_up)
+                };
+                self.device.selected = self
+                    .new_on_logger()
+                    .into_iter()
+                    .filter(|e| !warm_up(&e.name))
+                    .map(|e| e.name)
+                    .collect();
                 // Its custom tracks: the ones on this computer.
-                let custom = crate::paths::data("tracks/custom").and_then(|d| std::fs::read_dir(d).ok()).into_iter().flatten().flatten();
-                let names = custom.filter_map(|e| aim_track::read_tkk(e.path()).ok()).map(|t| (t.name, crate::device::TrackCopy::Here));
-                self.device.tracks = crate::device::MyChronTracks { custom: names.collect() };
+                let custom = crate::paths::data("tracks/custom")
+                    .and_then(|d| std::fs::read_dir(d).ok())
+                    .into_iter()
+                    .flatten()
+                    .flatten();
+                let names = custom
+                    .filter_map(|e| aim_track::read_tkk(e.path()).ok())
+                    .map(|t| (t.name, crate::device::TrackCopy::Here));
+                self.device.tracks = crate::device::MyChronTracks {
+                    custom: names.collect(),
+                };
             }
             self.device.last_scan = f64::MAX;
         }
@@ -250,15 +371,19 @@ impl App {
         // An AiM device Linux won't let Mychronix use (no USB rule yet).
         if now - self.device.usb_checked > 2.0 {
             self.device.usb_checked = now;
-            self.device.usb_blocked = crate::usb_access::blocked() || crate::hooks::get().fake_usb_blocked;
+            self.device.usb_blocked =
+                crate::usb_access::blocked() || crate::hooks::get().fake_usb_blocked;
         }
-        if let Some(rx) = &self.device.usb_allow && let Ok(result) = rx.try_recv() {
+        if let Some(rx) = &self.device.usb_allow
+            && let Ok(result) = rx.try_recv()
+        {
             self.device.usb_allow = None;
             match result {
                 Ok(()) => {
                     self.device.usb_blocked = false;
                     self.device.usb_checked = now;
-                    self.notices.success("USB access allowed. Your MyChron will show up in a moment.");
+                    self.notices
+                        .success("USB access allowed. Your MyChron will show up in a moment.");
                     // Look again now rather than at the next scan.
                     self.device.last_scan = 0.0;
                 }
@@ -267,8 +392,16 @@ impl App {
                 }
             }
         }
-        let every = if self.device.logger.is_some() { 15.0 } else { 4.0 };
-        if self.device.busy.is_none() && !self.device.scanning && self.device.last_scan != f64::MAX && now - self.device.last_scan > every {
+        let every = if self.device.logger.is_some() {
+            15.0
+        } else {
+            4.0
+        };
+        if self.device.busy.is_none()
+            && !self.device.scanning
+            && self.device.last_scan != f64::MAX
+            && now - self.device.last_scan > every
+        {
             self.device.last_scan = now;
             self.device.scanning = true;
             let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Scan);
@@ -280,26 +413,56 @@ impl App {
         let ctx = ui.ctx().clone();
         self.device_poll(&ctx);
 
-
         ui.label(RichText::new("Device").font(semibold(28.0)).color(TEXT));
-        ui.label(RichText::new("Your MyChrons, how to download from them, and their sessions.").font(regular(14.5)).color(SECONDARY));
+        ui.label(
+            RichText::new("Your MyChrons, how to download from them, and their sessions.")
+                .font(regular(14.5))
+                .color(SECONDARY),
+        );
         ui.add_space(18.0);
 
-
-        if crate::hooks::get().fake_dialog.is_some() && self.device.dialog.is_none() && self.frames < 3 && self.device.logger.is_some() {
+        if crate::hooks::get().fake_dialog.is_some()
+            && self.device.dialog.is_none()
+            && self.frames < 3
+            && self.device.logger.is_some()
+        {
             let multi = crate::hooks::get().fake_dialog.as_deref() == Some("multi");
-            let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-            let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
+            let id = self
+                .device
+                .logger
+                .as_ref()
+                .and_then(|b| b.logger_id)
+                .map(|i| i.to_string())
+                .unwrap_or_default();
+            let p = self
+                .profiles
+                .get_or_insert_with(crate::profiles::Profiles::load)
+                .for_logger(&id);
             self.device.dialog = Some(DownloadDialog {
                 meta: crate::device::SessionMeta {
                     driver: p.driver,
                     kart: p.kart,
                     championship: p.championship,
-                    track: if multi { String::new() } else { "Club Circuit".into() },
+                    track: if multi {
+                        String::new()
+                    } else {
+                        "Club Circuit".into()
+                    },
                     ..Default::default()
                 },
-                detected: if multi { vec!["Club North".into(), "Club Circuit".into()] } else { vec!["Club Circuit".into()] },
-                setup: self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == id).and_then(|k| k.next_setup.clone()).unwrap_or_else(|| self.latest_setup(&id)),
+                detected: if multi {
+                    vec!["Club North".into(), "Club Circuit".into()]
+                } else {
+                    vec!["Club Circuit".into()]
+                },
+                setup: self
+                    .profiles
+                    .get_or_insert_with(crate::profiles::Profiles::load)
+                    .karts
+                    .iter()
+                    .find(|k| k.logger == id)
+                    .and_then(|k| k.next_setup.clone())
+                    .unwrap_or_else(|| self.latest_setup(&id)),
                 setup_before: self.latest_setup(&id),
                 setup_open: false,
                 replace: true,
@@ -337,17 +500,37 @@ impl App {
     /// MyChron (WiFi or data key) that isn't on a kart yet.
     fn unplaced_connected(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
         let connected: Vec<String> = self
-            .device.logger
+            .device
+            .logger
             .as_ref()
             .and_then(|b| b.logger_id)
             .map(|i| i.to_string())
             .into_iter()
-            .chain(self.key.listing.as_ref().filter(|_| self.key.present).map(|(s, ..)| s.clone()))
+            .chain(
+                self.key
+                    .listing
+                    .as_ref()
+                    .filter(|_| self.key.present)
+                    .map(|(s, ..)| s.clone()),
+            )
             .collect();
-        let wifi_id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
-        let wifi_model = self.device.current_wifi.as_deref().map(model_from_ssid).filter(|m| m.starts_with("MyChron"));
+        let wifi_id = self
+            .device
+            .logger
+            .as_ref()
+            .and_then(|b| b.logger_id)
+            .map(|i| i.to_string());
+        let wifi_model = self
+            .device
+            .current_wifi
+            .as_deref()
+            .map(model_from_ssid)
+            .filter(|m| m.starts_with("MyChron"));
         let cards: Vec<_> = self
             .unplaced_mychrons(&lib, &profiles)
             .into_iter()
@@ -355,8 +538,17 @@ impl App {
             .map(|u| {
                 let model = Some(profiles.for_logger(&u.logger).model)
                     .filter(|m| !m.is_empty())
-                    .or_else(|| wifi_model.filter(|_| wifi_id.as_deref() == Some(u.logger.as_str())).map(String::from))
-                    .or_else(|| lib.sessions.iter().filter(|s| s.logger == u.logger).find_map(|s| s.summary.model.clone()))
+                    .or_else(|| {
+                        wifi_model
+                            .filter(|_| wifi_id.as_deref() == Some(u.logger.as_str()))
+                            .map(String::from)
+                    })
+                    .or_else(|| {
+                        lib.sessions
+                            .iter()
+                            .filter(|s| s.logger == u.logger)
+                            .find_map(|s| s.summary.model.clone())
+                    })
                     .unwrap_or_else(|| "MyChron".into());
                 (u, model)
             })
@@ -420,10 +612,14 @@ impl App {
     /// Sessions on the logger not yet saved here (see `device::downloaded`).
     pub(super) fn new_on_logger(&self) -> Vec<aim_link::DirEntry> {
         let dir = self.logger_dir();
-        self.device.files
+        self.device
+            .files
             .iter()
             .filter(|e| e.is_session() && !crate::device::listed_twice(&self.device.files, e))
-            .filter(|e| !dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
+            .filter(|e| {
+                !dir.as_ref()
+                    .is_some_and(|d| crate::device::downloaded(d, e).is_some())
+            })
             .cloned()
             .collect()
     }
@@ -433,42 +629,90 @@ impl App {
     /// none of them is newer than what's here.
     fn download_setup_target(&self, lib: &Library) -> Option<(PathBuf, String)> {
         let dir = self.logger_dir()?;
-        let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
+        let id = self
+            .device
+            .logger
+            .as_ref()
+            .and_then(|b| b.logger_id)
+            .map(|i| i.to_string())
+            .unwrap_or_default();
         let tz = jiff::tz::TimeZone::system();
         let picked: Vec<(aim_link::DirEntry, String)> = self
-            .device.files
+            .device
+            .files
             .iter()
             .filter(|e| self.device.selected.contains(&e.name))
-            .map(|e| (e.clone(), crate::device::start_of(e, self.device.summaries.iter().find(|s| s.file.as_deref() == Some(e.name.as_str())), &tz)))
+            .map(|e| {
+                (
+                    e.clone(),
+                    crate::device::start_of(
+                        e,
+                        self.device
+                            .summaries
+                            .iter()
+                            .find(|s| s.file.as_deref() == Some(e.name.as_str())),
+                        &tz,
+                    ),
+                )
+            })
             .collect();
         crate::device::setup_target(&dir, &picked, &lib.newest_start(&id))
     }
 
     pub(super) fn device_status(&mut self, ui: &mut Ui) {
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
         card(ui, |ui| {
             match &self.device.logger {
                 Some(b) => {
                     let id = b.logger_id.map(|i| i.to_string()).unwrap_or_default();
                     // On USB there's no network name to tell the model: what the Garage knows.
-                    let known = profiles.get(&id).map(|p| p.model.clone()).filter(|m| !m.is_empty());
+                    let known = profiles
+                        .get(&id)
+                        .map(|p| p.model.clone())
+                        .filter(|m| !m.is_empty());
                     let model = match (self.device.usb, known) {
                         (true, Some(m)) => m,
                         (true, None) => "MyChron".to_string(),
-                        (false, _) => self.device.joined.as_deref().or(self.device.current_wifi.as_deref()).map(model_from_ssid).unwrap_or("MyChron").to_string(),
+                        (false, _) => self
+                            .device
+                            .joined
+                            .as_deref()
+                            .or(self.device.current_wifi.as_deref())
+                            .map(model_from_ssid)
+                            .unwrap_or("MyChron")
+                            .to_string(),
                     };
-                    let who = profiles.get(&id).map(|p| p.driver.clone()).filter(|d| !d.is_empty());
+                    let who = profiles
+                        .get(&id)
+                        .map(|p| p.driver.clone())
+                        .filter(|d| !d.is_empty());
                     ui.horizontal(|ui| {
                         ui.add(Icon::Mychron.image(theme::GOOD, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("{model} connected")).font(semibold(17.0)).color(TEXT));
-                            let how = if self.device.usb { Some("USB".to_string()) } else { self.device.current_wifi.clone() };
-                            let line = [Some(format!("Logger {id}")), who, how, Some(format!("answered in {} ms", b.round_trip.as_millis()))]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join("  ·  ");
+                            ui.label(
+                                RichText::new(format!("{model} connected"))
+                                    .font(semibold(17.0))
+                                    .color(TEXT),
+                            );
+                            let how = if self.device.usb {
+                                Some("USB".to_string())
+                            } else {
+                                self.device.current_wifi.clone()
+                            };
+                            let line = [
+                                Some(format!("Logger {id}")),
+                                who,
+                                how,
+                                Some(format!("answered in {} ms", b.round_trip.as_millis())),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join("  ·  ");
                             ui.label(RichText::new(line).color(SECONDARY));
                             // Its own tracks (made on it or sent from RaceStudio), when it has any.
                             if !self.device.tracks.custom.is_empty() {
@@ -478,20 +722,37 @@ impl App {
                                     .custom
                                     .iter()
                                     .map(|(name, state)| match state {
-                                        crate::device::TrackCopy::Here => format!("{name} (on this computer)"),
-                                        crate::device::TrackCopy::Copied => format!("{name} (copied just now)"),
-                                        crate::device::TrackCopy::Failed => format!("{name} (couldn't be copied; see the log)"),
+                                        crate::device::TrackCopy::Here => {
+                                            format!("{name} (on this computer)")
+                                        }
+                                        crate::device::TrackCopy::Copied => {
+                                            format!("{name} (copied just now)")
+                                        }
+                                        crate::device::TrackCopy::Failed => {
+                                            format!("{name} (couldn't be copied; see the log)")
+                                        }
                                     })
                                     .collect::<Vec<_>>()
                                     .join(", ");
-                                ui.label(RichText::new(format!("Custom tracks on it: {list}")).color(SECONDARY));
+                                ui.label(
+                                    RichText::new(format!("Custom tracks on it: {list}"))
+                                        .color(SECONDARY),
+                                );
                             }
                         });
                         if self.device.joined.is_some() {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if button(ui, Some(Icon::Wifi), "Disconnect", false).clicked() && self.device.busy.is_none() {
+                                if button(ui, Some(Icon::Wifi), "Disconnect", false).clicked()
+                                    && self.device.busy.is_none()
+                                {
                                     self.device.busy = Some("Reconnecting to your network…".into());
-                                    let _ = self.device.worker.as_ref().unwrap().tx.send(crate::device::Command::Leave);
+                                    let _ = self
+                                        .device
+                                        .worker
+                                        .as_ref()
+                                        .unwrap()
+                                        .tx
+                                        .send(crate::device::Command::Leave);
                                 }
                             });
                         }
@@ -502,7 +763,11 @@ impl App {
                         ui.add(Icon::Mychron.image(DIM, 32.0));
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("No MyChron found yet").font(semibold(17.0)).color(TEXT));
+                            ui.label(
+                                RichText::new("No MyChron found yet")
+                                    .font(semibold(17.0))
+                                    .color(TEXT),
+                            );
                             let hint = match &self.device.busy {
                                 Some(b) => b.clone(),
                                 None => crate::device::JOIN_HINT.into(),
@@ -514,18 +779,33 @@ impl App {
                         ui.add_space(12.0);
                         hairline(ui);
                         ui.add_space(10.0);
-                        let current = self.device.current_wifi.clone().unwrap_or_else(|| "your current network".into());
+                        let current = self
+                            .device
+                            .current_wifi
+                            .clone()
+                            .unwrap_or_else(|| "your current network".into());
                         ui.label(RichText::new(format!("MyChrons in range. Joining one takes this computer off {current} until you disconnect.")).size(12.5).color(DIM));
                         ui.add_space(6.0);
                         for (ssid, signal) in self.device.networks.clone() {
                             ui.horizontal(|ui| {
                                 ui.add(Icon::Wifi.image(SECONDARY, 18.0));
-                                ui.label(RichText::new(model_from_ssid(&ssid)).font(medium(14.5)).color(TEXT));
-                                ui.label(RichText::new(format!("{ssid}  ·  {signal}% signal")).color(DIM));
+                                ui.label(
+                                    RichText::new(model_from_ssid(&ssid))
+                                        .font(medium(14.5))
+                                        .color(TEXT),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{ssid}  ·  {signal}% signal"))
+                                        .color(DIM),
+                                );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if button(ui, None, "Join", true).clicked() && self.device.busy.is_none() {
+                                    if button(ui, None, "Join", true).clicked()
+                                        && self.device.busy.is_none()
+                                    {
                                         self.device.busy = Some(format!("Joining {ssid}…"));
-                                        let _ = self.device.worker.as_ref().unwrap().tx.send(crate::device::Command::Join { ssid: ssid.clone() });
+                                        let _ = self.device.worker.as_ref().unwrap().tx.send(
+                                            crate::device::Command::Join { ssid: ssid.clone() },
+                                        );
                                     }
                                 });
                             });
@@ -537,32 +817,91 @@ impl App {
     }
 
     fn device_sessions(&mut self, ui: &mut Ui) {
-        let new: std::collections::BTreeSet<String> = self.new_on_logger().into_iter().map(|e| e.name).collect();
+        let new: std::collections::BTreeSet<String> =
+            self.new_on_logger().into_iter().map(|e| e.name).collect();
         let sessions: Vec<aim_link::DirEntry> = {
-            let mut v: Vec<_> = self.device.files.iter().filter(|e| e.is_session()).cloned().collect();
+            let mut v: Vec<_> = self
+                .device
+                .files
+                .iter()
+                .filter(|e| e.is_session())
+                .cloned()
+                .collect();
             v.sort_by(|a, b| b.name.cmp(&a.name));
             v
         };
-        let logger_id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
+        let logger_id = self
+            .device
+            .logger
+            .as_ref()
+            .and_then(|b| b.logger_id)
+            .map(|i| i.to_string())
+            .unwrap_or_default();
         let setup_now = self.latest_setup(&logger_id);
-        let next_setup = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == logger_id).and_then(|k| k.next_setup.clone());
-        let summary_of = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).cloned();
+        let next_setup = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .karts
+            .iter()
+            .find(|k| k.logger == logger_id)
+            .and_then(|k| k.next_setup.clone());
+        let summary_of = |name: &str| {
+            self.device
+                .summaries
+                .iter()
+                .find(|s| s.file.as_deref() == Some(name))
+                .cloned()
+        };
         card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Sessions on the logger").font(semibold(16.0)).color(TEXT));
-                ui.label(RichText::new(format!("{} total  ·  {} new", sessions.len(), new.len())).color(SECONDARY));
+                ui.label(
+                    RichText::new("Sessions on the logger")
+                        .font(semibold(16.0))
+                        .color(TEXT),
+                );
+                ui.label(
+                    RichText::new(format!("{} total  ·  {} new", sessions.len(), new.len()))
+                        .color(SECONDARY),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let n = self.device.selected.len();
-                    let label = if n == 0 { "Download".to_string() } else { format!("Download {n}") };
+                    let label = if n == 0 {
+                        "Download".to_string()
+                    } else {
+                        format!("Download {n}")
+                    };
                     // Quiet until something is picked: it does nothing then.
-                    if button(ui, Some(Icon::Download), &label, n > 0).clicked() && n > 0 && self.device.busy.is_none() {
-                        let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
-                        let p = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(&id);
+                    if button(ui, Some(Icon::Download), &label, n > 0).clicked()
+                        && n > 0
+                        && self.device.busy.is_none()
+                    {
+                        let id = self
+                            .device
+                            .logger
+                            .as_ref()
+                            .and_then(|b| b.logger_id)
+                            .map(|i| i.to_string())
+                            .unwrap_or_default();
+                        let p = self
+                            .profiles
+                            .get_or_insert_with(crate::profiles::Profiles::load)
+                            .for_logger(&id);
                         // The track comes from the logger: one track pre-fills the field, several defer to each session.
-                        let mut detected: Vec<String> = self.device.selected.iter().filter_map(|n| summary_of(n)).filter_map(|s| s.track).filter(|t| !t.is_empty()).collect();
+                        let mut detected: Vec<String> = self
+                            .device
+                            .selected
+                            .iter()
+                            .filter_map(|n| summary_of(n))
+                            .filter_map(|s| s.track)
+                            .filter(|t| !t.is_empty())
+                            .collect();
                         detected.sort();
                         detected.dedup();
-                        let track = if detected.len() == 1 { detected[0].clone() } else { String::new() };
+                        let track = if detected.len() == 1 {
+                            detected[0].clone()
+                        } else {
+                            String::new()
+                        };
                         self.device.dialog = Some(DownloadDialog {
                             meta: crate::device::SessionMeta {
                                 driver: p.driver,
@@ -573,7 +912,12 @@ impl App {
                             },
                             detected,
                             // A setup typed for a failed download, else the kart's next one (Garage), else what it runs.
-                            setup: self.device.unsaved_setup.clone().or(next_setup).unwrap_or_else(|| setup_now.clone()),
+                            setup: self
+                                .device
+                                .unsaved_setup
+                                .clone()
+                                .or(next_setup)
+                                .unwrap_or_else(|| setup_now.clone()),
                             setup_before: setup_now.clone(),
                             setup_open: false,
                             replace: true,
@@ -591,64 +935,106 @@ impl App {
             });
             if let Some((index, count, file, done, total)) = &self.device.progress {
                 ui.add_space(8.0);
-                let frac = (*index as f32 + *done as f32 / (*total).max(1) as f32) / (*count).max(1) as f32;
-                ui.label(RichText::new(format!("Downloading {file}  ({} of {count})", index + 1)).color(SECONDARY));
-                let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+                let frac = (*index as f32 + *done as f32 / (*total).max(1) as f32)
+                    / (*count).max(1) as f32;
+                ui.label(
+                    RichText::new(format!("Downloading {file}  ({} of {count})", index + 1))
+                        .color(SECONDARY),
+                );
+                let (bar, _) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
                 ui.painter().rect_filled(bar, 3.0, SURFACE_ACTIVE);
-                ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 3.0, TEXT);
+                ui.painter().rect_filled(
+                    Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())),
+                    3.0,
+                    TEXT,
+                );
             } else if let Some(b) = &self.device.busy {
                 ui.add_space(6.0);
                 ui.label(RichText::new(b).color(SECONDARY));
             }
             ui.add_space(8.0);
-            egui::ScrollArea::vertical().id_salt("logger_sessions").auto_shrink([false, true]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for e in &sessions {
-                    let sum = summary_of(&e.name);
-                    let is_new = new.contains(&e.name);
-                    let mut on = self.device.selected.contains(&e.name);
-                    let response = row(ui, false, |ui| {
-                        let (cb, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                        ui.painter().rect_stroke(cb, CornerRadius::same(4), Stroke::new(1.5, if on { TEXT } else { DIM }), egui::StrokeKind::Inside);
-                        if on {
-                            Icon::Check.image(TEXT, 14.0).paint_at(ui, cb.shrink(2.0));
-                        }
-                        ui.add_space(6.0);
-                        let number = aim_xrk::summary::session_number(&e.name).map(|n| format!("Session {n}")).unwrap_or(e.name.clone());
-                        ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                        let when = sum.as_ref().map(|s| [s.date.map(crate::dates::us_short), s.start_time.as_deref().map(crate::dates::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
-                        ui.label(RichText::new(when).color(DIM));
-                        if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
-                            ui.label(RichText::new(t).color(SECONDARY));
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if is_new {
-                                tag(ui, "New", TEXT);
-                                if sum.as_ref().is_some_and(listed_warm_up) {
-                                    tag(ui, "Warm-up", DIM);
+            egui::ScrollArea::vertical()
+                .id_salt("logger_sessions")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for e in &sessions {
+                        let sum = summary_of(&e.name);
+                        let is_new = new.contains(&e.name);
+                        let mut on = self.device.selected.contains(&e.name);
+                        let response = row(ui, false, |ui| {
+                            let (cb, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                            ui.painter().rect_stroke(
+                                cb,
+                                CornerRadius::same(4),
+                                Stroke::new(1.5, if on { TEXT } else { DIM }),
+                                egui::StrokeKind::Inside,
+                            );
+                            if on {
+                                Icon::Check.image(TEXT, 14.0).paint_at(ui, cb.shrink(2.0));
+                            }
+                            ui.add_space(6.0);
+                            let number = aim_xrk::summary::session_number(&e.name)
+                                .map(|n| format!("Session {n}"))
+                                .unwrap_or(e.name.clone());
+                            ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
+                            let when = sum
+                                .as_ref()
+                                .map(|s| {
+                                    [
+                                        s.date.map(crate::dates::us_short),
+                                        s.start_time.as_deref().map(crate::dates::clock_time),
+                                    ]
+                                    .into_iter()
+                                    .flatten()
+                                    .collect::<Vec<_>>()
+                                    .join("  ·  ")
+                                })
+                                .unwrap_or(e.date.clone());
+                            ui.label(RichText::new(when).color(DIM));
+                            if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
+                                ui.label(RichText::new(t).color(SECONDARY));
+                            }
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if is_new {
+                                    tag(ui, "New", TEXT);
+                                    if sum.as_ref().is_some_and(listed_warm_up) {
+                                        tag(ui, "Warm-up", DIM);
+                                    }
+                                } else {
+                                    ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
                                 }
-                            } else {
-                                ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
-                            }
-                            ui.label(RichText::new(format!("{:.1} MB", e.size as f64 / 1e6)).size(12.5).color(DIM));
-                            if let Some(s) = &sum {
-                                let best = s.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
-                                ui.label(RichText::new(best).font(medium(14.0)).color(TEXT));
-                                let laps = s.laps.unwrap_or(0);
-                                ui.label(RichText::new(plural(laps as usize, "lap")).size(12.5).color(DIM));
-                            }
+                                ui.label(
+                                    RichText::new(format!("{:.1} MB", e.size as f64 / 1e6))
+                                        .size(12.5)
+                                        .color(DIM),
+                                );
+                                if let Some(s) = &sum {
+                                    let best = s
+                                        .best_lap_ms
+                                        .map(|b| format_lap_time(b as i64))
+                                        .unwrap_or_else(|| "—".into());
+                                    ui.label(RichText::new(best).font(medium(14.0)).color(TEXT));
+                                    let laps = s.laps.unwrap_or(0);
+                                    ui.label(
+                                        RichText::new(plural(laps as usize, "lap"))
+                                            .size(12.5)
+                                            .color(DIM),
+                                    );
+                                }
+                            });
                         });
-                    });
-                    if response.clicked() {
-                        on = !on;
-                        if on {
-                            self.device.selected.insert(e.name.clone());
-                        } else {
-                            self.device.selected.remove(&e.name);
+                        if response.clicked() {
+                            on = !on;
+                            if on {
+                                self.device.selected.insert(e.name.clone());
+                            } else {
+                                self.device.selected.remove(&e.name);
+                            }
                         }
                     }
-                }
-            });
+                });
         });
     }
 
@@ -656,9 +1042,14 @@ impl App {
     /// track, before downloading. Every field but the comment suggests values
     /// already in use.
     fn download_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut dlg) = self.device.dialog.take() else { return };
+        let Some(mut dlg) = self.device.dialog.take() else {
+            return;
+        };
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
         let s = Suggestions::gather(&lib, &profiles);
         let tires = self.tire_suggestions();
         let lib = self.lib();
@@ -670,13 +1061,26 @@ impl App {
         // Picked sessions already saved here, as "Session 10".
         let dir = self.logger_dir();
         let again: Vec<String> = self
-            .device.files
+            .device
+            .files
             .iter()
-            .filter(|e| self.device.selected.contains(&e.name) && dir.as_ref().is_some_and(|d| crate::device::downloaded(d, e).is_some()))
-            .map(|e| aim_xrk::summary::session_number(&e.name).map(|k| format!("Session {k}")).unwrap_or(e.name.clone()))
+            .filter(|e| {
+                self.device.selected.contains(&e.name)
+                    && dir
+                        .as_ref()
+                        .is_some_and(|d| crate::device::downloaded(d, e).is_some())
+            })
+            .map(|e| {
+                aim_xrk::summary::session_number(&e.name)
+                    .map(|k| format!("Session {k}"))
+                    .unwrap_or(e.name.clone())
+            })
             .collect();
         // Where a changed setup is saved, shown with it so a wrong session is caught before downloading.
-        let target = dlg.setup_target.get_or_insert_with(|| self.download_setup_target(&lib)).clone();
+        let target = dlg
+            .setup_target
+            .get_or_insert_with(|| self.download_setup_target(&lib))
+            .clone();
         let setup_from = match &target {
             Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", crate::dates::stamp_words(start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
@@ -684,13 +1088,30 @@ impl App {
         // The Garage's drivers and karts, and what this MyChron is on now.
         let drivers: Vec<String> = profiles.drivers.iter().map(|d| d.name.clone()).collect();
         let karts: Vec<String> = profiles.garage_karts().map(|k| k.name.clone()).collect();
-        let current = profiles.for_logger(&self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default());
-                let closed = look::dialog(ctx, "download", 760.0, |ui| {
+        let current = profiles.for_logger(
+            &self
+                .device
+                .logger
+                .as_ref()
+                .and_then(|b| b.logger_id)
+                .map(|i| i.to_string())
+                .unwrap_or_default(),
+        );
+        let closed = look::dialog(ctx, "download", 760.0, |ui| {
             use look;
             let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
-            look::header(ui, Icon::Download, SECONDARY, None, &title, "Who drove, in which kart, and where. These are remembered for next time.");
+            look::header(
+                ui,
+                Icon::Download,
+                SECONDARY,
+                None,
+                &title,
+                "Who drove, in which kart, and where. These are remembered for next time.",
+            );
             // Two steps, either one a click away: the details, then the setup.
-            if let Some(k) = look::steps(ui, &["Details", "Setup"], usize::from(dlg.setup_open), true) {
+            if let Some(k) =
+                look::steps(ui, &["Details", "Setup"], usize::from(dlg.setup_open), true)
+            {
                 dlg.setup_open = k == 1;
             }
             look::body(ui, |ui| {
@@ -700,7 +1121,11 @@ impl App {
                     if changes.is_empty() {
                         look::note(ui, "Same as last time.", DIM);
                     } else {
-                        look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
+                        look::note(
+                            ui,
+                            &format!("Changed: {}", changes.join(", ")),
+                            theme::FAVORITE,
+                        );
                     }
                     // Changes and notes are both saved on one session: say which.
                     if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
@@ -814,7 +1239,13 @@ impl App {
             });
             look::footer_row(ui, |ui| {
                 // Back from the setup; Cancel from the details.
-                if look::big_button(ui, if dlg.setup_open { "Back" } else { "Cancel" }, None, look::Kind::Quiet, true) {
+                if look::big_button(
+                    ui,
+                    if dlg.setup_open { "Back" } else { "Cancel" },
+                    None,
+                    look::Kind::Quiet,
+                    true,
+                ) {
                     if dlg.setup_open {
                         dlg.setup_open = false;
                     } else {
@@ -822,10 +1253,24 @@ impl App {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if look::big_button(ui, "Download", Some(Icon::Download), look::Kind::Primary, true) {
+                    if look::big_button(
+                        ui,
+                        "Download",
+                        Some(Icon::Download),
+                        look::Kind::Primary,
+                        true,
+                    ) {
                         go = true;
                     }
-                    if !dlg.setup_open && look::big_button(ui, "Change setup", Some(Icon::Settings), look::Kind::Quiet, true) {
+                    if !dlg.setup_open
+                        && look::big_button(
+                            ui,
+                            "Change setup",
+                            Some(Icon::Settings),
+                            look::Kind::Quiet,
+                            true,
+                        )
+                    {
                         dlg.setup_open = true;
                     }
                 });
@@ -833,29 +1278,52 @@ impl App {
         });
         let open = !closed;
         if go {
-            let id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
+            let id = self
+                .device
+                .logger
+                .as_ref()
+                .and_then(|b| b.logger_id)
+                .map(|i| i.to_string())
+                .unwrap_or_default();
             // Remember these for next time (not the comment or session type, which change every time).
             // The MyChron is now on the kart named, so the kart's baseline applies to it.
             // A MyChron moving to another kart leaves its sessions so far with the old one.
             let lib = self.lib();
-            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
-            profiles.note_download(&id, &dlg.meta.driver, &dlg.meta.kart, &dlg.meta.championship, (!multiple).then_some(dlg.meta.track.as_str()), &|l: &str| lib.newest_start(l));
+            let profiles = self
+                .profiles
+                .get_or_insert_with(crate::profiles::Profiles::load);
+            profiles.note_download(
+                &id,
+                &dlg.meta.driver,
+                &dlg.meta.kart,
+                &dlg.meta.championship,
+                (!multiple).then_some(dlg.meta.track.as_str()),
+                &|l: &str| lib.newest_start(l),
+            );
             self.profiles_changed();
             // Each file gets the dialog's details; with several tracks, its own track from the logger.
             let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
-                .device.files
+                .device
+                .files
                 .iter()
                 .filter(|e| self.device.selected.contains(&e.name))
                 .map(|e| {
                     let mut meta = dlg.meta.clone();
                     if multiple || meta.track.is_empty() {
-                        meta.track = self.device.summaries.iter().find(|s| s.file.as_deref() == Some(e.name.as_str())).and_then(|s| s.track.clone()).unwrap_or_default();
+                        meta.track = self
+                            .device
+                            .summaries
+                            .iter()
+                            .find(|s| s.file.as_deref() == Some(e.name.as_str()))
+                            .and_then(|s| s.track.clone())
+                            .unwrap_or_default();
                     }
                     (e.clone(), meta)
                 })
                 .collect();
             // A setup sheet goes on the earliest new session only, and only when there's something new.
-            let changed = !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
+            let changed =
+                !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
             self.device.pending_setup = match (changed, target) {
                 (true, Some((path, _))) => Some((path, dlg.setup.clone())),
                 _ => None,
@@ -869,7 +1337,13 @@ impl App {
                 ));
             } else if let Some(dir) = self.logger_dir() {
                 self.device.busy = Some("Downloading…".into());
-                let _ = self.device.worker.as_ref().unwrap().tx.send(crate::device::Command::Download { files, dir, replace: dlg.replace });
+                let _ = self.device.worker.as_ref().unwrap().tx.send(
+                    crate::device::Command::Download {
+                        files,
+                        dir,
+                        replace: dlg.replace,
+                    },
+                );
             }
         } else if open && !cancel {
             self.device.dialog = Some(dlg);

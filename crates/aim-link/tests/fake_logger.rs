@@ -12,14 +12,28 @@ const TKK_LISTING: &[u8] = include_bytes!("data/tkk-listing.bin");
 
 /// Builds a directory listing the way the logger formats one.
 fn listing(files: &[(&str, usize)]) -> Vec<u8> {
-    let field = |tag: &[u8; 4], text: &str| Frame { tag: *tag, flag: 1, payload: text.as_bytes().to_vec() }.encode();
+    let field = |tag: &[u8; 4], text: &str| {
+        Frame {
+            tag: *tag,
+            flag: 1,
+            payload: text.as_bytes().to_vec(),
+        }
+        .encode()
+    };
     let mut out = Vec::new();
     for (name, size) in files {
         let mut body = field(b"TMD\0", "10/10/2026");
         body.extend(field(b"TMT\0", "13:49:35"));
         body.extend(field(b"SZ\0\0", &size.to_string()));
         body.extend(field(b"N\0\0\0", name));
-        out.extend(Frame { tag: *b"FLE\0", flag: 0, payload: body }.encode());
+        out.extend(
+            Frame {
+                tag: *b"FLE\0",
+                flag: 0,
+                payload: body,
+            }
+            .encode(),
+        );
     }
     out
 }
@@ -44,13 +58,21 @@ fn serve(listener: TcpListener, files: HashMap<String, Vec<u8>>, chunk: usize) {
         match (&req.tag, req.payload.len()) {
             (b"STNC", 64) => {
                 let p = &req.payload;
-                let command = (u16::from_le_bytes([p[8], p[9]]), u16::from_le_bytes([p[10], p[11]]));
-                let path = String::from_utf8_lossy(&p[32..]).trim_end_matches('\0').to_string();
+                let command = (
+                    u16::from_le_bytes([p[8], p[9]]),
+                    u16::from_le_bytes([p[10], p[11]]),
+                );
+                let path = String::from_utf8_lossy(&p[32..])
+                    .trim_end_matches('\0')
+                    .to_string();
                 current = match command {
                     client::cmd::READ_FILE => files[&path].clone(),
                     client::cmd::LIST_DIR if path == "0:/tkk" => TKK_LISTING.to_vec(),
                     client::cmd::LIST_DIR => {
-                        let names: Vec<_> = files.iter().map(|(n, d)| (n.rsplit('/').next().unwrap(), d.len())).collect();
+                        let names: Vec<_> = files
+                            .iter()
+                            .map(|(n, d)| (n.rsplit('/').next().unwrap(), d.len()))
+                            .collect();
                         listing(&names)
                     }
                     other => panic!("unexpected command {other:?}"),
@@ -94,12 +116,20 @@ fn start(files: HashMap<String, Vec<u8>>, chunk: usize) -> SocketAddr {
 #[test]
 fn downloads_a_file_across_chunks() {
     let session: Vec<u8> = (0..10_000u32).map(|i| (i * 7 % 251) as u8).collect();
-    let addr = start(HashMap::from([("1:/mem/a_0001.xrz".to_string(), session.clone())]), 4096);
+    let addr = start(
+        HashMap::from([("1:/mem/a_0001.xrz".to_string(), session.clone())]),
+        4096,
+    );
     let mut logger = Logger::connect(addr).unwrap();
     let mut calls = Vec::new();
-    let got = logger.read_file("1:/mem/a_0001.xrz", |done, total| calls.push((done, total))).unwrap();
+    let got = logger
+        .read_file("1:/mem/a_0001.xrz", |done, total| calls.push((done, total)))
+        .unwrap();
     assert_eq!(got, session);
-    assert_eq!(calls, vec![(4096, 10_000), (8192, 10_000), (10_000, 10_000)]);
+    assert_eq!(
+        calls,
+        vec![(4096, 10_000), (8192, 10_000), (10_000, 10_000)]
+    );
     assert_eq!(checksum(&got), checksum(&session));
 }
 
@@ -119,7 +149,10 @@ fn lists_sessions_and_reads_real_listing() {
 
     // The track folder listing exactly as a MyChron 6 sent it.
     let tracks = logger.list("0:/tkk").unwrap();
-    let tracks: Vec<_> = tracks.iter().map(|e| (e.name.as_str(), e.size, e.date.as_str())).collect();
+    let tracks: Vec<_> = tracks
+        .iter()
+        .map(|e| (e.name.as_str(), e.size, e.date.as_str()))
+        .collect();
     assert_eq!(
         tracks,
         [

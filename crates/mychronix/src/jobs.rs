@@ -9,11 +9,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 /// Runs `work` on a background thread called `name`.
 pub fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
     let label = name.to_string();
-    let started = std::thread::Builder::new().name(name.to_string()).spawn(move || {
-        if catch_unwind(AssertUnwindSafe(work)).is_err() {
-            log::error!("background job \"{label}\" stopped unexpectedly (details in crash.log)");
-        }
-    });
+    let started = std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(move || {
+            if catch_unwind(AssertUnwindSafe(work)).is_err() {
+                log::error!(
+                    "background job \"{label}\" stopped unexpectedly (details in crash.log)"
+                );
+            }
+        });
     if let Err(e) = started {
         log::error!("couldn't start background job \"{name}\": {e}");
     }
@@ -33,7 +37,9 @@ pub fn guard<T>(what: &str, f: impl FnOnce() -> T) -> Option<T> {
 /// Everything a job has sent so far, and whether it has ended (its sending
 /// side is gone, normally or because it crashed). No receiver: nothing, ended.
 pub fn drain<T>(rx: Option<&std::sync::mpsc::Receiver<T>>) -> (Vec<T>, bool) {
-    let Some(rx) = rx else { return (Vec::new(), true) };
+    let Some(rx) = rx else {
+        return (Vec::new(), true);
+    };
     let mut got = Vec::new();
     loop {
         match rx.try_recv() {
@@ -69,7 +75,9 @@ fn name_rpm(session: &mut aim_xrk::Session) {
     if session.channel("RPM").is_some() {
         return;
     }
-    if let Some(c) = session.channels.iter_mut().find(|c| (c.name == "Engine" || c.name == "Engine RPM") && c.units.eq_ignore_ascii_case("rpm")) {
+    if let Some(c) = session.channels.iter_mut().find(|c| {
+        (c.name == "Engine" || c.name == "Engine RPM") && c.units.eq_ignore_ascii_case("rpm")
+    }) {
         c.name = "RPM".into();
     }
 }
@@ -84,21 +92,43 @@ fn name_rpm(session: &mut aim_xrk::Session) {
 /// MyChron timed them somewhere else (it had another layout loaded).
 fn relap(session: &mut aim_xrk::Session, path: &std::path::Path) {
     use aim_xrk::relap::Retimed;
-    let picked = crate::device::SessionMeta::load(path).and_then(|m| m.track_guid).filter(|g| !g.is_empty());
-    let recorded = std::fs::read(path.with_extension("xri")).ok().and_then(|b| aim_xrk::parse_xri(&b).ok()).and_then(|s| s.track_guid);
+    let picked = crate::device::SessionMeta::load(path)
+        .and_then(|m| m.track_guid)
+        .filter(|g| !g.is_empty());
+    let recorded = std::fs::read(path.with_extension("xri"))
+        .ok()
+        .and_then(|b| aim_xrk::parse_xri(&b).ok())
+        .and_then(|s| s.track_guid);
     // A track you picked over the MyChron's own may start laps elsewhere.
     let other_track = picked.is_some() && picked != recorded;
     if !other_track && !aim_xrk::relap::needs_retiming(session) {
         return;
     }
-    let Some(gps) = session.gps.as_ref() else { return };
-    let (Some(&lat), Some(&lon)) = (gps.latitude.first(), gps.longitude.first()) else { return };
+    let Some(gps) = session.gps.as_ref() else {
+        return;
+    };
+    let (Some(&lat), Some(&lon)) = (gps.latitude.first(), gps.longitude.first()) else {
+        return;
+    };
     let (own, aim) = crate::tracks::start_finishes_near(lat, lon, 3_000.0);
     let mine = picked.clone().or(recorded);
-    let first: Vec<crate::tracks::Line> = own.iter().chain(&aim).filter(|l| mine.as_deref() == Some(l.guid.as_str())).cloned().collect();
+    let first: Vec<crate::tracks::Line> = own
+        .iter()
+        .chain(&aim)
+        .filter(|l| mine.as_deref() == Some(l.guid.as_str()))
+        .cloned()
+        .collect();
     let before = session.laps.len();
-    if other_track && let Some(line) = first.first() && let Some(laps) = aim_xrk::relap::at_picked_line(session, line.at) {
-        log::info!("{}: {before} lap(s) as the logger timed it; {} timed from GPS against the picked track's start/finish {:?}", path.display(), laps.len(), line.at);
+    if other_track
+        && let Some(line) = first.first()
+        && let Some(laps) = aim_xrk::relap::at_picked_line(session, line.at)
+    {
+        log::info!(
+            "{}: {before} lap(s) as the logger timed it; {} timed from GPS against the picked track's start/finish {:?}",
+            path.display(),
+            laps.len(),
+            line.at
+        );
         session.laps = laps;
         session.info.laps_from_gps = Some(Retimed::PickedTrack);
         return;
@@ -106,7 +136,12 @@ fn relap(session: &mut aim_xrk::Session, path: &std::path::Path) {
     for lines in [first, own, aim] {
         let at: Vec<(f64, f64)> = lines.iter().map(|l| l.at).collect();
         if let Some((k, laps)) = aim_xrk::relap::fix(session, &at) {
-            log::info!("{}: {before} lap(s) as the logger timed it; {} timed from GPS against start/finish {:?}", path.display(), laps.len(), at[k]);
+            log::info!(
+                "{}: {before} lap(s) as the logger timed it; {} timed from GPS against start/finish {:?}",
+                path.display(),
+                laps.len(),
+                at[k]
+            );
             session.laps = laps;
             session.info.laps_from_gps = Some(Retimed::Untimed);
             return;

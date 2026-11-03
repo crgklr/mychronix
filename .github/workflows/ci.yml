@@ -1,4 +1,4 @@
-# Tests and clippy on every push and pull request, so a change that breaks
+# Formatting, tests and clippy on every push and pull request, so a change that breaks
 # something is caught before a release tag (release.yml tests again then).
 name: CI
 
@@ -20,9 +20,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
 
       - name: Test
         run: cargo test --workspace --locked

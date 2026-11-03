@@ -6,7 +6,10 @@ use super::*;
 impl App {
     pub(super) fn sessions_page(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
         let mut shown_rows: Vec<usize> = Vec::new();
         let loggers: Vec<String> = {
             let mut l: Vec<String> = lib.sessions.iter().map(|s| s.logger.clone()).collect();
@@ -16,9 +19,18 @@ impl App {
         };
         let driver_of = |i: usize| lib.sessions[i].driver(&profiles);
         // The newest session's day, for "Last race day".
-        let newest = lib.sessions.iter().filter_map(|s| s.summary.date).max().and_then(|d| jiff::civil::Date::new(d.year as i16, d.month as i8, d.day as i8).ok());
+        let newest = lib
+            .sessions
+            .iter()
+            .filter_map(|s| s.summary.date)
+            .max()
+            .and_then(|d| jiff::civil::Date::new(d.year as i16, d.month as i8, d.day as i8).ok());
 
-        let setups = crate::setup::resolve(&lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
+        let setups = crate::setup::resolve(
+            &lib,
+            self.setup_baselines
+                .get_or_insert_with(crate::setup::Baselines::load),
+        );
         let raced: Vec<usize> = {
             let mut v: Vec<usize> = lib.sessions.iter().filter_map(|s| s.track).collect();
             v.sort();
@@ -30,7 +42,19 @@ impl App {
             ui.label(RichText::new("Sessions").font(semibold(28.0)).color(TEXT));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let busy = self.import_progress.is_some();
-                if button(ui, Some(Icon::FolderOpen), if busy { "Importing…" } else { "Import a folder…" }, false).clicked() && !busy {
+                if button(
+                    ui,
+                    Some(Icon::FolderOpen),
+                    if busy {
+                        "Importing…"
+                    } else {
+                        "Import a folder…"
+                    },
+                    false,
+                )
+                .clicked()
+                    && !busy
+                {
                     import = true;
                 }
             });
@@ -40,8 +64,14 @@ impl App {
         }
         // Session files or folders dropped on the window are imported too.
         self.import_drops(&ui.ctx().clone());
-        let matching = (0..lib.sessions.len()).filter(|&i| self.session_filter.keeps(&lib, i, &profiles, newest)).count();
-        let count = if matching < lib.sessions.len() { format!("Showing {matching} of {} sessions", lib.sessions.len()) } else { format!("{} sessions", lib.sessions.len()) };
+        let matching = (0..lib.sessions.len())
+            .filter(|&i| self.session_filter.keeps(&lib, i, &profiles, newest))
+            .count();
+        let count = if matching < lib.sessions.len() {
+            format!("Showing {matching} of {} sessions", lib.sessions.len())
+        } else {
+            format!("{} sessions", lib.sessions.len())
+        };
         ui.label(
             RichText::new(format!(
                 "{count}  ·  {} track{}  ·  {} MyChron{}",
@@ -57,7 +87,11 @@ impl App {
 
         if lib.sessions.is_empty() {
             card(ui, |ui| {
-                ui.label(RichText::new("No sessions yet").font(semibold(17.0)).color(TEXT));
+                ui.label(
+                    RichText::new("No sessions yet")
+                        .font(semibold(17.0))
+                        .color(TEXT),
+                );
                 ui.label(RichText::new("Download from your MyChron (Device page, or `mychronix device pull`) and they'll appear here.").color(SECONDARY));
             });
             return;
@@ -74,7 +108,11 @@ impl App {
             ui.allocate_ui_with_layout(vec2(list_w, height), column, |ui| {
                 ui.set_width(list_w);
                 // Filters are in the right column; search stays here.
-                search_field(ui, &mut self.session_search, "Search driver, kart, championship, track, comment…");
+                search_field(
+                    ui,
+                    &mut self.session_search,
+                    "Search driver, kart, championship, track, comment…",
+                );
                 ui.add_space(10.0);
 
                 let needle = self.session_search.to_lowercase();
@@ -88,9 +126,16 @@ impl App {
                                 let hay = format!(
                                     "{} {} {} {} {} {} {} {} {} {} {}",
                                     sum.number.unwrap_or(0),
-                                    sum.date.map(|d| format!("{d} {}", crate::dates::us_short(d))).unwrap_or_default(),
+                                    sum.date
+                                        .map(|d| format!("{d} {}", crate::dates::us_short(d)))
+                                        .unwrap_or_default(),
                                     sum.track.clone().unwrap_or_default(),
-                                    s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default(),
+                                    s.track
+                                        .map(|t| lib.tracks[t]
+                                            .full_name
+                                            .clone()
+                                            .unwrap_or_default())
+                                        .unwrap_or_default(),
                                     driver_of(i),
                                     m.kart,
                                     m.championship,
@@ -113,60 +158,104 @@ impl App {
                 let extras = self.row_extras(&lib, &profiles, &shown, &ui.ctx().clone());
                 shown_rows = shown.clone();
 
-                egui::ScrollArea::vertical().id_salt("sessions_list").auto_shrink([false, false]).show(ui, |ui| {
-                    let mut k = 0;
-                    while k < shown.len() {
-                        // One group per race day.
-                        let date = lib.sessions[shown[k]].summary.date;
-                        let mut end = k;
-                        while end < shown.len() && lib.sessions[shown[end]].summary.date == date {
-                            end += 1;
-                        }
-                        let day = &shown[k..end];
-                        // The tracks raced that day, as assigned (else as recorded).
-                        let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track_name(&lib.tracks)).collect();
-                        tracks.sort();
-                        tracks.dedup();
-                        let best = day.iter().filter_map(|&i| lib.sessions[i].summary.best_lap_ms).min();
-                        ui.add_space(if k == 0 { 0.0 } else { 14.0 });
-                        ui.horizontal(|ui| {
-                            ui.add(Icon::Calendar.image(SECONDARY, 16.0));
-                            let heading = date.map(crate::dates::long).unwrap_or_else(|| "Unknown date".into());
-                            ui.label(RichText::new(heading).font(semibold(16.0)).color(TEXT));
-                            ui.label(RichText::new(format!("{}  ·  {} session{}", tracks.join(", "), day.len(), if day.len() == 1 { "" } else { "s" })).color(SECONDARY));
-                            if let Some(b) = best {
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(RichText::new(format_lap_time(b as i64)).font(semibold(15.0)).color(theme::GOOD));
-                                    ui.label(RichText::new("Day best").size(12.5).color(DIM));
-                                });
+                egui::ScrollArea::vertical()
+                    .id_salt("sessions_list")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let mut k = 0;
+                        while k < shown.len() {
+                            // One group per race day.
+                            let date = lib.sessions[shown[k]].summary.date;
+                            let mut end = k;
+                            while end < shown.len() && lib.sessions[shown[end]].summary.date == date
+                            {
+                                end += 1;
                             }
-                        });
-                        ui.add_space(6.0);
-                        for &i in day {
-                            let driver = driver_of(i);
-                            if session_row_with(ui, &lib, i, &driver, best, !setups[i].changes.is_empty(), extras.get(&i)).clicked() {
-                                open = Some(lib.sessions[i].path.clone());
+                            let day = &shown[k..end];
+                            // The tracks raced that day, as assigned (else as recorded).
+                            let mut tracks: Vec<String> = day
+                                .iter()
+                                .filter_map(|&i| lib.sessions[i].track_name(&lib.tracks))
+                                .collect();
+                            tracks.sort();
+                            tracks.dedup();
+                            let best = day
+                                .iter()
+                                .filter_map(|&i| lib.sessions[i].summary.best_lap_ms)
+                                .min();
+                            ui.add_space(if k == 0 { 0.0 } else { 14.0 });
+                            ui.horizontal(|ui| {
+                                ui.add(Icon::Calendar.image(SECONDARY, 16.0));
+                                let heading = date
+                                    .map(crate::dates::long)
+                                    .unwrap_or_else(|| "Unknown date".into());
+                                ui.label(RichText::new(heading).font(semibold(16.0)).color(TEXT));
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}  ·  {} session{}",
+                                        tracks.join(", "),
+                                        day.len(),
+                                        if day.len() == 1 { "" } else { "s" }
+                                    ))
+                                    .color(SECONDARY),
+                                );
+                                if let Some(b) = best {
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(
+                                            RichText::new(format_lap_time(b as i64))
+                                                .font(semibold(15.0))
+                                                .color(theme::GOOD),
+                                        );
+                                        ui.label(RichText::new("Day best").size(12.5).color(DIM));
+                                    });
+                                }
+                            });
+                            ui.add_space(6.0);
+                            for &i in day {
+                                let driver = driver_of(i);
+                                if session_row_with(
+                                    ui,
+                                    &lib,
+                                    i,
+                                    &driver,
+                                    best,
+                                    !setups[i].changes.is_empty(),
+                                    extras.get(&i),
+                                )
+                                .clicked()
+                                {
+                                    open = Some(lib.sessions[i].path.clone());
+                                }
                             }
+                            k = end;
                         }
-                        k = end;
-                    }
-                    if shown.is_empty() {
-                        ui.label(RichText::new("No sessions match.").color(DIM));
-                    }
-                });
+                        if shown.is_empty() {
+                            ui.label(RichText::new("No sessions match.").color(DIM));
+                        }
+                    });
             });
 
             // Filters: when, drivers, tracks.
             ui.allocate_ui_with_layout(vec2(side_w, height), column, |ui| {
                 ui.set_width(side_w);
-                egui::ScrollArea::vertical().id_salt("sessions_filters").auto_shrink([false, false]).show(ui, |ui| {
-                    self.sessions_filter_panel(ui, &lib, &profiles, newest);
-                });
+                egui::ScrollArea::vertical()
+                    .id_salt("sessions_filters")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.sessions_filter_panel(ui, &lib, &profiles, newest);
+                    });
             });
         });
         // MYCHRONIX_CLICK_SESSION=<n> clicks session n once (for testing).
-        if open.is_none() && self.frames == 5 && let Some(n) = crate::hooks::get().click_session {
-            open = lib.sessions.iter().find(|s| s.summary.number == Some(n)).map(|s| s.path.clone());
+        if open.is_none()
+            && self.frames == 5
+            && let Some(n) = crate::hooks::get().click_session
+        {
+            open = lib
+                .sessions
+                .iter()
+                .find(|s| s.summary.number == Some(n))
+                .map(|s| s.path.clone());
         }
         self.want_weather(&shown_rows, &ui.ctx().clone());
         if let Some(path) = open {
@@ -187,13 +276,30 @@ pub(super) struct RowExtras {
 impl App {
     /// Sparkline laps and badges for each of `rows` (library indices); digests
     /// not yet known are asked for in the background.
-    pub(super) fn row_extras(&mut self, lib: &Library, profiles: &crate::profiles::Profiles, rows: &[usize], ctx: &egui::Context) -> std::collections::HashMap<usize, RowExtras> {
+    pub(super) fn row_extras(
+        &mut self,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+        rows: &[usize],
+        ctx: &egui::Context,
+    ) -> std::collections::HashMap<usize, RowExtras> {
         self.want_digests(rows.iter().map(|&i| lib.sessions[i].path.clone()), ctx);
-        let digests = self.sensors.digests.get_or_insert_with(crate::digest::Digests::load);
-        let ignored = self.sensors.ignored.get_or_insert_with(crate::sensor_check::Ignored::load);
+        let digests = self
+            .sensors
+            .digests
+            .get_or_insert_with(crate::digest::Digests::load);
+        let ignored = self
+            .sensors
+            .ignored
+            .get_or_insert_with(crate::sensor_check::Ignored::load);
         // Personal best: the driver's best lap at a track, on any MyChron, among two or more sessions there.
-        let who = |s: &tracks::LocalSession| Some(s.driver(profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| s.logger.clone());
-        let mut best_at: std::collections::HashMap<(String, String), (u64, usize)> = std::collections::HashMap::new();
+        let who = |s: &tracks::LocalSession| {
+            Some(s.driver(profiles))
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| s.logger.clone())
+        };
+        let mut best_at: std::collections::HashMap<(String, String), (u64, usize)> =
+            std::collections::HashMap::new();
         for s in &lib.sessions {
             if let (Some(b), Some(t)) = (s.summary.best_lap_ms, s.track_name(&lib.tracks)) {
                 let e = best_at.entry((who(s), t)).or_insert((u64::MAX, 0));
@@ -234,12 +340,19 @@ pub(super) fn sparkline(p: &egui::Painter, rect: Rect, laps: &[(i32, i64)]) {
     if laps.len() < 3 {
         return;
     }
-    let (lo, hi) = laps.iter().fold((i64::MAX, i64::MIN), |a, l| (a.0.min(l.1), a.1.max(l.1)));
+    let (lo, hi) = laps
+        .iter()
+        .fold((i64::MAX, i64::MIN), |a, l| (a.0.min(l.1), a.1.max(l.1)));
     let span = (hi - lo).max(1) as f32;
     let pts: Vec<egui::Pos2> = laps
         .iter()
         .enumerate()
-        .map(|(k, l)| pos2(rect.left() + rect.width() * k as f32 / (laps.len() - 1) as f32, rect.bottom() - rect.height() * (l.1 - lo) as f32 / span))
+        .map(|(k, l)| {
+            pos2(
+                rect.left() + rect.width() * k as f32 / (laps.len() - 1) as f32,
+                rect.bottom() - rect.height() * (l.1 - lo) as f32 / span,
+            )
+        })
         .collect();
     p.add(egui::Shape::line(pts.clone(), Stroke::new(1.5, SECONDARY)));
     if let Some(k) = laps.iter().position(|l| l.1 == lo) {
@@ -248,30 +361,63 @@ pub(super) fn sparkline(p: &egui::Painter, rect: Rect, laps: &[(i32, i64)]) {
 }
 
 /// One session in the list: number, time, driver; laps and best lap on the right.
-pub(super) fn session_row(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>, setup_changed: bool) -> egui::Response {
+pub(super) fn session_row(
+    ui: &mut Ui,
+    lib: &Library,
+    i: usize,
+    driver: &str,
+    day_best: Option<u64>,
+    setup_changed: bool,
+) -> egui::Response {
     session_row_with(ui, lib, i, driver, day_best, setup_changed, None)
 }
 
 /// [`session_row`] with a sparkline and badges.
-pub(super) fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &str, day_best: Option<u64>, setup_changed: bool, extras: Option<&RowExtras>) -> egui::Response {
+pub(super) fn session_row_with(
+    ui: &mut Ui,
+    lib: &Library,
+    i: usize,
+    driver: &str,
+    day_best: Option<u64>,
+    setup_changed: bool,
+    extras: Option<&RowExtras>,
+) -> egui::Response {
     let s = &lib.sessions[i];
     let sum = &s.summary;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         if response.hovered() {
-            p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), SURFACE_HOVER);
+            p.rect_filled(
+                rect,
+                CornerRadius::same(theme::RADIUS_SMALL + 2),
+                SURFACE_HOVER,
+            );
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         } else {
-            p.rect_filled(rect.shrink2(vec2(0.0, 1.0)), CornerRadius::same(theme::RADIUS_SMALL + 2), SURFACE);
+            p.rect_filled(
+                rect.shrink2(vec2(0.0, 1.0)),
+                CornerRadius::same(theme::RADIUS_SMALL + 2),
+                SURFACE,
+            );
         }
         let (l, r) = (rect.left() + 14.0, rect.right() - 14.0);
         let (top, bottom) = (rect.top() + 17.0, rect.top() + 35.0);
-        let title = p.text(pos2(l, top), egui::Align2::LEFT_CENTER, format!("Session {}", sum.number.unwrap_or(0)), medium(14.5), TEXT);
+        let title = p.text(
+            pos2(l, top),
+            egui::Align2::LEFT_CENTER,
+            format!("Session {}", sum.number.unwrap_or(0)),
+            medium(14.5),
+            TEXT,
+        );
         // Badges after the title.
         let mut badges: Vec<(String, Color32, String)> = Vec::new();
         if setup_changed {
-            badges.push(("Setup changed".into(), theme::FAVORITE, "This session's setup sheet changed something".into()));
+            badges.push((
+                "Setup changed".into(),
+                theme::FAVORITE,
+                "This session's setup sheet changed something".into(),
+            ));
         }
         if let Some(x) = extras {
             badges.extend(x.badges.iter().cloned());
@@ -280,38 +426,78 @@ pub(super) fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &st
         let mut tips = Vec::new();
         for (text, color, tip) in &badges {
             let galley = p.layout_no_wrap(text.clone(), medium(11.5), *color);
-            let tag = Rect::from_min_size(pos2(bx, top - galley.size().y / 2.0 - 3.0), galley.size() + vec2(14.0, 6.0));
+            let tag = Rect::from_min_size(
+                pos2(bx, top - galley.size().y / 2.0 - 3.0),
+                galley.size() + vec2(14.0, 6.0),
+            );
             p.rect_filled(tag, CornerRadius::same(255), color.gamma_multiply(0.16));
             p.galley(tag.min + vec2(7.0, 3.0), galley, *color);
             tips.push((tag, tip.clone()));
             bx = tag.right() + 6.0;
         }
-        if let Some(pos) = response.hover_pos() && let Some((_, tip)) = tips.iter().find(|(r, _)| r.contains(pos)) {
-            egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), response.id.with("badge"), egui::PopupAnchor::Pointer).show(|ui| {
+        if let Some(pos) = response.hover_pos()
+            && let Some((_, tip)) = tips.iter().find(|(r, _)| r.contains(pos))
+        {
+            egui::Tooltip::always_open(
+                ui.ctx().clone(),
+                ui.layer_id(),
+                response.id.with("badge"),
+                egui::PopupAnchor::Pointer,
+            )
+            .show(|ui| {
                 ui.label(tip);
             });
         }
         // Lap times, first to last, left of the numbers.
         if let Some(x) = extras {
             let w = 110.0;
-            let spark = Rect::from_min_size(pos2(r - 300.0 - w, rect.top() + 12.0), vec2(w, rect.height() - 24.0));
+            let spark = Rect::from_min_size(
+                pos2(r - 300.0 - w, rect.top() + 12.0),
+                vec2(w, rect.height() - 24.0),
+            );
             if spark.left() > bx + 20.0 {
                 sparkline(p, spark, &x.laps);
             }
         }
-        let track = s.track_name(&lib.tracks).unwrap_or_else(|| "No track".into());
-        let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
-        let line = [sum.start_time.as_deref().map(crate::dates::clock_time), Some(driver.to_string()), Some(track), championship]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("  ·  ");
-        p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, line, regular(12.5), DIM);
+        let track = s
+            .track_name(&lib.tracks)
+            .unwrap_or_else(|| "No track".into());
+        let championship = s
+            .meta
+            .as_ref()
+            .map(|m| m.championship.clone())
+            .filter(|c| !c.is_empty());
+        let line = [
+            sum.start_time.as_deref().map(crate::dates::clock_time),
+            Some(driver.to_string()),
+            Some(track),
+            championship,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("  ·  ");
+        p.text(
+            pos2(l, bottom),
+            egui::Align2::LEFT_CENTER,
+            line,
+            regular(12.5),
+            DIM,
+        );
 
         // Right side: best lap, then laps / time on track / max RPM.
         let is_day_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == day_best;
-        let best = sum.best_lap_ms.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "—".into());
-        p.text(pos2(r, top), egui::Align2::RIGHT_CENTER, best, medium(14.5), if is_day_best { theme::GOOD } else { TEXT });
+        let best = sum
+            .best_lap_ms
+            .map(|b| format_lap_time(b as i64))
+            .unwrap_or_else(|| "—".into());
+        p.text(
+            pos2(r, top),
+            egui::Align2::RIGHT_CENTER,
+            best,
+            medium(14.5),
+            if is_day_best { theme::GOOD } else { TEXT },
+        );
         let laps = sum.laps.unwrap_or(0);
         let mut facts = vec![plural(laps as usize, "lap")];
         if let Some(d) = sum.duration_ms {
@@ -320,7 +506,13 @@ pub(super) fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &st
         if let Some(rpm) = sum.max_rpm {
             facts.push(format!("{} rpm max", group_thousands(rpm as usize)));
         }
-        p.text(pos2(r, bottom), egui::Align2::RIGHT_CENTER, facts.join("  ·  "), regular(12.5), DIM);
+        p.text(
+            pos2(r, bottom),
+            egui::Align2::RIGHT_CENTER,
+            facts.join("  ·  "),
+            regular(12.5),
+            DIM,
+        );
     }
     response
 }
@@ -341,4 +533,3 @@ pub(super) fn calculated_note(ui: &mut Ui) {
 pub(super) fn same_channel<'a>(session: &'a Session, name: &str) -> Option<&'a aim_xrk::Channel> {
     crate::report::channel(session, name)
 }
-

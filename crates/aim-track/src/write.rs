@@ -47,7 +47,12 @@ fn encode(frames: &[Frame]) -> Vec<u8> {
 }
 
 fn vnfo(frames: &mut [Frame]) -> Result<&mut Vec<u8>, Error> {
-    frames.iter_mut().find(|f| f.tag_str() == "Vnfo").map(|f| &mut f.payload).filter(|p| p.len() >= START_FINISH + 8).ok_or_else(|| Error::Format("no Vnfo record".into()))
+    frames
+        .iter_mut()
+        .find(|f| f.tag_str() == "Vnfo")
+        .map(|f| &mut f.payload)
+        .filter(|p| p.len() >= START_FINISH + 8)
+        .ok_or_else(|| Error::Format("no Vnfo record".into()))
 }
 
 /// Puts the start/finish line at `at`. A track a MyChron made has its center
@@ -82,8 +87,18 @@ pub struct LapPoint {
 /// lid`): the outline is the lap, with the speed at each point; the center
 /// and the start/finish are the lap's first point. `lid` names the MyChron
 /// the lap was recorded on (64 bytes), when there's one to copy.
-pub fn from_lap(name: &str, id: &str, guid: [u8; 8], lap: &[LapPoint], length_m: f32, lid: Option<&[u8]>) -> Result<Vec<u8>, Error> {
-    let first = lap.first().ok_or_else(|| Error::Format("no lap to make the track from".into()))?.at;
+pub fn from_lap(
+    name: &str,
+    id: &str,
+    guid: [u8; 8],
+    lap: &[LapPoint],
+    length_m: f32,
+    lid: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let first = lap
+        .first()
+        .ok_or_else(|| Error::Format("no lap to make the track from".into()))?
+        .at;
     let mut ptkk = vec![0u8; 268];
     ptkk[4..260].copy_from_slice(&padded(name, 256));
     ptkk[260..].copy_from_slice(&padded(id, 9)[..8]);
@@ -98,16 +113,47 @@ pub fn from_lap(name: &str, id: &str, guid: [u8; 8], lap: &[LapPoint], length_m:
     vnfo[476 - GUID_FROM_END..].copy_from_slice(&guid);
     let vidx = vec![0xff, 0xff, 0, 0, 0xff, 0xff, 0xff, 0xff];
     // Points: lat, lon, then 4 bytes a MyChron leaves unset (0 here).
-    let pts: Vec<u8> = lap.iter().flat_map(|p| e7(p.at).into_iter().chain([0u8; 4])).collect();
+    let pts: Vec<u8> = lap
+        .iter()
+        .flat_map(|p| e7(p.at).into_iter().chain([0u8; 4]))
+        .collect();
     // Speed (km/h) at each point, then a value a MyChron writes as 30 or 31 (meaning unknown).
-    let anf: Vec<u8> = lap.iter().flat_map(|p| p.kmh.to_bits().to_le_bytes().into_iter().chain(30u32.to_le_bytes())).collect();
-    let lid = lid.filter(|l| l.len() == 64).map(<[u8]>::to_vec).unwrap_or_else(|| {
-        let mut l = vec![0u8; 64];
-        l[..4].copy_from_slice(b"idn\x01");
-        l
-    });
-    let records = [(b"Ptkk", ptkk), (b"Vnfo", vnfo), (b"Vidx", vidx), (b"pts\0", pts), (b"anf\0", anf), (b"lid\0", lid)];
-    Ok(encode(&records.into_iter().map(|(tag, payload)| Frame { tag: *tag, flag: FLAG, payload }).collect::<Vec<_>>()))
+    let anf: Vec<u8> = lap
+        .iter()
+        .flat_map(|p| {
+            p.kmh
+                .to_bits()
+                .to_le_bytes()
+                .into_iter()
+                .chain(30u32.to_le_bytes())
+        })
+        .collect();
+    let lid = lid
+        .filter(|l| l.len() == 64)
+        .map(<[u8]>::to_vec)
+        .unwrap_or_else(|| {
+            let mut l = vec![0u8; 64];
+            l[..4].copy_from_slice(b"idn\x01");
+            l
+        });
+    let records = [
+        (b"Ptkk", ptkk),
+        (b"Vnfo", vnfo),
+        (b"Vidx", vidx),
+        (b"pts\0", pts),
+        (b"anf\0", anf),
+        (b"lid\0", lid),
+    ];
+    Ok(encode(
+        &records
+            .into_iter()
+            .map(|(tag, payload)| Frame {
+                tag: *tag,
+                flag: FLAG,
+                payload,
+            })
+            .collect::<Vec<_>>(),
+    ))
 }
 
 #[cfg(test)]
@@ -116,15 +162,31 @@ mod tests {
     use crate::parse_tkk;
 
     fn lap() -> Vec<LapPoint> {
-        (0..80).map(|k| {
-            let a = k as f64 / 80.0 * std::f64::consts::TAU;
-            LapPoint { at: LatLon { lat: 45.0 + 0.0004 * a.sin(), lon: 9.0 + 0.0006 * a.cos() }, kmh: 30.0 + 10.0 * a.cos() as f32 }
-        }).collect()
+        (0..80)
+            .map(|k| {
+                let a = k as f64 / 80.0 * std::f64::consts::TAU;
+                LapPoint {
+                    at: LatLon {
+                        lat: 45.0 + 0.0004 * a.sin(),
+                        lon: 9.0 + 0.0006 * a.cos(),
+                    },
+                    kmh: 30.0 + 10.0 * a.cos() as f32,
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn a_track_made_from_a_lap_reads_back() {
-        let bytes = from_lap("Club Ring", "mx000001", [1, 2, 3, 4, 5, 6, 7, 8], &lap(), 312.5, None).unwrap();
+        let bytes = from_lap(
+            "Club Ring",
+            "mx000001",
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            &lap(),
+            312.5,
+            None,
+        )
+        .unwrap();
         let t = parse_tkk(&bytes).unwrap();
         assert_eq!(t.name, "Club Ring");
         assert_eq!(t.id, "mx000001");

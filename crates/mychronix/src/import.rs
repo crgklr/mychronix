@@ -14,7 +14,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-
 pub enum Event {
     Progress { done: usize, total: usize },
     Finished(Report),
@@ -36,7 +35,9 @@ pub struct Report {
 }
 
 fn name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| p.display().to_string())
 }
 
 const MYCHRON_5_6: [&str; 2] = ["xrk", "xrz"];
@@ -44,7 +45,9 @@ const RS2: [&str; 3] = ["drk", "imd", "mc4"];
 const MYCHRONIX_FILE: [&str; 5] = ["xrk", "xrz", "drk", "imd", "mc4"];
 
 fn ext(p: &Path) -> String {
-    p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
+    p.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 /// The session files under `paths` (files, or folders searched through),
@@ -58,7 +61,11 @@ pub fn collect(paths: &[PathBuf], library: &Path) -> Vec<PathBuf> {
         walk(p, 0, &mut files);
     }
     files.retain(|f| !f.starts_with(library));
-    let has = |f: &Path, exts: &[&str]| exts.iter().any(|e| f.with_extension(e).exists() || f.with_extension(e.to_ascii_uppercase()).exists());
+    let has = |f: &Path, exts: &[&str]| {
+        exts.iter().any(|e| {
+            f.with_extension(e).exists() || f.with_extension(e.to_ascii_uppercase()).exists()
+        })
+    };
     files.retain(|f| match ext(f).as_str() {
         "drk" => !has(f, &MYCHRON_5_6),
         "imd" | "mc4" => !has(f, &["drk"]),
@@ -72,7 +79,11 @@ pub fn collect(paths: &[PathBuf], library: &Path) -> Vec<PathBuf> {
 fn walk(p: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     if p.is_dir() {
         // Hidden folders (and very deep trees) aren't searched.
-        if depth > 8 || (depth > 0 && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))) {
+        if depth > 8
+            || (depth > 0
+                && p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.')))
+        {
             return;
         }
         let Ok(rd) = std::fs::read_dir(p) else { return };
@@ -90,8 +101,19 @@ type Key = (String, (u16, u8, u8), i64);
 
 fn key(logger: &str, s: &aim_xrk::SessionSummary) -> Option<Key> {
     let d = s.date?;
-    let p: Vec<i64> = s.start_time.as_deref()?.split(':').filter_map(|x| x.trim().parse().ok()).collect();
-    (p.len() == 3).then(|| (logger.to_string(), (d.year, d.month, d.day), p[0] * 3600 + p[1] * 60 + p[2]))
+    let p: Vec<i64> = s
+        .start_time
+        .as_deref()?
+        .split(':')
+        .filter_map(|x| x.trim().parse().ok())
+        .collect();
+    (p.len() == 3).then(|| {
+        (
+            logger.to_string(),
+            (d.year, d.month, d.day),
+            p[0] * 3600 + p[1] * 60 + p[2],
+        )
+    })
 }
 
 /// Whether `k` is already known, allowing two seconds either way: a summary
@@ -105,10 +127,20 @@ fn seen(known: &mut HashSet<Key>, k: Key) -> bool {
 }
 
 /// Imports in the background; events report progress.
-pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egui::Context) -> mpsc::Receiver<Event> {
+pub fn spawn(
+    paths: Vec<PathBuf>,
+    lib: &crate::tracks::Library,
+    ctx: eframe::egui::Context,
+) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
-    let Some(root) = crate::paths::sessions_dir() else { return rx };
-    let mut known: HashSet<_> = lib.sessions.iter().filter_map(|s| key(&s.logger, &s.summary)).collect();
+    let Some(root) = crate::paths::sessions_dir() else {
+        return rx;
+    };
+    let mut known: HashSet<_> = lib
+        .sessions
+        .iter()
+        .filter_map(|s| key(&s.logger, &s.summary))
+        .collect();
     crate::jobs::spawn("import", move || {
         let files = collect(&paths, &root);
         let total = files.len();
@@ -116,13 +148,24 @@ pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egu
         let _ = tx.send(Event::Progress { done: 0, total });
         ctx.request_repaint();
         let mut report = Report {
-            searched: paths.iter().filter(|p| p.is_dir()).map(|p| name(p)).collect(),
-            not_sessions: paths.iter().filter(|p| p.is_file() && !MYCHRONIX_FILE.iter().any(|e| *e == ext(p))).map(|p| name(p)).collect(),
+            searched: paths
+                .iter()
+                .filter(|p| p.is_dir())
+                .map(|p| name(p))
+                .collect(),
+            not_sessions: paths
+                .iter()
+                .filter(|p| p.is_file() && !MYCHRONIX_FILE.iter().any(|e| *e == ext(p)))
+                .map(|p| name(p))
+                .collect(),
             ..Default::default()
         };
         for (i, f) in files.iter().enumerate() {
             // A file that trips up a reader counts as unreadable; the import carries on.
-            let outcome = crate::jobs::guard(&f.display().to_string(), || import_one(f, &root, &mut known)).unwrap_or_else(|| Err("couldn't be read".into()));
+            let outcome = crate::jobs::guard(&f.display().to_string(), || {
+                import_one(f, &root, &mut known)
+            })
+            .unwrap_or_else(|| Err("couldn't be read".into()));
             match outcome {
                 Ok(Some((logger, _))) => {
                     report.added += 1;
@@ -133,13 +176,22 @@ pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egu
                 Ok(None) => report.already += 1,
                 Err(e) => {
                     log::info!("import: {}: {e}", f.display());
-                    report.unreadable.push(f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                    report.unreadable.push(
+                        f.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    );
                 }
             }
             let _ = tx.send(Event::Progress { done: i + 1, total });
             ctx.request_repaint();
         }
-        log::info!("import: {} added, {} already here, {} unreadable", report.added, report.already, report.unreadable.len());
+        log::info!(
+            "import: {} added, {} already here, {} unreadable",
+            report.added,
+            report.already,
+            report.unreadable.len()
+        );
         let _ = tx.send(Event::Finished(report));
         ctx.request_repaint();
     });
@@ -150,7 +202,11 @@ pub fn spawn(paths: Vec<PathBuf>, lib: &crate::tracks::Library, ctx: eframe::egu
 fn free_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     let mut n = 1;
     loop {
-        let name = if n == 1 { format!("{stem}.{ext}") } else { format!("{stem}-{n}.{ext}") };
+        let name = if n == 1 {
+            format!("{stem}.{ext}")
+        } else {
+            format!("{stem}-{n}.{ext}")
+        };
         let p = dir.join(name);
         if !p.exists() && !p.with_extension("xri").exists() && !p.with_extension("drk").exists() {
             return p;
@@ -160,15 +216,27 @@ fn free_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 }
 
 /// Imports one session. Some((logger, where it was saved)) when added, None when already there.
-fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Option<(String, PathBuf)>, String> {
+fn import_one(
+    path: &Path,
+    root: &Path,
+    known: &mut HashSet<Key>,
+) -> Result<Option<(String, PathBuf)>, String> {
     let session = crate::jobs::open_session(path)?;
-    let logger = session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "imported".into());
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "session".into());
+    let logger = session
+        .info
+        .logger_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "imported".into());
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "session".into());
     let dir = root.join(&logger);
     let e = ext(path);
     if MYCHRON_5_6.contains(&e.as_str()) {
         let target = free_name(&dir, &stem, "xrz");
-        let mut summary = aim_xrk::summary::summarize(&session, target.file_name().and_then(|n| n.to_str()));
+        let mut summary =
+            aim_xrk::summary::summarize(&session, target.file_name().and_then(|n| n.to_str()));
         if key(&logger, &summary).is_some_and(|k| seen(known, k)) {
             return Ok(None);
         }
@@ -180,26 +248,46 @@ fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Opti
             bytes
         } else {
             let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-            z.write_all(&bytes).and_then(|_| z.finish()).map_err(|e| e.to_string())?
+            z.write_all(&bytes)
+                .and_then(|_| z.finish())
+                .map_err(|e| e.to_string())?
         };
         write_new(&target, &xrz)?;
-        write_new(&target.with_extension("xri"), &aim_xrk::summary::to_xri(&summary))?;
+        write_new(
+            &target.with_extension("xri"),
+            &aim_xrk::summary::to_xri(&summary),
+        )?;
         Ok(Some((logger, target)))
     } else {
-        let summary = if e == "drk" { aim_xrk::drk::summary(path) } else { aim_xrk::mc4::summary(path) }.map_err(|e| e.to_string())?;
+        let summary = if e == "drk" {
+            aim_xrk::drk::summary(path)
+        } else {
+            aim_xrk::mc4::summary(path)
+        }
+        .map_err(|e| e.to_string())?;
         if key(&logger, &summary).is_some_and(|k| seen(known, k)) {
             return Ok(None);
         }
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         // The session and the files RaceStudio 2 keeps beside it, under one free name.
         let target = free_name(&dir, &stem, &e);
-        let new_stem = target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let new_stem = target
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let src_dir = path.parent().unwrap_or(Path::new("."));
-        for entry in std::fs::read_dir(src_dir).map_err(|e| e.to_string())?.flatten() {
+        for entry in std::fs::read_dir(src_dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let p = entry.path();
             let companion = ["drk", "imd", "gpk", "rrk", "mc4"].contains(&ext(&p).as_str());
-            if companion && p.file_stem().map(|s| s.to_string_lossy()) == Some(stem.as_str().into()) {
-                write_new(&dir.join(format!("{new_stem}.{}", ext(&p))), &std::fs::read(&p).map_err(|e| e.to_string())?)?;
+            if companion && p.file_stem().map(|s| s.to_string_lossy()) == Some(stem.as_str().into())
+            {
+                write_new(
+                    &dir.join(format!("{new_stem}.{}", ext(&p))),
+                    &std::fs::read(&p).map_err(|e| e.to_string())?,
+                )?;
             }
         }
         Ok(Some((logger, target)))
@@ -211,23 +299,53 @@ fn import_one(path: &Path, root: &Path, known: &mut HashSet<Key>) -> Result<Opti
 /// the files RaceStudio 2 keeps beside it): where it is in the library now,
 /// the new copy or the one already there. None when it isn't one, or is
 /// already inside the library.
-pub fn add_rs2_file(path: &Path, root: &Path, lib: &crate::tracks::Library) -> Result<Option<PathBuf>, String> {
+pub fn add_rs2_file(
+    path: &Path,
+    root: &Path,
+    lib: &crate::tracks::Library,
+) -> Result<Option<PathBuf>, String> {
     if !RS2.contains(&ext(path).as_str()) || path.starts_with(root) {
         return Ok(None);
     }
-    let mut known: HashSet<Key> = lib.sessions.iter().filter_map(|s| key(&s.logger, &s.summary)).collect();
+    let mut known: HashSet<Key> = lib
+        .sessions
+        .iter()
+        .filter_map(|s| key(&s.logger, &s.summary))
+        .collect();
     match import_one(path, root, &mut known)? {
         Some((logger, copy)) => {
-            log::info!("added {} to the library as {} (MyChron {logger})", path.display(), copy.display());
+            log::info!(
+                "added {} to the library as {} (MyChron {logger})",
+                path.display(),
+                copy.display()
+            );
             Ok(Some(copy))
         }
         // Already there: open the library's copy.
         None => {
             let session = crate::jobs::open_session(path)?;
-            let logger = session.info.logger_id.map(|id| id.to_string()).unwrap_or_else(|| "imported".into());
-            let summary = if ext(path) == "drk" { aim_xrk::drk::summary(path) } else { aim_xrk::mc4::summary(path) }.map_err(|e| e.to_string())?;
+            let logger = session
+                .info
+                .logger_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "imported".into());
+            let summary = if ext(path) == "drk" {
+                aim_xrk::drk::summary(path)
+            } else {
+                aim_xrk::mc4::summary(path)
+            }
+            .map_err(|e| e.to_string())?;
             let k = key(&logger, &summary);
-            Ok(lib.sessions.iter().find(|s| k.as_ref().is_some_and(|k| key(&s.logger, &s.summary).is_some_and(|m| m.0 == k.0 && m.1 == k.1 && (m.2 - k.2).abs() <= 2))).map(|s| s.path.clone()))
+            Ok(lib
+                .sessions
+                .iter()
+                .find(|s| {
+                    k.as_ref().is_some_and(|k| {
+                        key(&s.logger, &s.summary)
+                            .is_some_and(|m| m.0 == k.0 && m.1 == k.1 && (m.2 - k.2).abs() <= 2)
+                    })
+                })
+                .map(|s| s.path.clone()))
         }
     }
 }
@@ -249,10 +367,23 @@ mod tests {
         let d = std::env::temp_dir().join(format!("mychronix-collect-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("sub/.hidden")).unwrap();
-        for f in ["a.xrk", "a.drk", "a.rrk", "b.drk", "b.imd", "c.mc4", "sub/d.XRZ", "sub/.hidden/e.xrk", "notes.txt"] {
+        for f in [
+            "a.xrk",
+            "a.drk",
+            "a.rrk",
+            "b.drk",
+            "b.imd",
+            "c.mc4",
+            "sub/d.XRZ",
+            "sub/.hidden/e.xrk",
+            "notes.txt",
+        ] {
             std::fs::write(d.join(f), b"x").unwrap();
         }
-        let names: Vec<String> = collect(std::slice::from_ref(&d), &d.join("library")).iter().map(|p| p.strip_prefix(&d).unwrap().display().to_string()).collect();
+        let names: Vec<String> = collect(std::slice::from_ref(&d), &d.join("library"))
+            .iter()
+            .map(|p| p.strip_prefix(&d).unwrap().display().to_string())
+            .collect();
         assert_eq!(names, ["a.xrk", "b.drk", "c.mc4", "sub/d.XRZ"]);
         let _ = std::fs::remove_dir_all(&d);
     }

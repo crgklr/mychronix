@@ -13,9 +13,6 @@
 
 mod aim_tracks;
 mod app;
-mod import;
-mod hooks;
-mod jobs;
 mod braking;
 mod bumps;
 mod charts;
@@ -25,25 +22,28 @@ mod countries;
 mod dates;
 mod device;
 mod digest;
+mod events;
+mod hooks;
+mod import;
+mod jobs;
 mod logging;
-mod startup_notify;
 mod mcp;
 mod paths;
-mod events;
 mod profiles;
 mod report;
+mod sensor_check;
 mod settings;
 mod setup;
 mod split_report;
-mod sensor_check;
 mod splits;
+mod startup_notify;
 mod storage;
 mod theme;
-mod units;
-mod usb_access;
-mod update;
-mod weather;
 mod tracks;
+mod units;
+mod update;
+mod usb_access;
+mod weather;
 
 use std::path::PathBuf;
 
@@ -52,8 +52,14 @@ use eframe::egui;
 /// The MyChron icon, for desktops that take it from the window.
 fn app_icon() -> egui::IconData {
     let png = include_bytes!("../assets/mychronix-icon-256.png");
-    let image = image::load_from_memory(png).expect("bundled icon is a valid PNG").to_rgba8();
-    egui::IconData { width: image.width(), height: image.height(), rgba: image.into_raw() }
+    let image = image::load_from_memory(png)
+        .expect("bundled icon is a valid PNG")
+        .to_rgba8();
+    egui::IconData {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
+    }
 }
 
 /// Writes a crash to `crash.log` beside the log (kept under about 1 MB)
@@ -61,17 +67,30 @@ fn app_icon() -> egui::IconData {
 fn install_crash_handler() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
         if let Some(dir) = crate::paths::log_dir() {
             let _ = std::fs::create_dir_all(&dir);
             let log = dir.join("crash.log");
             if std::fs::metadata(&log).is_ok_and(|m| m.len() > 1_000_000) {
                 let _ = std::fs::rename(&log, dir.join("crash.log.old"));
             }
-            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let line = format!("[{secs}] Mychronix {} · thread {thread}: {info}\n", env!("CARGO_PKG_VERSION"));
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let line = format!(
+                "[{secs}] Mychronix {} · thread {thread}: {info}\n",
+                env!("CARGO_PKG_VERSION")
+            );
             log::error!("panic on thread {thread}: {info}");
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log)
+            {
                 use std::io::Write;
                 let _ = f.write_all(line.as_bytes());
             }
@@ -97,13 +116,24 @@ fn main() -> eframe::Result {
     // under the old name.
     #[cfg(target_os = "macos")]
     unsafe {
-        objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("Mychronix"));
+        objc2_foundation::NSProcessInfo::processInfo()
+            .setProcessName(objc2_foundation::ns_string!("Mychronix"));
     }
     // Until 0.1.17 this name was the command-line tool, now mychronix-cli:
     // its commands get pointed there instead of opening the app.
-    if let Some(first) = std::env::args().nth(1).filter(|a| CLI_COMMANDS.contains(&a.as_str()) && !std::path::Path::new(a).exists()) {
+    if let Some(first) = std::env::args()
+        .nth(1)
+        .filter(|a| CLI_COMMANDS.contains(&a.as_str()) && !std::path::Path::new(a).exists())
+    {
         let rest: Vec<String> = std::env::args().skip(1).collect();
-        eprintln!("The Mychronix command-line tool is now mychronix-cli. Run:\n  mychronix-cli {}", if first.starts_with('-') { "--help".to_string() } else { rest.join(" ") });
+        eprintln!(
+            "The Mychronix command-line tool is now mychronix-cli. Run:\n  mychronix-cli {}",
+            if first.starts_with('-') {
+                "--help".to_string()
+            } else {
+                rest.join(" ")
+            }
+        );
         std::process::exit(2);
     }
     let launch_token = startup_notify::take_token();
@@ -161,7 +191,14 @@ fn main() -> eframe::Result {
             startup_notify::finish(launch_token, cc, cc);
             theme::install(&cc.egui_ctx);
             units::init();
-            log::info!("units: {}", if units::imperial() { "mph and °F" } else { "km/h and °C" });
+            log::info!(
+                "units: {}",
+                if units::imperial() {
+                    "mph and °F"
+                } else {
+                    "km/h and °C"
+                }
+            );
             // Undo WiFi changes left behind if Mychronix quit while joined to a logger.
             device::restore_after_crash();
             // An assistant set up before an update may run a program that's gone.
@@ -213,11 +250,20 @@ fn main() -> eframe::Result {
 /// Locks `~/Mychronix/.lock` for this window: Some(the lock, or None when
 /// there's no data folder to lock), None when another window holds it.
 fn one_window() -> Option<Option<std::fs::File>> {
-    let Some(path) = paths::data(".lock") else { return Some(None) };
+    let Some(path) = paths::data(".lock") else {
+        return Some(None);
+    };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else { return Some(None) };
+    let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+    else {
+        return Some(None);
+    };
     match file.try_lock() {
         Ok(()) => Some(Some(file)),
         Err(std::fs::TryLockError::WouldBlock) => None,

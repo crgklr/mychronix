@@ -39,7 +39,10 @@ struct DriverStats {
 impl App {
     pub(super) fn events_page(&mut self, ui: &mut Ui) {
         let lib = self.lib();
-        let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).clone();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load)
+            .clone();
         let mut defs = self.events_page.events.take().unwrap_or_else(Events::load);
         if let Some(rx) = &self.events_page.peak_egt_rx {
             while let Ok((path, v)) = rx.try_recv() {
@@ -49,18 +52,29 @@ impl App {
 
         let all = events::group(&lib, &profiles, &defs);
         let today = crate::dates::today();
-        let mut championships: Vec<String> = all.iter().map(|e| e.championship.clone()).filter(|c| !c.trim().is_empty()).collect();
+        let mut championships: Vec<String> = all
+            .iter()
+            .map(|e| e.championship.clone())
+            .filter(|c| !c.trim().is_empty())
+            .collect();
         championships.sort();
         championships.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         let shown: Vec<&Event> = all
             .iter()
-            .filter(|e| self.events_page.champ.as_ref().is_none_or(|c| e.championship.eq_ignore_ascii_case(c)))
+            .filter(|e| {
+                self.events_page
+                    .champ
+                    .as_ref()
+                    .is_none_or(|c| e.championship.eq_ignore_ascii_case(c))
+            })
             .collect();
         let upcoming = |e: &Event| e.start > today || (e.sessions.is_empty() && e.end >= today);
 
         // Header.
         // MYCHRONIX_EVENT_DIALOG opens the plan dialog (for screenshots).
-        let mut plan = self.events_page.dialog.is_none() && self.frames < 3 && crate::hooks::get().event_dialog;
+        let mut plan = self.events_page.dialog.is_none()
+            && self.frames < 3
+            && crate::hooks::get().event_dialog;
         // "Plan an event" from the Garage.
         if std::mem::take(&mut self.plan_on_open) {
             plan = true;
@@ -75,7 +89,11 @@ impl App {
                     sub.push_str(&format!("  ·  {n_up} coming up"));
                 }
                 if !championships.is_empty() {
-                    sub.push_str(&format!("  ·  {} championship{}", championships.len(), if championships.len() == 1 { "" } else { "s" }));
+                    sub.push_str(&format!(
+                        "  ·  {} championship{}",
+                        championships.len(),
+                        if championships.len() == 1 { "" } else { "s" }
+                    ));
                 }
                 ui.label(RichText::new(sub).font(regular(14.5)).color(SECONDARY));
             });
@@ -93,7 +111,11 @@ impl App {
                     self.events_page.champ = None;
                 }
                 for c in &championships {
-                    let on = self.events_page.champ.as_ref().is_some_and(|x| x.eq_ignore_ascii_case(c));
+                    let on = self
+                        .events_page
+                        .champ
+                        .as_ref()
+                        .is_some_and(|x| x.eq_ignore_ascii_case(c));
                     if chip(ui, c, on).clicked() {
                         self.events_page.champ = Some(c.clone());
                     }
@@ -104,7 +126,11 @@ impl App {
 
         if all.is_empty() {
             card(ui, |ui| {
-                ui.label(RichText::new("No events yet").font(semibold(17.0)).color(TEXT));
+                ui.label(
+                    RichText::new("No events yet")
+                        .font(semibold(17.0))
+                        .color(TEXT),
+                );
                 ui.label(
                     RichText::new("Sessions you download are grouped into events by week, track and championship. You can also plan an event ahead of time.")
                         .color(SECONDARY),
@@ -117,12 +143,19 @@ impl App {
                     self.events_page.champ = Some(c);
                 }
                 if let Some(want) = crate::hooks::get().event.clone() {
-                    self.events_page.sel = shown.iter().find(|e| e.title().eq_ignore_ascii_case(&want)).map(|e| e.key());
+                    self.events_page.sel = shown
+                        .iter()
+                        .find(|e| e.title().eq_ignore_ascii_case(&want))
+                        .map(|e| e.key());
                 }
             }
             // Keep the selection; default to the newest event that has sessions.
             if !shown.iter().any(|e| Some(e.key()) == self.events_page.sel) {
-                self.events_page.sel = shown.iter().find(|e| !e.sessions.is_empty()).or(shown.first()).map(|e| e.key());
+                self.events_page.sel = shown
+                    .iter()
+                    .find(|e| !e.sessions.is_empty())
+                    .or(shown.first())
+                    .map(|e| e.key());
             }
             let gap = 14.0;
             let height = ui.available_height();
@@ -134,39 +167,53 @@ impl App {
                 ui.spacing_mut().item_spacing.x = gap;
                 ui.allocate_ui_with_layout(vec2(list_w, height), column, |ui| {
                     ui.set_width(list_w);
-                    egui::ScrollArea::vertical().id_salt("event_list").auto_shrink([false, false]).show(ui, |ui| {
-                        if let Some(champ) = &self.events_page.champ {
-                            season_card(ui, &lib, &profiles, champ, &shown);
-                            ui.add_space(12.0);
-                        }
-                        for (label, up) in [("Coming up", true), ("Past events", false)] {
-                            let group: Vec<&&Event> = shown.iter().filter(|e| upcoming(e) == up).collect();
-                            if group.is_empty() {
-                                continue;
+                    egui::ScrollArea::vertical()
+                        .id_salt("event_list")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if let Some(champ) = &self.events_page.champ {
+                                season_card(ui, &lib, &profiles, champ, &shown);
+                                ui.add_space(12.0);
                             }
-                            ui.label(RichText::new(label).font(medium(13.0)).color(DIM));
-                            ui.add_space(4.0);
-                            // Soonest first for upcoming events.
-                            let order: Vec<&&Event> = if up { group.into_iter().rev().collect() } else { group };
-                            for e in order {
-                                let selected = Some(e.key()) == self.events_page.sel;
-                                if event_row(ui, &lib, &profiles, e, selected, today).clicked() {
-                                    self.events_page.sel = Some(e.key());
+                            for (label, up) in [("Coming up", true), ("Past events", false)] {
+                                let group: Vec<&&Event> =
+                                    shown.iter().filter(|e| upcoming(e) == up).collect();
+                                if group.is_empty() {
+                                    continue;
                                 }
+                                ui.label(RichText::new(label).font(medium(13.0)).color(DIM));
+                                ui.add_space(4.0);
+                                // Soonest first for upcoming events.
+                                let order: Vec<&&Event> = if up {
+                                    group.into_iter().rev().collect()
+                                } else {
+                                    group
+                                };
+                                for e in order {
+                                    let selected = Some(e.key()) == self.events_page.sel;
+                                    if event_row(ui, &lib, &profiles, e, selected, today).clicked()
+                                    {
+                                        self.events_page.sel = Some(e.key());
+                                    }
+                                }
+                                ui.add_space(12.0);
                             }
-                            ui.add_space(12.0);
-                        }
-                        if shown.is_empty() {
-                            ui.label(RichText::new("No events in this championship.").color(DIM));
-                        }
-                    });
+                            if shown.is_empty() {
+                                ui.label(
+                                    RichText::new("No events in this championship.").color(DIM),
+                                );
+                            }
+                        });
                 });
                 ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
                     ui.set_width(detail_w);
                     if let Some(e) = shown.iter().find(|e| Some(e.key()) == self.events_page.sel) {
-                        egui::ScrollArea::vertical().id_salt("event_detail").auto_shrink([false, false]).show(ui, |ui| {
-                            action = self.event_detail(ui, &lib, &profiles, e, today);
-                        });
+                        egui::ScrollArea::vertical()
+                            .id_salt("event_detail")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                action = self.event_detail(ui, &lib, &profiles, e, today);
+                            });
                     }
                 });
             });
@@ -174,7 +221,9 @@ impl App {
                 Some(DetailAction::Open(path, lap)) => {
                     self.events_page.events = Some(defs);
                     self.load(path);
-                    if let (Some(n), Some(s)) = (lap, &self.session) && let Some(i) = s.laps.iter().position(|l| l.number as u32 == n) {
+                    if let (Some(n), Some(s)) = (lap, &self.session)
+                        && let Some(i) = s.laps.iter().position(|l| l.number as u32 == n)
+                    {
                         self.lap = Some(i);
                         self.cursor_s = Some(s.laps[i].duration_ms() as f64 / 2000.0);
                     }
@@ -198,7 +247,14 @@ impl App {
     }
 
     /// The selected event: title, a card per driver, best laps through the event, sessions by day.
-    fn event_detail(&mut self, ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e: &Event, today: aim_xrk::summary::Date) -> Option<DetailAction> {
+    fn event_detail(
+        &mut self,
+        ui: &mut Ui,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+        e: &Event,
+        today: aim_xrk::summary::Date,
+    ) -> Option<DetailAction> {
         let mut action = None;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -211,7 +267,11 @@ impl App {
                 if !e.championship.trim().is_empty() {
                     sub.push(e.championship.clone());
                 }
-                ui.label(RichText::new(sub.join("  ·  ")).font(regular(14.5)).color(SECONDARY));
+                ui.label(
+                    RichText::new(sub.join("  ·  "))
+                        .font(regular(14.5))
+                        .color(SECONDARY),
+                );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (label, def) = match &e.def {
@@ -232,7 +292,12 @@ impl App {
                 }
             });
         });
-        if let Some(notes) = e.def.as_ref().map(|d| d.notes.trim()).filter(|n| !n.is_empty()) {
+        if let Some(notes) = e
+            .def
+            .as_ref()
+            .map(|d| d.notes.trim())
+            .filter(|n| !n.is_empty())
+        {
             ui.add_space(4.0);
             ui.label(RichText::new(notes).color(SECONDARY));
         }
@@ -253,7 +318,10 @@ impl App {
                     .sessions
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| events::session_key(lib, *i, profiles).is_some_and(|k| k.track.eq_ignore_ascii_case(&e.track)))
+                    .filter(|(i, _)| {
+                        events::session_key(lib, *i, profiles)
+                            .is_some_and(|k| k.track.eq_ignore_ascii_case(&e.track))
+                    })
                     .filter_map(|(_, s)| s.summary.best_lap_ms.map(|b| (b, s)))
                     .min_by_key(|(b, _)| *b);
                 match best {
@@ -269,7 +337,9 @@ impl App {
                         );
                     }
                     None => {
-                        ui.label(RichText::new(format!("No laps at {} yet.", e.track)).color(SECONDARY));
+                        ui.label(
+                            RichText::new(format!("No laps at {} yet.", e.track)).color(SECONDARY),
+                        );
                     }
                 }
                 ui.label(
@@ -286,7 +356,10 @@ impl App {
             .sessions
             .iter()
             .map(|&i| lib.sessions[i].path.clone())
-            .filter(|p| !self.events_page.peak_egt.contains_key(p) && !self.events_page.peak_egt_asked.contains(p))
+            .filter(|p| {
+                !self.events_page.peak_egt.contains_key(p)
+                    && !self.events_page.peak_egt_asked.contains(p)
+            })
             .collect();
         if !need.is_empty() {
             self.events_page.peak_egt_asked.extend(need.iter().cloned());
@@ -308,10 +381,19 @@ impl App {
         }
 
         let stats = driver_stats(lib, profiles, e, &self.events_page.peak_egt);
-        let setups = crate::setup::resolve(lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
+        let setups = crate::setup::resolve(
+            lib,
+            self.setup_baselines
+                .get_or_insert_with(crate::setup::Baselines::load),
+        );
         for (k, d) in stats.iter().enumerate() {
             // Setup at the start of the event, then each change during it.
-            let mine: Vec<usize> = e.sessions.iter().copied().filter(|&i| driver_for(&lib.sessions[i], profiles).eq_ignore_ascii_case(&d.name)).collect();
+            let mine: Vec<usize> = e
+                .sessions
+                .iter()
+                .copied()
+                .filter(|&i| driver_for(&lib.sessions[i], profiles).eq_ignore_ascii_case(&d.name))
+                .collect();
             let mut setup_lines = Vec::new();
             if let Some(&first) = mine.first() {
                 let start = setups[first].setup.summary();
@@ -320,11 +402,27 @@ impl App {
                 }
                 for &i in &mine[1..] {
                     if !setups[i].changes.is_empty() {
-                        setup_lines.push((true, format!("Session {}: {}", lib.sessions[i].summary.number.unwrap_or(0), setups[i].changes.join(", "))));
+                        setup_lines.push((
+                            true,
+                            format!(
+                                "Session {}: {}",
+                                lib.sessions[i].summary.number.unwrap_or(0),
+                                setups[i].changes.join(", ")
+                            ),
+                        ));
                     }
                 }
                 if !setups[first].changes.is_empty() {
-                    setup_lines.insert(1.min(setup_lines.len()), (true, format!("Changed for this event: {}", setups[first].changes.join(", "))));
+                    setup_lines.insert(
+                        1.min(setup_lines.len()),
+                        (
+                            true,
+                            format!(
+                                "Changed for this event: {}",
+                                setups[first].changes.join(", ")
+                            ),
+                        ),
+                    );
                 }
             }
             if let Some(a) = driver_card(ui, lib, d, SERIES[k % SERIES.len()], &setup_lines) {
@@ -334,14 +432,30 @@ impl App {
         }
 
         // Best lap per session, one line per driver.
-        let with_bests: Vec<(usize, &DriverStats)> = stats.iter().enumerate().filter(|(_, d)| d.bests.len() >= 2).collect();
+        let with_bests: Vec<(usize, &DriverStats)> = stats
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.bests.len() >= 2)
+            .collect();
         if !with_bests.is_empty() {
             // Only sessions with a lap time, so warm-ups don't leave gaps.
-            let order: Vec<usize> = e.sessions.iter().copied().filter(|i| stats.iter().any(|d| d.bests.iter().any(|(x, _)| x == i))).collect();
-            let numbers: Vec<u32> = order.iter().map(|&i| lib.sessions[i].summary.number.unwrap_or(0)).collect();
+            let order: Vec<usize> = e
+                .sessions
+                .iter()
+                .copied()
+                .filter(|i| stats.iter().any(|d| d.bests.iter().any(|(x, _)| x == i)))
+                .collect();
+            let numbers: Vec<u32> = order
+                .iter()
+                .map(|&i| lib.sessions[i].summary.number.unwrap_or(0))
+                .collect();
             graph_card(ui, 240.0, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Best lap by session").font(medium(14.5)).color(TEXT));
+                    ui.label(
+                        RichText::new("Best lap by session")
+                            .font(medium(14.5))
+                            .color(TEXT),
+                    );
                     ui.label(RichText::new("s").size(13.0).color(DIM));
                 });
                 Plot::new(("event_bests", e.key()))
@@ -354,7 +468,10 @@ impl App {
                     .allow_scroll(false)
                     .x_axis_formatter(move |mark, _| {
                         let i = mark.value.round() as i64;
-                        if (mark.value - i as f64).abs() < 1e-6 && i >= 0 && (i as usize) < numbers.len() {
+                        if (mark.value - i as f64).abs() < 1e-6
+                            && i >= 0
+                            && (i as usize) < numbers.len()
+                        {
                             format!("S{}", numbers[i as usize])
                         } else {
                             String::new()
@@ -367,11 +484,27 @@ impl App {
                             let pts: Vec<[f64; 2]> = d
                                 .bests
                                 .iter()
-                                .filter_map(|(i, b)| order.iter().position(|x| x == i).map(|x| [x as f64, *b as f64 / 1000.0]))
+                                .filter_map(|(i, b)| {
+                                    order
+                                        .iter()
+                                        .position(|x| x == i)
+                                        .map(|x| [x as f64, *b as f64 / 1000.0])
+                                })
                                 .collect();
                             let color = SERIES[*k % SERIES.len()];
-                            plot.line(Line::new(d.name.clone(), PlotPoints::from(pts.clone())).color(color).width(2.0));
-                            plot.points(egui_plot::Points::new(format!("{} laps", d.name), PlotPoints::from(pts)).color(color).radius(4.0));
+                            plot.line(
+                                Line::new(d.name.clone(), PlotPoints::from(pts.clone()))
+                                    .color(color)
+                                    .width(2.0),
+                            );
+                            plot.points(
+                                egui_plot::Points::new(
+                                    format!("{} laps", d.name),
+                                    PlotPoints::from(pts),
+                                )
+                                .color(color)
+                                .radius(4.0),
+                            );
                         }
                     });
             });
@@ -379,11 +512,24 @@ impl App {
         }
 
         // Sessions by day, with setup changes flagged.
-        let setups = crate::setup::resolve(lib, self.setup_baselines.get_or_insert_with(crate::setup::Baselines::load));
-        let mut days: Vec<aim_xrk::summary::Date> = e.sessions.iter().filter_map(|&i| lib.sessions[i].summary.date).collect();
+        let setups = crate::setup::resolve(
+            lib,
+            self.setup_baselines
+                .get_or_insert_with(crate::setup::Baselines::load),
+        );
+        let mut days: Vec<aim_xrk::summary::Date> = e
+            .sessions
+            .iter()
+            .filter_map(|&i| lib.sessions[i].summary.date)
+            .collect();
         days.dedup();
         for day in days {
-            let in_day: Vec<usize> = e.sessions.iter().copied().filter(|&i| lib.sessions[i].summary.date == Some(day)).collect();
+            let in_day: Vec<usize> = e
+                .sessions
+                .iter()
+                .copied()
+                .filter(|&i| lib.sessions[i].summary.date == Some(day))
+                .collect();
             let best = in_day
                 .iter()
                 .filter(|&&i| !events::is_warm_up(&lib.sessions[i].summary))
@@ -391,7 +537,11 @@ impl App {
                 .min();
             ui.horizontal(|ui| {
                 ui.add(Icon::Calendar.image(SECONDARY, 16.0));
-                ui.label(RichText::new(crate::dates::long(day)).font(semibold(16.0)).color(TEXT));
+                ui.label(
+                    RichText::new(crate::dates::long(day))
+                        .font(semibold(16.0))
+                        .color(TEXT),
+                );
                 ui.label(RichText::new(plural(in_day.len(), "session")).color(SECONDARY));
             });
             ui.add_space(6.0);
@@ -399,7 +549,12 @@ impl App {
             for &i in in_day.iter().rev() {
                 let s = &lib.sessions[i];
                 let mut who = driver_for(s, profiles);
-                if let Some(t) = s.meta.as_ref().map(|m| m.session_type.trim()).filter(|t| !t.is_empty()) {
+                if let Some(t) = s
+                    .meta
+                    .as_ref()
+                    .map(|m| m.session_type.trim())
+                    .filter(|t| !t.is_empty())
+                {
                     who = format!("{t}  ·  {who}");
                 }
                 if events::is_warm_up(&s.summary) {
@@ -415,68 +570,144 @@ impl App {
     }
 
     /// Plan, name or edit an event.
-    fn event_dialog(&mut self, ctx: &egui::Context, lib: &Library, profiles: &crate::profiles::Profiles, defs: &mut Events) {
-        let Some(mut def) = self.events_page.dialog.take() else { return };
+    fn event_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+        defs: &mut Events,
+    ) {
+        let Some(mut def) = self.events_page.dialog.take() else {
+            return;
+        };
         // Saved dates are ISO; show them as written in the US.
         for d in [&mut def.start, &mut def.end] {
-            if d.contains('-') && let Some(p) = crate::dates::parse_date(d) {
+            if d.contains('-')
+                && let Some(p) = crate::dates::parse_date(d)
+            {
                 *d = crate::dates::us_numeric(p);
             }
         }
         let s = Suggestions::gather(lib, profiles);
         let mut championships = s.championships.clone();
-        for c in lib.sessions.iter().enumerate().filter_map(|(i, _)| events::session_key(lib, i, profiles)).map(|k| k.championship) {
+        for c in lib
+            .sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, _)| events::session_key(lib, i, profiles))
+            .map(|k| k.championship)
+        {
             if !c.trim().is_empty() && !championships.iter().any(|x| x.eq_ignore_ascii_case(&c)) {
                 championships.push(c);
             }
         }
         let existing = defs.events.iter().any(|d| d.id == def.id && def.id != 0);
-        let title = if existing { "Edit event" } else if def.track.is_empty() { "Plan an event" } else { "Name this event" };
+        let title = if existing {
+            "Edit event"
+        } else if def.track.is_empty() {
+            "Plan an event"
+        } else {
+            "Name this event"
+        };
         let (mut save, mut cancel, mut delete) = (false, false, false);
         let field_w = 460.0;
         let problem = if def.name.trim().is_empty() {
             Some("Give the event a name.")
         } else if def.track.trim().is_empty() {
             Some("Choose a track.")
-        } else if crate::dates::parse_date(&def.start).is_none() || crate::dates::parse_date(&def.end).is_none() {
+        } else if crate::dates::parse_date(&def.start).is_none()
+            || crate::dates::parse_date(&def.end).is_none()
+        {
             Some("Dates look like 10/17/2026.")
         } else {
             None
         };
         let closed = look::dialog(ctx, "event_edit", 720.0, |ui| {
             use look;
-            look::header(ui, Icon::Calendar, SECONDARY, None, title, "Sessions downloaded from this track between these dates join this event automatically.");
+            look::header(
+                ui,
+                Icon::Calendar,
+                SECONDARY,
+                None,
+                title,
+                "Sessions downloaded from this track between these dates join this event automatically.",
+            );
             look::body(ui, |ui| {
-                egui::Grid::new("event_fields").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {
-                    look::label(ui, "Name");
-                    suggest_field(ui, "ev_name", &mut def.name, "e.g. New England Championship round 3", &[], field_w);
-                    ui.end_row();
-                    look::label(ui, "Track");
-                    suggest_field(ui, "ev_track", &mut def.track, "Track name as your MyChron uses it", &s.tracks, field_w);
-                    ui.end_row();
-                    look::label(ui, "Starts");
-                    look::text(ui, &mut def.start, "MM/DD/YYYY", Some(200.0));
-                    ui.end_row();
-                    look::label(ui, "Ends");
-                    look::text(ui, &mut def.end, "MM/DD/YYYY", Some(200.0));
-                    ui.end_row();
-                    look::label(ui, "Championship");
-                    suggest_field(ui, "ev_champ", &mut def.championship, "Optional", &championships, field_w);
-                    ui.end_row();
-                    look::label(ui, "Notes");
-                    look::text_area(ui, &mut def.notes, "Entry, class, tires, anything to remember", field_w, 3);
-                    ui.end_row();
-                });
+                egui::Grid::new("event_fields")
+                    .num_columns(2)
+                    .spacing([20.0, 16.0])
+                    .min_col_width(120.0)
+                    .show(ui, |ui| {
+                        look::label(ui, "Name");
+                        suggest_field(
+                            ui,
+                            "ev_name",
+                            &mut def.name,
+                            "e.g. New England Championship round 3",
+                            &[],
+                            field_w,
+                        );
+                        ui.end_row();
+                        look::label(ui, "Track");
+                        suggest_field(
+                            ui,
+                            "ev_track",
+                            &mut def.track,
+                            "Track name as your MyChron uses it",
+                            &s.tracks,
+                            field_w,
+                        );
+                        ui.end_row();
+                        look::label(ui, "Starts");
+                        look::text(ui, &mut def.start, "MM/DD/YYYY", Some(200.0));
+                        ui.end_row();
+                        look::label(ui, "Ends");
+                        look::text(ui, &mut def.end, "MM/DD/YYYY", Some(200.0));
+                        ui.end_row();
+                        look::label(ui, "Championship");
+                        suggest_field(
+                            ui,
+                            "ev_champ",
+                            &mut def.championship,
+                            "Optional",
+                            &championships,
+                            field_w,
+                        );
+                        ui.end_row();
+                        look::label(ui, "Notes");
+                        look::text_area(
+                            ui,
+                            &mut def.notes,
+                            "Entry, class, tires, anything to remember",
+                            field_w,
+                            3,
+                        );
+                        ui.end_row();
+                    });
                 if let Some(p) = problem {
                     look::note(ui, p, SECONDARY);
                 }
             });
             look::footer_row(ui, |ui| {
-                if existing && look::big_button(ui, "Delete event", Some(Icon::Trash), look::Kind::Quiet, true) {
+                if existing
+                    && look::big_button(
+                        ui,
+                        "Delete event",
+                        Some(Icon::Trash),
+                        look::Kind::Quiet,
+                        true,
+                    )
+                {
                     delete = true;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if look::big_button(ui, "Save", Some(Icon::Check), look::Kind::Primary, problem.is_none()) {
+                    if look::big_button(
+                        ui,
+                        "Save",
+                        Some(Icon::Check),
+                        look::Kind::Primary,
+                        problem.is_none(),
+                    ) {
                         save = true;
                     }
                     if look::big_button(ui, "Cancel", None, look::Kind::Quiet, true) {
@@ -519,7 +750,9 @@ enum DetailAction {
 /// The session's driver, as everywhere else (`session_driver`: entered at
 /// download, else the driver of the kart its MyChron was on then).
 fn driver_for(s: &tracks::LocalSession, profiles: &crate::profiles::Profiles) -> String {
-    Some(s.driver(profiles)).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("MyChron {}", s.logger))
+    Some(s.driver(profiles))
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| format!("MyChron {}", s.logger))
 }
 
 fn driver_stats(
@@ -532,7 +765,10 @@ fn driver_stats(
     for &i in &e.sessions {
         let s = &lib.sessions[i];
         let name = driver_for(s, profiles);
-        let d = match out.iter_mut().position(|d| d.name.eq_ignore_ascii_case(&name)) {
+        let d = match out
+            .iter_mut()
+            .position(|d| d.name.eq_ignore_ascii_case(&name))
+        {
             Some(k) => &mut out[k],
             None => {
                 out.push(DriverStats {
@@ -556,7 +792,12 @@ fn driver_stats(
             .as_ref()
             .map(|m| m.kart.clone())
             .filter(|k| !k.trim().is_empty())
-            .or_else(|| profiles.get(&s.logger).map(|p| p.kart.clone()).filter(|k| !k.trim().is_empty()));
+            .or_else(|| {
+                profiles
+                    .get(&s.logger)
+                    .map(|p| p.kart.clone())
+                    .filter(|k| !k.trim().is_empty())
+            });
         if let Some(k) = kart.filter(|k| !d.karts.contains(k)) {
             d.karts.push(k);
         }
@@ -590,7 +831,13 @@ fn driver_stats(
 }
 
 /// A driver's card: name and kart, then fastest lap, sessions, laps, time, peaks.
-fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setup_lines: &[(bool, String)]) -> Option<DetailAction> {
+fn driver_card(
+    ui: &mut Ui,
+    lib: &Library,
+    d: &DriverStats,
+    color: Color32,
+    setup_lines: &[(bool, String)],
+) -> Option<DetailAction> {
     let mut action = None;
     card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -603,10 +850,23 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
         });
         ui.add_space(10.0);
         let dash = || "—".to_string();
-        let warm = if d.warm_ups > 0 { format!("+ {} warm-up{}", d.warm_ups, if d.warm_ups == 1 { "" } else { "s" }) } else { String::new() };
+        let warm = if d.warm_ups > 0 {
+            format!(
+                "+ {} warm-up{}",
+                d.warm_ups,
+                if d.warm_ups == 1 { "" } else { "s" }
+            )
+        } else {
+            String::new()
+        };
         let fastest_note = d
             .fastest
-            .map(|(_, i, lap)| format!("Session {}, lap {lap}", lib.sessions[i].summary.number.unwrap_or(0)))
+            .map(|(_, i, lap)| {
+                format!(
+                    "Session {}, lap {lap}",
+                    lib.sessions[i].summary.number.unwrap_or(0)
+                )
+            })
             .unwrap_or_default();
         let egt = match d.peak_egt {
             None => "…".to_string(),
@@ -614,31 +874,110 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
             Some(None) => dash(),
         };
         let tiles: [(&str, String, String, bool); 7] = [
-            ("Fastest lap", d.fastest.map(|(b, _, _)| format_lap_time(b as i64)).unwrap_or_else(dash), fastest_note, true),
+            (
+                "Fastest lap",
+                d.fastest
+                    .map(|(b, _, _)| format_lap_time(b as i64))
+                    .unwrap_or_else(dash),
+                fastest_note,
+                true,
+            ),
             ("Sessions", d.sessions.to_string(), warm, false),
             ("Laps", d.laps.to_string(), String::new(), false),
-            ("On track", if d.time_ms > 0 { format_duration(d.time_ms as i64) } else { dash() }, String::new(), false),
-            ("Peak RPM", d.peak_rpm.map(|r| group_thousands(r as usize)).unwrap_or_else(dash), String::new(), false),
+            (
+                "On track",
+                if d.time_ms > 0 {
+                    format_duration(d.time_ms as i64)
+                } else {
+                    dash()
+                },
+                String::new(),
+                false,
+            ),
+            (
+                "Peak RPM",
+                d.peak_rpm
+                    .map(|r| group_thousands(r as usize))
+                    .unwrap_or_else(dash),
+                String::new(),
+                false,
+            ),
             ("Peak EGT", egt, String::new(), false),
-            ("Top speed", d.top_speed.map(|v| format!("{:.1} {}", crate::units::speed(v), crate::units::speed_unit())).unwrap_or_else(dash), String::new(), false),
+            (
+                "Top speed",
+                d.top_speed
+                    .map(|v| {
+                        format!(
+                            "{:.1} {}",
+                            crate::units::speed(v),
+                            crate::units::speed_unit()
+                        )
+                    })
+                    .unwrap_or_else(dash),
+                String::new(),
+                false,
+            ),
         ];
         let w = ui.available_width();
         // All in one row when there's room, else 4 + 3.
-        let per_row = if w > 1100.0 { 7 } else if w > 520.0 { 4 } else { 3 };
+        let per_row = if w > 1100.0 {
+            7
+        } else if w > 520.0 {
+            4
+        } else {
+            3
+        };
         let tile_w = (w - 8.0 * (per_row - 1) as f32) / per_row as f32;
         for chunk in tiles.chunks(per_row) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 for (label, value, note, is_fastest) in chunk {
                     let clickable = *is_fastest && d.fastest.is_some();
-                    let (rect, resp) = ui.allocate_exact_size(vec2(tile_w, 66.0), if clickable { Sense::click() } else { Sense::hover() });
+                    let (rect, resp) = ui.allocate_exact_size(
+                        vec2(tile_w, 66.0),
+                        if clickable {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        },
+                    );
                     let p = ui.painter();
-                    p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL + 2), if clickable && resp.hovered() { SURFACE_HOVER } else { SURFACE_ACTIVE });
-                    p.text(rect.left_top() + vec2(12.0, 16.0), egui::Align2::LEFT_CENTER, *label, regular(12.5), DIM);
-                    let vc = if *is_fastest && d.fastest.is_some() { theme::GOOD } else { TEXT };
-                    p.text(rect.left_top() + vec2(12.0, 38.0), egui::Align2::LEFT_CENTER, value, semibold(18.0), vc);
+                    p.rect_filled(
+                        rect,
+                        CornerRadius::same(theme::RADIUS_SMALL + 2),
+                        if clickable && resp.hovered() {
+                            SURFACE_HOVER
+                        } else {
+                            SURFACE_ACTIVE
+                        },
+                    );
+                    p.text(
+                        rect.left_top() + vec2(12.0, 16.0),
+                        egui::Align2::LEFT_CENTER,
+                        *label,
+                        regular(12.5),
+                        DIM,
+                    );
+                    let vc = if *is_fastest && d.fastest.is_some() {
+                        theme::GOOD
+                    } else {
+                        TEXT
+                    };
+                    p.text(
+                        rect.left_top() + vec2(12.0, 38.0),
+                        egui::Align2::LEFT_CENTER,
+                        value,
+                        semibold(18.0),
+                        vc,
+                    );
                     if !note.is_empty() {
-                        p.text(rect.left_top() + vec2(12.0, 56.0), egui::Align2::LEFT_CENTER, note, regular(11.5), SECONDARY);
+                        p.text(
+                            rect.left_top() + vec2(12.0, 56.0),
+                            egui::Align2::LEFT_CENTER,
+                            note,
+                            regular(11.5),
+                            SECONDARY,
+                        );
                     }
                     if clickable {
                         let resp = resp.on_hover_text("Open this lap");
@@ -647,7 +986,8 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
                         }
                         if resp.clicked() {
                             let (_, i, lap) = d.fastest.unwrap();
-                            action = Some(DetailAction::Open(lib.sessions[i].path.clone(), Some(lap)));
+                            action =
+                                Some(DetailAction::Open(lib.sessions[i].path.clone(), Some(lap)));
                         }
                     }
                 }
@@ -655,19 +995,33 @@ fn driver_card(ui: &mut Ui, lib: &Library, d: &DriverStats, color: Color32, setu
             ui.add_space(8.0);
         }
         for (changed, line) in setup_lines {
-            ui.label(RichText::new(line).size(12.5).color(if *changed { theme::FAVORITE } else { SECONDARY }));
+            ui.label(RichText::new(line).size(12.5).color(if *changed {
+                theme::FAVORITE
+            } else {
+                SECONDARY
+            }));
         }
     });
     action
 }
 
 /// A championship's season so far: per driver, events entered and best lap at each track.
-fn season_card(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, champ: &str, events: &[&Event]) {
+fn season_card(
+    ui: &mut Ui,
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    champ: &str,
+    events: &[&Event],
+) {
     card(ui, |ui| {
         ui.label(RichText::new(champ).font(semibold(16.0)).color(TEXT));
         let raced: Vec<&&Event> = events.iter().filter(|e| !e.sessions.is_empty()).collect();
         let planned = events.len() - raced.len();
-        let mut sub = format!("{} event{} so far", raced.len(), if raced.len() == 1 { "" } else { "s" });
+        let mut sub = format!(
+            "{} event{} so far",
+            raced.len(),
+            if raced.len() == 1 { "" } else { "s" }
+        );
         if planned > 0 {
             sub.push_str(&format!("  ·  {planned} coming up"));
         }
@@ -692,12 +1046,20 @@ fn season_card(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles,
                     seen.push(name);
                     drivers[k].1 += 1;
                 }
-                let best = (!events::is_warm_up(&s.summary)).then_some(s.summary.best_lap_ms).flatten();
-                match drivers[k].2.iter_mut().find(|(t, _)| t.eq_ignore_ascii_case(&e.track)) {
-                    Some((_, b)) => *b = match (*b, best) {
-                        (Some(x), Some(y)) => Some(x.min(y)),
-                        (x, y) => x.or(y),
-                    },
+                let best = (!events::is_warm_up(&s.summary))
+                    .then_some(s.summary.best_lap_ms)
+                    .flatten();
+                match drivers[k]
+                    .2
+                    .iter_mut()
+                    .find(|(t, _)| t.eq_ignore_ascii_case(&e.track))
+                {
+                    Some((_, b)) => {
+                        *b = match (*b, best) {
+                            (Some(x), Some(y)) => Some(x.min(y)),
+                            (x, y) => x.or(y),
+                        }
+                    }
                     None => drivers[k].2.push((e.track.clone(), best)),
                 }
             }
@@ -712,8 +1074,14 @@ fn season_card(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles,
                     ui.add_space(4.0);
                     ui.label(RichText::new(track).size(13.0).color(SECONDARY));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let text = best.map(|b| format_lap_time(b as i64)).unwrap_or_else(|| "no laps".into());
-                        ui.label(RichText::new(text).font(medium(13.5)).color(if best.is_some() { TEXT } else { DIM }));
+                        let text = best
+                            .map(|b| format_lap_time(b as i64))
+                            .unwrap_or_else(|| "no laps".into());
+                        ui.label(
+                            RichText::new(text)
+                                .font(medium(13.5))
+                                .color(if best.is_some() { TEXT } else { DIM }),
+                        );
                     });
                 });
             }
@@ -723,7 +1091,14 @@ fn season_card(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles,
 }
 
 /// A row in the event list.
-fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e: &Event, selected: bool, today: aim_xrk::summary::Date) -> egui::Response {
+fn event_row(
+    ui: &mut Ui,
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    e: &Event,
+    selected: bool,
+    today: aim_xrk::summary::Date,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 58.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let p = ui.painter_at(rect.shrink2(vec2(0.0, 2.0)));
@@ -737,11 +1112,25 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        p.rect_filled(rect.shrink2(vec2(0.0, 2.0)), CornerRadius::same(theme::RADIUS_SMALL + 2), fill);
+        p.rect_filled(
+            rect.shrink2(vec2(0.0, 2.0)),
+            CornerRadius::same(theme::RADIUS_SMALL + 2),
+            fill,
+        );
         let (l, r) = (rect.left() + 14.0, rect.right() - 14.0);
         let (top, bottom) = (rect.top() + 20.0, rect.top() + 39.0);
-        p.text(pos2(l, top), egui::Align2::LEFT_CENTER, e.title(), medium(14.5), TEXT);
-        let mut drivers: Vec<String> = e.sessions.iter().map(|&i| driver_for(&lib.sessions[i], profiles)).collect();
+        p.text(
+            pos2(l, top),
+            egui::Align2::LEFT_CENTER,
+            e.title(),
+            medium(14.5),
+            TEXT,
+        );
+        let mut drivers: Vec<String> = e
+            .sessions
+            .iter()
+            .map(|&i| driver_for(&lib.sessions[i], profiles))
+            .collect();
         drivers.sort();
         drivers.dedup();
         let mut line = vec![date_range(e.start, e.end)];
@@ -751,7 +1140,13 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
         if !drivers.is_empty() {
             line.push(drivers.join(", "));
         }
-        p.text(pos2(l, bottom), egui::Align2::LEFT_CENTER, line.join("  ·  "), regular(12.5), DIM);
+        p.text(
+            pos2(l, bottom),
+            egui::Align2::LEFT_CENTER,
+            line.join("  ·  "),
+            regular(12.5),
+            DIM,
+        );
         let best = e
             .sessions
             .iter()
@@ -762,11 +1157,28 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
             (Some(b), _) => (format_lap_time(b as i64), theme::GOOD),
             (None, true) => {
                 let n = crate::dates::days(e.start) - crate::dates::days(today);
-                (if n > 1 { format!("in {n} days") } else if n == 1 { "tomorrow".into() } else if n == 0 { "today".into() } else { "planned".into() }, SECONDARY)
+                (
+                    if n > 1 {
+                        format!("in {n} days")
+                    } else if n == 1 {
+                        "tomorrow".into()
+                    } else if n == 0 {
+                        "today".into()
+                    } else {
+                        "planned".into()
+                    },
+                    SECONDARY,
+                )
             }
             (None, false) => (plural(e.sessions.len(), "session"), DIM),
         };
-        p.text(pos2(r, top), egui::Align2::RIGHT_CENTER, right, medium(14.0), color);
+        p.text(
+            pos2(r, top),
+            egui::Align2::RIGHT_CENTER,
+            right,
+            medium(14.0),
+            color,
+        );
     }
     response
 }

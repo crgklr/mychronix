@@ -46,7 +46,10 @@ impl Stat {
 
     /// A share of the lap in %, rather than a value of the channel.
     pub fn is_share(self) -> bool {
-        matches!(self, Stat::Braking | Stat::OnThrottle | Stat::Cornering | Stat::Coasting)
+        matches!(
+            self,
+            Stat::Braking | Stat::OnThrottle | Stat::Cornering | Stat::Coasting
+        )
     }
 }
 
@@ -58,7 +61,10 @@ pub struct Column {
 
 impl Column {
     fn new(channel: &str, stat: Stat) -> Self {
-        Self { channel: channel.into(), stat }
+        Self {
+            channel: channel.into(),
+            stat,
+        }
     }
 
     /// "RPM max", "EGT avg", "Lateral g peak", "Braking", "Steering corrections".
@@ -117,7 +123,12 @@ pub enum Preset {
 }
 
 impl Preset {
-    pub const ALL: [Preset; 4] = [Preset::Default, Preset::Engine, Preset::Driving, Preset::Driver];
+    pub const ALL: [Preset; 4] = [
+        Preset::Default,
+        Preset::Engine,
+        Preset::Driving,
+        Preset::Driver,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -186,15 +197,26 @@ impl Preset {
 /// loggers: a MyChron 4 (through RaceStudio 2) records "Engine" and
 /// "Battery" where a MyChron 6 records "RPM" and "Internal Batt"; without
 /// GPS, speed is worked out from RPM.
-const SAME_CHANNEL: [&[&str]; 3] = [&["RPM", "Engine"], &["GPS Speed", crate::setup::SPEED_FROM_RPM], &["Internal Batt", "Battery"]];
+const SAME_CHANNEL: [&[&str]; 3] = [
+    &["RPM", "Engine"],
+    &["GPS Speed", crate::setup::SPEED_FROM_RPM],
+    &["Internal Batt", "Battery"],
+];
 
 /// `session`'s channel `name`, or the same thing under another name.
 pub fn channel<'a>(session: &'a Session, name: &str) -> Option<&'a Channel> {
     let real = |c: &&Channel| c.values.len() > 1;
-    session.channels.iter().filter(real).find(|c| c.name == name).or_else(|| {
-        let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
-        group.iter().find_map(|n| session.channels.iter().filter(real).find(|c| c.name == *n))
-    })
+    session
+        .channels
+        .iter()
+        .filter(real)
+        .find(|c| c.name == name)
+        .or_else(|| {
+            let group = SAME_CHANNEL.iter().find(|g| g.contains(&name))?;
+            group
+                .iter()
+                .find_map(|n| session.channels.iter().filter(real).find(|c| c.name == *n))
+        })
 }
 
 /// Lateral g for cornering and coasting: from GPS as RaceStudio does, else
@@ -212,14 +234,18 @@ pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> O
     if !column.stat.is_share() {
         return value(channel, start_ms, end_ms, column.stat);
     }
-    let lateral = LATERAL.iter().find_map(|name| session.channels.iter().find(|c| c.name == *name));
+    let lateral = LATERAL
+        .iter()
+        .find_map(|name| session.channels.iter().find(|c| c.name == *name));
     let condition: Box<dyn Fn(i64, f64) -> bool> = match column.stat {
         Stat::Braking => Box::new(|_, v| v < -0.15),
         Stat::OnThrottle => Box::new(|_, v| v > 0.05),
         Stat::Cornering => Box::new(|_, v| v.abs() > 0.2),
         Stat::Coasting => {
             let lateral = lateral?;
-            Box::new(move |t, v| (-0.15..=0.05).contains(&v) && sample_at(lateral, t).is_some_and(|g| g.abs() <= 0.2))
+            Box::new(move |t, v| {
+                (-0.15..=0.05).contains(&v) && sample_at(lateral, t).is_some_and(|g| g.abs() <= 0.2)
+            })
         }
         _ => return None,
     };
@@ -228,7 +254,12 @@ pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> O
 
 /// % of [start_ms, end_ms] in which `condition(time, value)` holds, weighting
 /// each sample by the time until the next.
-fn share(channel: &Channel, start_ms: i64, end_ms: i64, condition: impl Fn(i64, f64) -> bool) -> Option<f64> {
+fn share(
+    channel: &Channel,
+    start_ms: i64,
+    end_ms: i64,
+    condition: impl Fn(i64, f64) -> bool,
+) -> Option<f64> {
     let lo = channel.times_ms.partition_point(|&t| t < start_ms);
     let hi = channel.times_ms.partition_point(|&t| t <= end_ms);
     if hi <= lo + 1 {
@@ -237,7 +268,12 @@ fn share(channel: &Channel, start_ms: i64, end_ms: i64, condition: impl Fn(i64, 
     let (mut on, mut total) = (0i64, 0i64);
     for i in lo..hi {
         let t = channel.times_ms[i];
-        let next = channel.times_ms.get(i + 1).copied().unwrap_or(end_ms).min(end_ms);
+        let next = channel
+            .times_ms
+            .get(i + 1)
+            .copied()
+            .unwrap_or(end_ms)
+            .min(end_ms);
         let dt = (next - t).max(0);
         let v = channel.values[i];
         if !v.is_finite() {
@@ -290,7 +326,12 @@ fn sample_at(channel: &Channel, t_ms: i64) -> Option<f64> {
 pub fn value(channel: &Channel, start_ms: i64, end_ms: i64, stat: Stat) -> Option<f64> {
     let lo = channel.times_ms.partition_point(|&t| t < start_ms);
     let hi = channel.times_ms.partition_point(|&t| t <= end_ms);
-    let values = channel.values.get(lo..hi)?.iter().copied().filter(|v| v.is_finite());
+    let values = channel
+        .values
+        .get(lo..hi)?
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite());
     match stat {
         Stat::Max => values.reduce(f64::max),
         Stat::Min => values.reduce(f64::min),
@@ -311,7 +352,12 @@ pub fn summary(values: &[f64]) -> Option<[f64; 4]> {
     let n = values.len() as f64;
     let mean = values.iter().sum::<f64>() / n;
     let sd = (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
-    Some([values.iter().copied().fold(f64::MIN, f64::max), values.iter().copied().fold(f64::MAX, f64::min), mean, sd])
+    Some([
+        values.iter().copied().fold(f64::MIN, f64::max),
+        values.iter().copied().fold(f64::MAX, f64::min),
+        mean,
+        sd,
+    ])
 }
 
 #[cfg(test)]
@@ -344,9 +390,20 @@ mod tests {
     #[test]
     fn shares_of_a_lap() {
         // Longitudinal g at 100 ms steps: brake, brake, coast, throttle, throttle, throttle, (end).
-        let lon = Channel { name: "GPS LonAcc".into(), ..channel(&[-0.5, -0.2, 0.0, 0.3, 0.3, 0.3, 0.0]) };
-        let lat = Channel { name: "GPS LatAcc".into(), ..channel(&[0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0]) };
-        let session = Session { info: Default::default(), channels: vec![lon, lat], laps: Vec::new(), gps: None };
+        let lon = Channel {
+            name: "GPS LonAcc".into(),
+            ..channel(&[-0.5, -0.2, 0.0, 0.3, 0.3, 0.3, 0.0])
+        };
+        let lat = Channel {
+            name: "GPS LatAcc".into(),
+            ..channel(&[0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0])
+        };
+        let session = Session {
+            info: Default::default(),
+            channels: vec![lon, lat],
+            laps: Vec::new(),
+            gps: None,
+        };
         let col = |name: &str, stat| Column::new(name, stat);
         let pct = |c: Column| cell(&session, &c, 0, 600).unwrap().round();
         assert_eq!(pct(col("GPS LonAcc", Stat::Braking)), 33.0);
@@ -362,7 +419,10 @@ mod tests {
         let v = [0.0, 10.0, 20.0, 10.0, 0.0, 2.0, 0.0, 8.0, 1.0, 9.0];
         assert_eq!(reversals(&v, 5.0), 4);
         assert_eq!(reversals(&[0.0, 1.0, 0.0, 1.0], 5.0), 0);
-        assert_eq!(Column::new("Steering Angle", Stat::Corrections).title(), "Steering corrections");
+        assert_eq!(
+            Column::new("Steering Angle", Stat::Corrections).title(),
+            "Steering corrections"
+        );
     }
 
     #[test]

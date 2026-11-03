@@ -17,7 +17,9 @@ pub(super) struct LibraryLoad {
 impl App {
     /// The library, loaded on the spot the first time a page needs it.
     pub(super) fn lib(&mut self) -> std::sync::Arc<Library> {
-        self.library.get_or_insert_with(|| std::sync::Arc::new(Library::load())).clone()
+        self.library
+            .get_or_insert_with(|| std::sync::Arc::new(Library::load()))
+            .clone()
     }
 
     /// The library to change in place (a session's new digest or setup sheet): copied
@@ -32,7 +34,8 @@ impl App {
         if let Some(p) = &self.profiles
             && let Err(e) = p.save()
         {
-            self.notices.error(format!("Couldn't save your drivers and karts: {e}"));
+            self.notices
+                .error(format!("Couldn't save your drivers and karts: {e}"));
         }
         self.setup_baselines = None;
         self.reload_library();

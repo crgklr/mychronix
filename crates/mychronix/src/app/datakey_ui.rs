@@ -8,9 +8,19 @@ use aim_link::datakey::{DataKey, RunInfo};
 /// What the background key worker reports.
 pub(super) enum KeyEvent {
     /// The runs on the key, and which of them aren't saved yet.
-    Listed { serial: String, total: usize, new: Vec<RunInfo> },
-    Progress { done: usize, of: usize },
-    Downloaded { saved: Vec<PathBuf>, serial: String },
+    Listed {
+        serial: String,
+        total: usize,
+        new: Vec<RunInfo>,
+    },
+    Progress {
+        done: usize,
+        of: usize,
+    },
+    Downloaded {
+        saved: Vec<PathBuf>,
+        serial: String,
+    },
     Failed(String),
 }
 
@@ -28,12 +38,26 @@ pub(super) struct KeyState {
 
 /// Runs already saved for a logger, by start time ("MM/DD/YYYY", "HH:MM:SS").
 fn saved_starts(dir: &std::path::Path) -> Vec<(String, String)> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     entries
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "drk" || x == "mc4"))
-        .filter_map(|p| if p.extension().is_some_and(|x| x == "drk") { aim_xrk::drk::summary(&p).ok() } else { aim_xrk::mc4::summary(&p).ok() })
-        .filter_map(|s| Some((s.date.map(|d| format!("{:02}/{:02}/{}", d.month, d.day, d.year))?, s.start_time?)))
+        .filter_map(|p| {
+            if p.extension().is_some_and(|x| x == "drk") {
+                aim_xrk::drk::summary(&p).ok()
+            } else {
+                aim_xrk::mc4::summary(&p).ok()
+            }
+        })
+        .filter_map(|s| {
+            Some((
+                s.date
+                    .map(|d| format!("{:02}/{:02}/{}", d.month, d.day, d.year))?,
+                s.start_time?,
+            ))
+        })
         .collect()
 }
 
@@ -48,16 +72,20 @@ fn main_serial(runs: &[RunInfo]) -> String {
         }
     }
     // The first listed wins a tie.
-    count.iter().fold(None::<(u32, usize)>, |best, &(s, n)| match best {
-        Some((_, m)) if m >= n => best,
-        _ => Some((s, n)),
-    })
-    .map(|(s, _)| s.to_string())
-    .unwrap_or_else(|| "mychron4".into())
+    count
+        .iter()
+        .fold(None::<(u32, usize)>, |best, &(s, n)| match best {
+            Some((_, m)) if m >= n => best,
+            _ => Some((s, n)),
+        })
+        .map(|(s, _)| s.to_string())
+        .unwrap_or_else(|| "mychron4".into())
 }
 
 fn sessions_dir(serial: &str) -> PathBuf {
-    crate::paths::sessions_dir().unwrap_or_default().join(serial)
+    crate::paths::sessions_dir()
+        .unwrap_or_default()
+        .join(serial)
 }
 
 impl App {
@@ -77,7 +105,12 @@ impl App {
                     k.busy = None;
                     k.progress = None;
                     let n = saved.len();
-                    self.notices.success(format!("Downloaded {} from the data key.", plural(n, "session"))).go_to("Open Sessions", Page::Sessions);
+                    self.notices
+                        .success(format!(
+                            "Downloaded {} from the data key.",
+                            plural(n, "session")
+                        ))
+                        .go_to("Open Sessions", Page::Sessions);
                     if let Some((_, _, new)) = k.listing.as_mut() {
                         new.clear();
                     }
@@ -101,7 +134,10 @@ impl App {
             k.progress = None;
             self.notices.error("Reading the data key stopped unexpectedly. Unplug it, plug it back in, and try again.");
         }
-        if k.busy.is_some() || k.last_check.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) {
+        if k.busy.is_some()
+            || k.last_check
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
             return;
         }
@@ -130,16 +166,23 @@ impl App {
                 let runs = key.runs()?;
                 let serial = main_serial(&runs);
                 // Each run is compared with what's saved for its own MyChron: one key can carry several.
-                let mut have: std::collections::HashMap<u32, Vec<(String, String)>> = std::collections::HashMap::new();
+                let mut have: std::collections::HashMap<u32, Vec<(String, String)>> =
+                    std::collections::HashMap::new();
                 let new: Vec<RunInfo> = runs
                     .iter()
                     .filter(|r| {
-                        let saved = have.entry(r.serial).or_insert_with(|| saved_starts(&sessions_dir(&r.serial.to_string())));
+                        let saved = have
+                            .entry(r.serial)
+                            .or_insert_with(|| saved_starts(&sessions_dir(&r.serial.to_string())));
                         r.start().is_some_and(|s| !saved.contains(&s))
                     })
                     .cloned()
                     .collect();
-                Ok(KeyEvent::Listed { serial, total: runs.len(), new })
+                Ok(KeyEvent::Listed {
+                    serial,
+                    total: runs.len(),
+                    new,
+                })
             })()
             .unwrap_or_else(|e| KeyEvent::Failed(e.to_string()));
             let _ = tx.send(ev);
@@ -149,7 +192,9 @@ impl App {
 
     /// Downloads the new runs in the background.
     pub(super) fn key_download(&mut self, ctx: &egui::Context) {
-        let Some((serial, _, new)) = self.key.listing.clone() else { return };
+        let Some((serial, _, new)) = self.key.listing.clone() else {
+            return;
+        };
         if new.is_empty() {
             return;
         }
@@ -165,13 +210,18 @@ impl App {
                 for (k, r) in new.iter().enumerate() {
                     // Under the MyChron that recorded it.
                     let dir = sessions_dir(&r.serial.to_string());
-                    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
                     let run = key.download(r, |_, _| {}).map_err(|e| e.to_string())?;
                     let path = dir.join(r.file_name());
-                    crate::storage::write_atomic(&path, &run.to_file()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+                    crate::storage::write_atomic(&path, &run.to_file())
+                        .map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
                     log::info!("data key: saved {}", path.display());
                     saved.push(path);
-                    let _ = tx.send(KeyEvent::Progress { done: k + 1, of: new.len() });
+                    let _ = tx.send(KeyEvent::Progress {
+                        done: k + 1,
+                        of: new.len(),
+                    });
                     ctx.request_repaint();
                 }
                 Ok(saved)
@@ -191,42 +241,85 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         let mut download = false;
-        Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin::symmetric(20, 16)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                ui.add(Icon::Mychron.image(if self.key.present { theme::GOOD } else { SECONDARY }, 34.0));
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new("MyChron 4 data key").font(semibold(16.0)).color(TEXT));
-                    let line = match (&self.key.busy, &self.key.listing, self.key.present) {
-                        (Some(b), _, _) => b.clone(),
-                        (None, Some((serial, total, new)), true) => {
-                            let who = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).for_logger(serial).driver;
-                            let whose = if who.is_empty() { format!("MyChron {serial}") } else { format!("{who}'s MyChron") };
-                            match new.len() {
-                                0 => format!("Plugged in · {total} runs from {whose}, all downloaded"),
-                                n => format!("Plugged in · {total} runs from {whose}, {n} new"),
+        Frame::new()
+            .fill(SURFACE)
+            .corner_radius(CornerRadius::same(theme::RADIUS))
+            .inner_margin(Margin::symmetric(20, 16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    ui.add(Icon::Mychron.image(
+                        if self.key.present {
+                            theme::GOOD
+                        } else {
+                            SECONDARY
+                        },
+                        34.0,
+                    ));
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.label(
+                            RichText::new("MyChron 4 data key")
+                                .font(semibold(16.0))
+                                .color(TEXT),
+                        );
+                        let line = match (&self.key.busy, &self.key.listing, self.key.present) {
+                            (Some(b), _, _) => b.clone(),
+                            (None, Some((serial, total, new)), true) => {
+                                let who = self
+                                    .profiles
+                                    .get_or_insert_with(crate::profiles::Profiles::load)
+                                    .for_logger(serial)
+                                    .driver;
+                                let whose = if who.is_empty() {
+                                    format!("MyChron {serial}")
+                                } else {
+                                    format!("{who}'s MyChron")
+                                };
+                                match new.len() {
+                                    0 => format!(
+                                        "Plugged in · {total} runs from {whose}, all downloaded"
+                                    ),
+                                    n => format!("Plugged in · {total} runs from {whose}, {n} new"),
+                                }
                             }
-                        }
-                        (None, _, true) => "Plugged in".into(),
-                        (None, _, false) => "Not plugged in".into(),
-                    };
-                    ui.label(RichText::new(line).size(13.0).color(if self.key.present { theme::GOOD } else { SECONDARY }));
-                    if let Some((done, of)) = self.key.progress {
-                        ui.add(egui::ProgressBar::new(done as f32 / of.max(1) as f32).desired_width(260.0).text(format!("{done} of {of} runs")));
-                    }
-                });
-                let new = self.key.listing.as_ref().map(|l| l.2.len()).unwrap_or(0);
-                if self.key.busy.is_none() && new > 0 {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if button(ui, Some(Icon::FolderOpen), &format!("Download {new} new run{}", if new == 1 { "" } else { "s" }), true).clicked() {
-                            download = true;
+                            (None, _, true) => "Plugged in".into(),
+                            (None, _, false) => "Not plugged in".into(),
+                        };
+                        ui.label(RichText::new(line).size(13.0).color(if self.key.present {
+                            theme::GOOD
+                        } else {
+                            SECONDARY
+                        }));
+                        if let Some((done, of)) = self.key.progress {
+                            ui.add(
+                                egui::ProgressBar::new(done as f32 / of.max(1) as f32)
+                                    .desired_width(260.0)
+                                    .text(format!("{done} of {of} runs")),
+                            );
                         }
                     });
-                }
+                    let new = self.key.listing.as_ref().map(|l| l.2.len()).unwrap_or(0);
+                    if self.key.busy.is_none() && new > 0 {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if button(
+                                ui,
+                                Some(Icon::FolderOpen),
+                                &format!(
+                                    "Download {new} new run{}",
+                                    if new == 1 { "" } else { "s" }
+                                ),
+                                true,
+                            )
+                            .clicked()
+                            {
+                                download = true;
+                            }
+                        });
+                    }
+                });
             });
-        });
         ui.add_space(14.0);
         if download {
             self.key_download(&ctx);
@@ -239,7 +332,17 @@ mod tests {
     use super::*;
 
     fn run(serial: u32) -> RunInfo {
-        RunInfo { index: 0, number: 0, serial, model: 106, laps_addr: 0, data_addr: 0, data_len: 0, best_lap_cs: None, header: Vec::new() }
+        RunInfo {
+            index: 0,
+            number: 0,
+            serial,
+            model: 106,
+            laps_addr: 0,
+            data_addr: 0,
+            data_len: 0,
+            best_lap_cs: None,
+            header: Vec::new(),
+        }
     }
 
     #[test]

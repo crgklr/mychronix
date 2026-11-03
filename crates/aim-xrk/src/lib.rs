@@ -79,8 +79,16 @@ impl GpsTrack {
                 track.times_ms.push(g.timecodes[i]);
                 track.latitude.push(lat);
                 track.longitude.push(lon);
-                track.speed_kmh.push(g.speed.get(i).copied().unwrap_or(0.0) * 3.6);
-                track.yaw_rate_dps.push(g.yaw_rate.get(i).map(|&v| v as f64).filter(|v| v.is_finite()).unwrap_or(0.0));
+                track
+                    .speed_kmh
+                    .push(g.speed.get(i).copied().unwrap_or(0.0) * 3.6);
+                track.yaw_rate_dps.push(
+                    g.yaw_rate
+                        .get(i)
+                        .map(|&v| v as f64)
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(0.0),
+                );
             }
         }
         (!track.is_empty()).then_some(track)
@@ -141,13 +149,22 @@ impl Session {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let data = std::fs::read(path)?;
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("drk")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("drk"))
+        {
             return drk::open(path);
         }
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("imd")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("imd"))
+        {
             return mc4::read_imd(&data);
         }
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mc4")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("mc4"))
+        {
             return mc4::read(&data);
         }
         Self::from_bytes(&data)
@@ -160,7 +177,9 @@ impl Session {
         match read {
             Ok(Ok(session)) => Ok(session),
             Ok(Err(e)) => Err(Error::Parse(e.to_string())),
-            Err(_) => Err(Error::Parse("the file is damaged or in a format this version can't read".into())),
+            Err(_) => Err(Error::Parse(
+                "the file is damaged or in a format this version can't read".into(),
+            )),
         }
     }
 
@@ -173,7 +192,11 @@ impl Session {
     /// end of recording (the in-lap), so neither is a timed lap; the logger
     /// leaves both out of its own best lap too.
     pub fn complete_laps(&self) -> &[Lap] {
-        if self.laps.len() < 3 { &[] } else { &self.laps[1..self.laps.len() - 1] }
+        if self.laps.len() < 3 {
+            &[]
+        } else {
+            &self.laps[1..self.laps.len() - 1]
+        }
     }
 
     /// The fastest complete lap no shorter than `min_ms`, nor cut short (see `laps`).
@@ -201,7 +224,8 @@ impl Session {
 
 /// Whether a stretch the logger didn't record (`gaps`, from `checks::recording_gaps`) falls in `lap`.
 pub fn has_gap(lap: &Lap, gaps: &[(i64, i64)]) -> bool {
-    gaps.iter().any(|&(from, to)| from < lap.end_ms && to > lap.start_ms)
+    gaps.iter()
+        .any(|&(from, to)| from < lap.end_ms && to > lap.start_ms)
 }
 
 impl From<libxrk::XrkFile> for Session {
@@ -226,7 +250,15 @@ impl From<libxrk::XrkFile> for Session {
             .into_iter()
             .map(|c| {
                 let (times_ms, values) = without_placeholders(c.timecodes, to_f64(c.values));
-                Channel { name: c.name, group: c.group, units: c.units, decimals: c.dec_pts, interpolate: c.interpolate, times_ms, values }
+                Channel {
+                    name: c.name,
+                    group: c.group,
+                    units: c.units,
+                    decimals: c.dec_pts,
+                    interpolate: c.interpolate,
+                    times_ms,
+                    values,
+                }
             })
             .collect();
         let gps = file.gps.as_ref().and_then(GpsTrack::from_libxrk);
@@ -264,7 +296,11 @@ impl From<libxrk::XrkFile> for Session {
             });
             // The built-in IMU in the kart's own directions, when it checks out.
             let find = |n: &str| channels.iter().find(|c| c.name == n);
-            if let (Some(x), Some(y), Some(z)) = (find("AccelerometerX"), find("AccelerometerY"), find("AccelerometerZ")) {
+            if let (Some(x), Some(y), Some(z)) = (
+                find("AccelerometerX"),
+                find("AccelerometerY"),
+                find("AccelerometerZ"),
+            ) {
                 let accel = [x, y, z];
                 match imu::find_mount(accel, g, &lon_g) {
                     Ok(mount) => {
@@ -272,14 +308,20 @@ impl From<libxrk::XrkFile> for Session {
                         let mut extra = imu::kart_channels(accel, &mount);
                         extra.extend(imu::grip_used(&extra[0], &g.times_ms, &lat_g));
                         // Steering from the gyro, unless the file already has a steering channel.
-                        let has_steering = channels.iter().any(|c| c.name.to_lowercase().contains("steer") && !c.values.is_empty());
-                        if let (false, Some(gx), Some(gy), Some(gz)) = (has_steering, find("GyroX"), find("GyroY"), find("GyroZ")) {
+                        let has_steering = channels.iter().any(|c| {
+                            c.name.to_lowercase().contains("steer") && !c.values.is_empty()
+                        });
+                        if let (false, Some(gx), Some(gy), Some(gz)) =
+                            (has_steering, find("GyroX"), find("GyroY"), find("GyroZ"))
+                        {
                             extra.extend(imu::steering([gx, gy, gz], &mount, g));
                         }
                         info.imu_mount = Some(mount);
                         channels.extend(extra);
                     }
-                    Err(why) => log::debug!("IMU: mounting not worked out ({why:?}); no IMU channels"),
+                    Err(why) => {
+                        log::debug!("IMU: mounting not worked out ({why:?}); no IMU channels")
+                    }
                 }
             }
         }
@@ -287,9 +329,18 @@ impl From<libxrk::XrkFile> for Session {
             .laps
             .into_iter()
             // libxrk counts from 0; the logger and RaceStudio count the out-lap as lap 1.
-            .map(|l| Lap { number: l.num + 1, start_ms: l.start_time, end_ms: l.end_time })
+            .map(|l| Lap {
+                number: l.num + 1,
+                start_ms: l.start_time,
+                end_ms: l.end_time,
+            })
             .collect();
-        Session { info, channels, laps, gps }
+        Session {
+            info,
+            channels,
+            laps,
+            gps,
+        }
     }
 }
 
@@ -300,7 +351,11 @@ fn without_placeholders(times_ms: Vec<i64>, values: Vec<f64>) -> (Vec<i64>, Vec<
     if values.iter().all(|v| v.is_finite() && v.abs() < 1e30) {
         return (times_ms, values);
     }
-    times_ms.into_iter().zip(values).filter(|(_, v)| v.is_finite() && v.abs() < 1e30).unzip()
+    times_ms
+        .into_iter()
+        .zip(values)
+        .filter(|(_, v)| v.is_finite() && v.abs() < 1e30)
+        .unzip()
 }
 
 fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
@@ -339,7 +394,12 @@ pub fn is_mychron4(model_id: u16) -> bool {
 pub fn format_lap_time(ms: i64) -> String {
     let sign = if ms < 0 { "-" } else { "" };
     let ms = ms.unsigned_abs();
-    format!("{sign}{}:{:02}.{:03}", ms / 60_000, (ms / 1000) % 60, ms % 1000)
+    format!(
+        "{sign}{}:{:02}.{:03}",
+        ms / 60_000,
+        (ms / 1000) % 60,
+        ms % 1000
+    )
 }
 
 #[cfg(test)]
@@ -355,25 +415,61 @@ mod tests {
 
     #[test]
     fn best_lap_ignores_out_and_in_laps() {
-        let lap = |number, start_ms, end_ms| Lap { number, start_ms, end_ms };
-        let session = |laps| Session { info: SessionInfo::default(), channels: vec![], laps, gps: None };
+        let lap = |number, start_ms, end_ms| Lap {
+            number,
+            start_ms,
+            end_ms,
+        };
+        let session = |laps| Session {
+            info: SessionInfo::default(),
+            channels: vec![],
+            laps,
+            gps: None,
+        };
         // Out-lap 25.7 s and in-lap 24.4 s are faster than any real lap, as in a_0031/a_0032.
-        let s = session(vec![lap(0, 0, 25_700), lap(1, 25_700, 57_000), lap(2, 57_000, 87_600), lap(3, 87_600, 112_000)]);
+        let s = session(vec![
+            lap(0, 0, 25_700),
+            lap(1, 25_700, 57_000),
+            lap(2, 57_000, 87_600),
+            lap(3, 87_600, 112_000),
+        ]);
         assert_eq!(s.best_lap(10_000).map(|l| l.number), Some(2));
         // With no lap that crosses the line twice there is no best lap.
-        assert!(session(vec![lap(0, 0, 20_000), lap(1, 20_000, 75_000)]).best_lap(0).is_none());
+        assert!(
+            session(vec![lap(0, 0, 20_000), lap(1, 20_000, 75_000)])
+                .best_lap(0)
+                .is_none()
+        );
     }
 
     #[test]
     fn the_reference_lap_skips_one_with_a_recording_gap() {
-        let lap = |number, start_ms, end_ms| Lap { number, start_ms, end_ms };
-        let s = Session { info: SessionInfo::default(), channels: vec![], gps: None, laps: vec![lap(0, 0, 30_000), lap(1, 30_000, 55_100), lap(2, 55_100, 80_500), lap(3, 80_500, 99_000)] };
+        let lap = |number, start_ms, end_ms| Lap {
+            number,
+            start_ms,
+            end_ms,
+        };
+        let s = Session {
+            info: SessionInfo::default(),
+            channels: vec![],
+            gps: None,
+            laps: vec![
+                lap(0, 0, 30_000),
+                lap(1, 30_000, 55_100),
+                lap(2, 55_100, 80_500),
+                lap(3, 80_500, 99_000),
+            ],
+        };
         // Lap 1 is fastest, but 6.7 s of it wasn't recorded.
         let gaps = [(40_000, 46_700)];
         assert_eq!(s.best_lap(10_000).map(|l| l.number), Some(1));
         assert_eq!(s.reference_lap(10_000, &gaps).map(|l| l.number), Some(2));
         // Every lap with a gap: the best lap still.
-        assert_eq!(s.reference_lap(10_000, &[(31_000, 32_000), (60_000, 61_000)]).map(|l| l.number), Some(1));
+        assert_eq!(
+            s.reference_lap(10_000, &[(31_000, 32_000), (60_000, 61_000)])
+                .map(|l| l.number),
+            Some(1)
+        );
     }
 }
 
@@ -394,9 +490,15 @@ pub fn longitudinal_g(times_ms: &[i64], speed_kmh: &[f64]) -> Vec<f64> {
     (0..n)
         .map(|i| {
             let a = times_ms[..i].partition_point(|&t| t < times_ms[i] - HALF_MS);
-            let b = (i + times_ms[i..].partition_point(|&t| t <= times_ms[i] + HALF_MS)).saturating_sub(1).max(i);
+            let b = (i + times_ms[i..].partition_point(|&t| t <= times_ms[i] + HALF_MS))
+                .saturating_sub(1)
+                .max(i);
             let dt = (times_ms[b] - times_ms[a]) as f64 / 1000.0;
-            if dt <= 0.0 || speed_kmh[i] < GPS_ACC_MIN_KMH { 0.0 } else { (speed_kmh[b] - speed_kmh[a]) / 3.6 / dt / 9.81 }
+            if dt <= 0.0 || speed_kmh[i] < GPS_ACC_MIN_KMH {
+                0.0
+            } else {
+                (speed_kmh[b] - speed_kmh[a]) / 3.6 / dt / 9.81
+            }
         })
         .collect()
 }
@@ -410,10 +512,16 @@ pub fn lateral_g(times_ms: &[i64], speed_kmh: &[f64], yaw_rate_dps: &[f64]) -> V
     (0..n)
         .map(|i| {
             let a = times_ms[..i].partition_point(|&t| t < times_ms[i] - HALF_MS);
-            let b = (i + times_ms[i..n].partition_point(|&t| t <= times_ms[i] + HALF_MS)).max(i + 1).min(n);
+            let b = (i + times_ms[i..n].partition_point(|&t| t <= times_ms[i] + HALF_MS))
+                .max(i + 1)
+                .min(n);
             let rates = &yaw_rate_dps[a..b];
             let yaw = rates.iter().sum::<f64>() / rates.len() as f64;
-            if speed_kmh[i] < GPS_ACC_MIN_KMH { 0.0 } else { speed_kmh[i] / 3.6 * yaw.to_radians() / 9.81 }
+            if speed_kmh[i] < GPS_ACC_MIN_KMH {
+                0.0
+            } else {
+                speed_kmh[i] / 3.6 * yaw.to_radians() / 9.81
+            }
         })
         .collect()
 }
@@ -422,7 +530,8 @@ pub fn lateral_g(times_ms: &[i64], speed_kmh: &[f64], yaw_rate_dps: &[f64]) -> V
 mod placeholder_tests {
     #[test]
     fn placeholder_samples_are_dropped() {
-        let (t, v) = super::without_placeholders(vec![0, 10, 20, 30], vec![1.0, f64::MAX, f64::NAN, 2.0]);
+        let (t, v) =
+            super::without_placeholders(vec![0, 10, 20, 30], vec![1.0, f64::MAX, f64::NAN, 2.0]);
         assert_eq!((t, v), (vec![0, 30], vec![1.0, 2.0]));
         let (t, v) = super::without_placeholders(vec![0, 10], vec![f64::MAX, f64::MAX]);
         assert!(t.is_empty() && v.is_empty());
@@ -435,7 +544,10 @@ mod lon_g_tests {
     fn steady_braking_reads_minus_one_g() {
         // Losing 9.81 m/s (35.3 km/h) per second, sampled at 25 Hz.
         let times: Vec<i64> = (0..50).map(|k| k * 40).collect();
-        let speeds: Vec<f64> = times.iter().map(|&t| 60.0 - 35.316 * t as f64 / 1000.0).collect();
+        let speeds: Vec<f64> = times
+            .iter()
+            .map(|&t| 60.0 - 35.316 * t as f64 / 1000.0)
+            .collect();
         let g = super::longitudinal_g(&times, &speeds);
         assert!((g[25] + 1.0).abs() < 0.01, "{}", g[25]);
     }

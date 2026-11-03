@@ -53,7 +53,11 @@ fn handle(msg: &Value) -> Option<Value> {
     let id = id?; // a notification ("notifications/initialized" and the like)
     let result = match method {
         "initialize" => {
-            let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL).to_string();
+            let version = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or(PROTOCOL)
+                .to_string();
             json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
@@ -67,12 +71,17 @@ fn handle(msg: &Value) -> Option<Value> {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             let outcome = if crate::settings::get().mcp {
-                crate::jobs::guard(&format!("MCP tool {name}"), || call(name, &args)).unwrap_or_else(|| Err("Mychronix hit an error reading that; it's in Mychronix's log.".into()))
+                crate::jobs::guard(&format!("MCP tool {name}"), || call(name, &args))
+                    .unwrap_or_else(|| {
+                        Err("Mychronix hit an error reading that; it's in Mychronix's log.".into())
+                    })
             } else {
                 Err("The Mychronix Performance Engineer is turned off. Turn it on in Mychronix, under Settings.".into())
             };
             match outcome {
-                Ok(v) => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }], "structuredContent": v, "isError": false }),
+                Ok(v) => {
+                    json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }], "structuredContent": v, "isError": false })
+                }
                 Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
             }
         }
@@ -199,7 +208,11 @@ fn session_id(lib: &Library, i: usize) -> String {
 }
 
 fn find_session(lib: &Library, id: &str) -> Result<usize, String> {
-    lib.sessions.iter().enumerate().position(|(i, _)| session_id(lib, i) == id).ok_or_else(|| format!("No session {id}; list_sessions gives the ids"))
+    lib.sessions
+        .iter()
+        .enumerate()
+        .position(|(i, _)| session_id(lib, i) == id)
+        .ok_or_else(|| format!("No session {id}; list_sessions gives the ids"))
 }
 
 fn date_text(d: Option<aim_xrk::summary::Date>) -> Option<String> {
@@ -207,11 +220,18 @@ fn date_text(d: Option<aim_xrk::summary::Date>) -> Option<String> {
 }
 
 /// Opens session `i`, with speed worked out from RPM when there's no GPS (as the app does).
-fn open(lib: &Library, profiles: &crate::profiles::Profiles, i: usize) -> Result<aim_xrk::Session, String> {
+fn open(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    i: usize,
+) -> Result<aim_xrk::Session, String> {
     let s = &lib.sessions[i];
-    let mut session = crate::jobs::open_session(&s.path).map_err(|e| format!("Couldn't open that session: {e}"))?;
+    let mut session = crate::jobs::open_session(&s.path)
+        .map_err(|e| format!("Couldn't open that session: {e}"))?;
     // Speed from RPM without GPS, as Analysis adds it.
-    let kart = s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id));
+    let kart = s
+        .kart
+        .and_then(|id| profiles.karts.iter().find(|k| k.id == id));
     crate::setup::add_speed_from_rpm(&mut session, lib, &crate::setup::Baselines::load(), i, kart);
     Ok(session)
 }
@@ -219,36 +239,80 @@ fn open(lib: &Library, profiles: &crate::profiles::Profiles, i: usize) -> Result
 /// The lap asked for (by number), else the best.
 fn pick_lap(session: &aim_xrk::Session, number: Option<i64>) -> Result<aim_xrk::Lap, String> {
     match number {
-        Some(n) => session.laps.iter().find(|l| l.number as i64 == n).copied().ok_or_else(|| format!("No lap {n}; this session has laps 1 to {}", session.laps.len())),
-        None => session.best_lap(aim_xrk::laps::MIN_LAP_MS).copied().ok_or_else(|| "This session has no complete timed lap".to_string()),
+        Some(n) => session
+            .laps
+            .iter()
+            .find(|l| l.number as i64 == n)
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "No lap {n}; this session has laps 1 to {}",
+                    session.laps.len()
+                )
+            }),
+        None => session
+            .best_lap(aim_xrk::laps::MIN_LAP_MS)
+            .copied()
+            .ok_or_else(|| "This session has no complete timed lap".to_string()),
     }
 }
 
 /// The MyChron's model ("MyChron 6"): as its summary says, else as learned
 /// when it was connected (a MyChron 5/6 summary doesn't name its model).
-fn logger_model(s: &crate::tracks::LocalSession, profiles: &crate::profiles::Profiles) -> Option<String> {
-    s.summary.model.clone().or_else(|| profiles.loggers.get(&s.logger).map(|l| l.model.clone()).filter(|m| !m.is_empty()))
+fn logger_model(
+    s: &crate::tracks::LocalSession,
+    profiles: &crate::profiles::Profiles,
+) -> Option<String> {
+    s.summary.model.clone().or_else(|| {
+        profiles
+            .loggers
+            .get(&s.logger)
+            .map(|l| l.model.clone())
+            .filter(|m| !m.is_empty())
+    })
 }
 
-fn kart_name(s: &crate::tracks::LocalSession, profiles: &crate::profiles::Profiles) -> Option<String> {
-    s.kart.and_then(|id| profiles.karts.iter().find(|k| k.id == id)).map(|k| k.name.clone())
+fn kart_name(
+    s: &crate::tracks::LocalSession,
+    profiles: &crate::profiles::Profiles,
+) -> Option<String> {
+    s.kart
+        .and_then(|id| profiles.karts.iter().find(|k| k.id == id))
+        .map(|k| k.name.clone())
 }
 
 // ---------------------------------------------------------------------------
 // Tools
 
-fn list_sessions(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let want = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_lowercase).filter(|s| !s.is_empty());
-    let (driver, track, since, until) = (want("driver"), want("track"), want("since"), want("until"));
-    let timed_only = args.get("timed_only").and_then(Value::as_bool).unwrap_or(false);
+fn list_sessions(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let want = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::to_lowercase)
+            .filter(|s| !s.is_empty())
+    };
+    let (driver, track, since, until) =
+        (want("driver"), want("track"), want("since"), want("until"));
+    let timed_only = args
+        .get("timed_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(40) as usize;
     let mut rows: Vec<(String, Value)> = Vec::new();
     for (i, s) in lib.sessions.iter().enumerate() {
         let d = s.driver(profiles);
         let t = lib.sessions[i].track_name(&lib.tracks).unwrap_or_default();
         let date = date_text(s.summary.date).unwrap_or_default();
-        if driver.as_ref().is_some_and(|w| !d.to_lowercase().contains(w))
-            || track.as_ref().is_some_and(|w| !t.to_lowercase().contains(w))
+        if driver
+            .as_ref()
+            .is_some_and(|w| !d.to_lowercase().contains(w))
+            || track
+                .as_ref()
+                .is_some_and(|w| !t.to_lowercase().contains(w))
             || since.as_ref().is_some_and(|w| date.as_str() < w.as_str())
             || until.as_ref().is_some_and(|w| date.as_str() > w.as_str())
             || (timed_only && s.summary.best_lap_ms.is_none())
@@ -275,24 +339,50 @@ fn list_sessions(lib: &Library, profiles: &crate::profiles::Profiles, args: &Val
     }
     rows.sort_by(|a, b| b.0.cmp(&a.0));
     let total = rows.len();
-    Ok(json!({ "sessions": rows.into_iter().take(limit).map(|r| r.1).collect::<Vec<_>>(), "matching": total }))
+    Ok(
+        json!({ "sessions": rows.into_iter().take(limit).map(|r| r.1).collect::<Vec<_>>(), "matching": total }),
+    )
 }
 
-fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let i = find_session(lib, args.get("session").and_then(Value::as_str).unwrap_or(""))?;
+fn get_session(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let i = find_session(
+        lib,
+        args.get("session").and_then(Value::as_str).unwrap_or(""),
+    )?;
     let s = &lib.sessions[i];
     let session = open(lib, profiles, i)?;
-    let slow = aim_xrk::laps::racing(&session).into_iter().map(|r| !r).collect::<Vec<_>>();
+    let slow = aim_xrk::laps::racing(&session)
+        .into_iter()
+        .map(|r| !r)
+        .collect::<Vec<_>>();
     let best = session.best_lap(aim_xrk::laps::MIN_LAP_MS).copied();
     let peak = |name: &str, lap: &aim_xrk::Lap| {
         let c = crate::report::channel(&session, name)?;
-        let (lo, hi) = (c.times_ms.partition_point(|&t| t < lap.start_ms), c.times_ms.partition_point(|&t| t <= lap.end_ms));
-        c.values[lo..hi].iter().copied().filter(|v| v.is_finite()).reduce(f64::max)
+        let (lo, hi) = (
+            c.times_ms.partition_point(|&t| t < lap.start_ms),
+            c.times_ms.partition_point(|&t| t <= lap.end_ms),
+        );
+        c.values[lo..hi]
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .reduce(f64::max)
     };
     let low = |name: &str, lap: &aim_xrk::Lap| {
         let c = crate::report::channel(&session, name)?;
-        let (lo, hi) = (c.times_ms.partition_point(|&t| t < lap.start_ms), c.times_ms.partition_point(|&t| t <= lap.end_ms));
-        c.values[lo..hi].iter().copied().filter(|v| v.is_finite() && *v > 1.0).reduce(f64::min)
+        let (lo, hi) = (
+            c.times_ms.partition_point(|&t| t < lap.start_ms),
+            c.times_ms.partition_point(|&t| t <= lap.end_ms),
+        );
+        c.values[lo..hi]
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite() && *v > 1.0)
+            .reduce(f64::min)
     };
     let laps: Vec<Value> = session
         .laps
@@ -320,8 +410,15 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
             aim_xrk::notes::Note::TempTrend { channel, from, to, per_lap, .. } => json!({ "temperature_trend": channel, "from_c": round(from, 0), "to_c": round(to, 0), "per_lap_c": round(per_lap, 1) }),
         })
         .collect();
-    let setup = crate::setup::resolve(lib, &crate::setup::Baselines::load()).get(i).map(|r| json!({ "setup": r.setup, "changed_from_previous": r.changes }));
-    let channels: Vec<&str> = session.channels.iter().filter(|c| c.values.len() > 1).map(|c| c.name.as_str()).collect();
+    let setup = crate::setup::resolve(lib, &crate::setup::Baselines::load())
+        .get(i)
+        .map(|r| json!({ "setup": r.setup, "changed_from_previous": r.changes }));
+    let channels: Vec<&str> = session
+        .channels
+        .iter()
+        .filter(|c| c.values.len() > 1)
+        .map(|c| c.name.as_str())
+        .collect();
     Ok(json!({
         "session": session_id(lib, i),
         "date": date_text(s.summary.date),
@@ -348,22 +445,45 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
 }
 
 /// The corner model for session `i`, and the trace of `lap` in it.
-fn corners_of(lib: &Library, profiles: &crate::profiles::Profiles, i: usize, lap: Option<i64>) -> Result<(aim_xrk::Session, CornerModel, usize), String> {
+fn corners_of(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    i: usize,
+    lap: Option<i64>,
+) -> Result<(aim_xrk::Session, CornerModel, usize), String> {
     let session = open(lib, profiles, i)?;
     let gaps = aim_xrk::checks::recording_gaps(&session);
-    let best = session.reference_lap(aim_xrk::laps::MIN_LAP_MS, &gaps).copied().ok_or("This session has no complete timed lap")?;
-    let counts: Vec<bool> = aim_xrk::laps::racing(&session).into_iter().map(|r| !r).collect::<Vec<_>>().into_iter().zip(&session.laps).map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps)).collect();
-    let model = CornerModel::build(&session, &best, &counts).ok_or("Corners need GPS (this session has none, or no corner to brake for)")?;
+    let best = session
+        .reference_lap(aim_xrk::laps::MIN_LAP_MS, &gaps)
+        .copied()
+        .ok_or("This session has no complete timed lap")?;
+    let counts: Vec<bool> = aim_xrk::laps::racing(&session)
+        .into_iter()
+        .map(|r| !r)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .zip(&session.laps)
+        .map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps))
+        .collect();
+    let model = CornerModel::build(&session, &best, &counts)
+        .ok_or("Corners need GPS (this session has none, or no corner to brake for)")?;
     let lap = pick_lap(&session, lap)?;
     let index = session.laps.iter().position(|l| *l == lap).unwrap_or(0);
-    let trace = model.trace_of(index).ok_or_else(|| format!("Lap {} doesn't go all the way round (an out-lap or in-lap)", lap.number))?;
+    let trace = model.trace_of(index).ok_or_else(|| {
+        format!(
+            "Lap {} doesn't go all the way round (an out-lap or in-lap)",
+            lap.number
+        )
+    })?;
     Ok((session, model, trace))
 }
 
 fn corner_row(model: &CornerModel, trace: usize, k: usize) -> Value {
     let a = &model.stats[trace][k];
     let b = &model.stats[model.best_of[k]][k];
-    let share = |s: Slowing| a.slowing.iter().filter(|&&x| x == s).count() as f64 * crate::corner_model::STEP_M;
+    let share = |s: Slowing| {
+        a.slowing.iter().filter(|&&x| x == s).count() as f64 * crate::corner_model::STEP_M
+    };
     json!({
         "corner": k + 1,
         "time_s": round(a.time_s, 3),
@@ -383,9 +503,17 @@ fn corner_row(model: &CornerModel, trace: usize, k: usize) -> Value {
     })
 }
 
-fn get_corners(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let i = find_session(lib, args.get("session").and_then(Value::as_str).unwrap_or(""))?;
-    let (session, model, trace) = corners_of(lib, profiles, i, args.get("lap").and_then(Value::as_i64))?;
+fn get_corners(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let i = find_session(
+        lib,
+        args.get("session").and_then(Value::as_str).unwrap_or(""),
+    )?;
+    let (session, model, trace) =
+        corners_of(lib, profiles, i, args.get("lap").and_then(Value::as_i64))?;
     let lap_s: f64 = model.stats[trace].iter().map(|s| s.time_s).sum();
     Ok(json!({
         "session": session_id(lib, i),
@@ -402,14 +530,26 @@ fn get_corners(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
     }))
 }
 
-fn compare_laps(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let i = find_session(lib, args.get("session").and_then(Value::as_str).unwrap_or(""))?;
+fn compare_laps(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let i = find_session(
+        lib,
+        args.get("session").and_then(Value::as_str).unwrap_or(""),
+    )?;
     let j = match args.get("other_session").and_then(Value::as_str) {
         Some(id) => find_session(lib, id)?,
         None => i,
     };
     let (_, a_model, a) = corners_of(lib, profiles, i, args.get("lap").and_then(Value::as_i64))?;
-    let (_, b_model, b) = corners_of(lib, profiles, j, args.get("other_lap").and_then(Value::as_i64))?;
+    let (_, b_model, b) = corners_of(
+        lib,
+        profiles,
+        j,
+        args.get("other_lap").and_then(Value::as_i64),
+    )?;
     if a_model.segments.len() != b_model.segments.len() {
         return Err(format!(
             "These laps don't have the same corners ({} against {}): different tracks or layouts can't be compared corner by corner.",
@@ -445,14 +585,26 @@ fn compare_laps(lib: &Library, profiles: &crate::profiles::Profiles, args: &Valu
     }))
 }
 
-fn get_channel(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let i = find_session(lib, args.get("session").and_then(Value::as_str).unwrap_or(""))?;
+fn get_channel(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let i = find_session(
+        lib,
+        args.get("session").and_then(Value::as_str).unwrap_or(""),
+    )?;
     let session = open(lib, profiles, i)?;
     let name = args.get("channel").and_then(Value::as_str).unwrap_or("");
-    let mut channel = crate::report::channel(&session, name).cloned().ok_or_else(|| format!("No channel {name}; get_session lists this session's channels"))?;
+    let mut channel = crate::report::channel(&session, name)
+        .cloned()
+        .ok_or_else(|| format!("No channel {name}; get_session lists this session's channels"))?;
     crate::units::convert_channel(&mut channel);
     let lap = pick_lap(&session, args.get("lap").and_then(Value::as_i64))?;
-    let (lo, hi) = (channel.times_ms.partition_point(|&t| t < lap.start_ms), channel.times_ms.partition_point(|&t| t <= lap.end_ms));
+    let (lo, hi) = (
+        channel.times_ms.partition_point(|&t| t < lap.start_ms),
+        channel.times_ms.partition_point(|&t| t <= lap.end_ms),
+    );
     if hi <= lo {
         return Err("That channel has no readings on that lap".into());
     }
@@ -480,15 +632,36 @@ fn get_channel(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
     }))
 }
 
-fn race_days(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value) -> Result<Value, String> {
-    let want = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_lowercase).filter(|s| !s.is_empty());
+fn race_days(
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    args: &Value,
+) -> Result<Value, String> {
+    let want = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::to_lowercase)
+            .filter(|s| !s.is_empty())
+    };
     let (driver, track) = (want("driver"), want("track"));
     // (date, track, driver) -> (sessions, laps, best ms)
     type Day = (String, String, String);
     let mut days: std::collections::BTreeMap<Day, (usize, u32, Option<u64>)> = Default::default();
     for (i, s) in lib.sessions.iter().enumerate() {
-        let (Some(date), d, t) = (date_text(s.summary.date), s.driver(profiles), lib.sessions[i].track_name(&lib.tracks).unwrap_or_default()) else { continue };
-        if driver.as_ref().is_some_and(|w| !d.to_lowercase().contains(w)) || track.as_ref().is_some_and(|w| !t.to_lowercase().contains(w)) {
+        let (Some(date), d, t) = (
+            date_text(s.summary.date),
+            s.driver(profiles),
+            lib.sessions[i].track_name(&lib.tracks).unwrap_or_default(),
+        ) else {
+            continue;
+        };
+        if driver
+            .as_ref()
+            .is_some_and(|w| !d.to_lowercase().contains(w))
+            || track
+                .as_ref()
+                .is_some_and(|w| !t.to_lowercase().contains(w))
+        {
             continue;
         }
         let e = days.entry((date, t, d)).or_default();
@@ -515,10 +688,30 @@ mod tests {
         assert_eq!(init["result"]["serverInfo"]["name"], "mychronix");
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
         // Notifications get no reply.
-        assert!(handle(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).is_none());
+        assert!(
+            handle(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).is_none()
+        );
         let list = handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).unwrap();
-        let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["list_sessions", "get_session", "get_corners", "compare_laps", "get_channel", "race_days"]);
-        assert_eq!(handle(&json!({ "jsonrpc": "2.0", "id": 3, "method": "nope" })).unwrap()["error"]["code"], -32601);
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "list_sessions",
+                "get_session",
+                "get_corners",
+                "compare_laps",
+                "get_channel",
+                "race_days"
+            ]
+        );
+        assert_eq!(
+            handle(&json!({ "jsonrpc": "2.0", "id": 3, "method": "nope" })).unwrap()["error"]["code"],
+            -32601
+        );
     }
 }

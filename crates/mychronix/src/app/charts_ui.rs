@@ -30,7 +30,13 @@ impl Default for ChartsState {
 }
 
 /// Channels worth a one-click pick, when the session has them.
-const QUICK: [&str; 5] = ["RPM", "GPS Speed", "Exhaust Temp", "Forward g", "GPS LatAcc"];
+const QUICK: [&str; 5] = [
+    "RPM",
+    "GPS Speed",
+    "Exhaust Temp",
+    "Forward g",
+    "GPS LatAcc",
+];
 
 impl App {
     /// The time windows the charts cover: the chosen lap, or every racing lap.
@@ -39,7 +45,13 @@ impl App {
             Some(l) => (vec![(l.start_ms, l.end_ms)], format!("Lap {}", l.number)),
             None => {
                 let slow = slow_laps(session);
-                let w: Vec<(i64, i64)> = session.laps.iter().zip(&slow).filter(|(_, s)| !**s).map(|(l, _)| (l.start_ms, l.end_ms)).collect();
+                let w: Vec<(i64, i64)> = session
+                    .laps
+                    .iter()
+                    .zip(&slow)
+                    .filter(|(_, s)| !**s)
+                    .map(|(l, _)| (l.start_ms, l.end_ms))
+                    .collect();
                 let label = format!("{} racing laps", w.len());
                 (w, label)
             }
@@ -51,14 +63,21 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             if quick {
-                for name in QUICK.iter().filter(|n| session.channels.iter().any(|c| c.name == **n)) {
+                for name in QUICK
+                    .iter()
+                    .filter(|n| session.channels.iter().any(|c| c.name == **n))
+                {
                     if chip(ui, short_name(name), value == name).clicked() {
                         *value = name.to_string();
                     }
                 }
             }
             egui::ComboBox::from_id_salt(id)
-                .selected_text(if quick && QUICK.contains(&value.as_str()) { "Other…".to_string() } else { short_name(value).to_string() })
+                .selected_text(if quick && QUICK.contains(&value.as_str()) {
+                    "Other…".to_string()
+                } else {
+                    short_name(value).to_string()
+                })
                 .width(180.0)
                 .show_ui(ui, |ui| {
                     for c in session.channels.iter().filter(|c| !is_dead(c)) {
@@ -85,7 +104,10 @@ impl App {
                 st.hist_percent = false;
             }
             ui.add_space(12.0);
-            if chip(ui, "Overlay best lap", st.hist_best).on_hover_text("Outline the session's best lap for comparison").clicked() {
+            if chip(ui, "Overlay best lap", st.hist_best)
+                .on_hover_text("Outline the session's best lap for comparison")
+                .clicked()
+            {
                 st.hist_best = !st.hist_best;
             }
         });
@@ -122,28 +144,65 @@ impl App {
         let bins = (((hi - start) / bin).floor() as usize + 1).max(1);
         let to_bars = |h: Vec<f64>| -> Vec<f64> {
             let total: f64 = h.iter().sum::<f64>().max(1e-9);
-            if st.hist_percent { h.iter().map(|s| s / total * 100.0).collect() } else { h }
+            if st.hist_percent {
+                h.iter().map(|s| s / total * 100.0).collect()
+            } else {
+                h
+            }
         };
         let main = to_bars(charts::histogram(c, &windows, start, bin, bins));
         let overlay = (st.hist_best && self.lap.and_then(|i| session.laps.get(i)).copied() != best)
-            .then(|| best_window.as_ref().map(|w| to_bars(charts::histogram(c, w, start, bin, bins))))
+            .then(|| {
+                best_window
+                    .as_ref()
+                    .map(|w| to_bars(charts::histogram(c, w, start, bin, bins)))
+            })
             .flatten();
         let units = pretty_units(&c.units).to_string();
         // The most common band and the time near the top of the range.
-        let top = main.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map(|(k, _)| start + bin * (k as f64 + 0.5));
+        let top = main
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(k, _)| start + bin * (k as f64 + 0.5));
         let decimals = if bin < 1.0 { 2 } else { 0 };
         graph_card(ui, (ui.available_height() - 4.0).max(260.0), |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{} · {scope}", short_name(&c.name))).font(medium(14.5)).color(TEXT));
-                ui.label(RichText::new(format!("{} by {units}, bands of {bin} {units}", if st.hist_percent { "% of time" } else { "seconds" })).size(12.5).color(DIM));
+                ui.label(
+                    RichText::new(format!("{} · {scope}", short_name(&c.name)))
+                        .font(medium(14.5))
+                        .color(TEXT),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{} by {units}, bands of {bin} {units}",
+                        if st.hist_percent {
+                            "% of time"
+                        } else {
+                            "seconds"
+                        }
+                    ))
+                    .size(12.5)
+                    .color(DIM),
+                );
                 if let Some(t) = top {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{t:.decimals$} {units}")).font(semibold(14.0)).color(TEXT));
+                        ui.label(
+                            RichText::new(format!("{t:.decimals$} {units}"))
+                                .font(semibold(14.0))
+                                .color(TEXT),
+                        );
                         ui.label(RichText::new("Most time around").size(12.5).color(DIM));
                     });
                 }
             });
-            let bars: Vec<egui_plot::Bar> = main.iter().enumerate().map(|(k, &v)| egui_plot::Bar::new(start + bin * (k as f64 + 0.5), v).width(bin * 0.86)).collect();
+            let bars: Vec<egui_plot::Bar> = main
+                .iter()
+                .enumerate()
+                .map(|(k, &v)| {
+                    egui_plot::Bar::new(start + bin * (k as f64 + 0.5), v).width(bin * 0.86)
+                })
+                .collect();
             if super::is_calculated(&c.name) {
                 super::calculated_note(ui);
             }
@@ -164,9 +223,18 @@ impl App {
                         let pts: Vec<[f64; 2]> = o
                             .iter()
                             .enumerate()
-                            .flat_map(|(k, &v)| [[start + bin * k as f64, v], [start + bin * (k as f64 + 1.0), v]])
+                            .flat_map(|(k, &v)| {
+                                [
+                                    [start + bin * k as f64, v],
+                                    [start + bin * (k as f64 + 1.0), v],
+                                ]
+                            })
                             .collect();
-                        plot.line(Line::new(format!("Best lap {}", b.number), PlotPoints::from(pts)).color(theme::GOOD).width(2.0));
+                        plot.line(
+                            Line::new(format!("Best lap {}", b.number), PlotPoints::from(pts))
+                                .color(theme::GOOD)
+                                .width(2.0),
+                        );
                     }
                 });
         });
@@ -181,7 +249,10 @@ impl App {
         let has = |n: &str| session.channels.iter().any(|c| c.name == n && !is_dead(c));
         // The grip circle: cornering across, braking and speeding up up — the
         // IMU's forward g when the session has it, else the GPS's.
-        let grip_y = ["Forward g", "GPS LonAcc"].into_iter().find(|n| has(n)).filter(|_| has("GPS LatAcc"));
+        let grip_y = ["Forward g", "GPS LonAcc"]
+            .into_iter()
+            .find(|n| has(n))
+            .filter(|_| has("GPS LatAcc"));
         if st.x.is_empty() || st.y.is_empty() {
             match grip_y.filter(|&y| y == "Forward g") {
                 Some(y) => {
@@ -225,7 +296,11 @@ impl App {
             ui.label(RichText::new("Color by").size(12.5).color(DIM));
             let mut color = st.color.clone().unwrap_or_default();
             egui::ComboBox::from_id_salt("scatter_color")
-                .selected_text(if color.is_empty() { "Nothing".to_string() } else { short_name(&color).to_string() })
+                .selected_text(if color.is_empty() {
+                    "Nothing".to_string()
+                } else {
+                    short_name(&color).to_string()
+                })
                 .width(180.0)
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut color, String::new(), "Nothing");
@@ -250,41 +325,99 @@ impl App {
         // percentile, so a lone bump doesn't set it).
         let limit = gg
             .then(|| {
-                let mut r: Vec<f64> = pts.iter().map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt()).filter(|r| *r > 0.2).collect();
+                let mut r: Vec<f64> = pts
+                    .iter()
+                    .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
+                    .filter(|r| *r > 0.2)
+                    .collect();
                 r.sort_by(f64::total_cmp);
                 (r.len() > 50).then(|| r[r.len() * 98 / 100])
             })
             .flatten();
         // The gearing on RPM vs speed: rpm = (rpm per unit of speed) × speed.
         let gearing = (st.x == "GPS Speed" && st.y == "RPM")
-            .then(|| setup.as_ref().and_then(|s| s.expected_rpm_per_kmh().map(|e| (e / crate::units::speed(1.0), format!("{}/{}", s.drive_teeth.trim(), s.driven_teeth.trim())))))
+            .then(|| {
+                setup.as_ref().and_then(|s| {
+                    s.expected_rpm_per_kmh().map(|e| {
+                        (
+                            e / crate::units::speed(1.0),
+                            format!("{}/{}", s.drive_teeth.trim(), s.driven_teeth.trim()),
+                        )
+                    })
+                })
+            })
             .flatten();
-        let (cmin, cmax) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[2]), b.max(p[2])));
-        let (xu, yu) = (pretty_units(&x.units).to_string(), pretty_units(&y.units).to_string());
+        let (cmin, cmax) = pts
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[2]), b.max(p[2])));
+        let (xu, yu) = (
+            pretty_units(&x.units).to_string(),
+            pretty_units(&y.units).to_string(),
+        );
         graph_card(ui, (ui.available_height() - 4.0).max(300.0), |ui| {
             ui.horizontal(|ui| {
                 if gg {
-                    ui.label(RichText::new(format!("Grip circle · {scope}")).font(medium(14.5)).color(TEXT));
-                    ui.label(RichText::new("down is braking, up is speeding up, sideways is cornering").size(12.5).color(DIM));
+                    ui.label(
+                        RichText::new(format!("Grip circle · {scope}"))
+                            .font(medium(14.5))
+                            .color(TEXT),
+                    );
+                    ui.label(
+                        RichText::new("down is braking, up is speeding up, sideways is cornering")
+                            .size(12.5)
+                            .color(DIM),
+                    );
                     if let Some(l) = limit {
-                        ui.label(RichText::new(format!("·  grip reached {l:.2} g")).size(12.5).color(SECONDARY));
+                        ui.label(
+                            RichText::new(format!("·  grip reached {l:.2} g"))
+                                .size(12.5)
+                                .color(SECONDARY),
+                        );
                     }
                 } else {
-                    ui.label(RichText::new(format!("{} against {} · {scope}", short_name(&y.name), short_name(&x.name))).font(medium(14.5)).color(TEXT));
-                    ui.label(RichText::new(format!("{yu} up, {xu} across")).size(12.5).color(DIM));
+                    ui.label(
+                        RichText::new(format!(
+                            "{} against {} · {scope}",
+                            short_name(&y.name),
+                            short_name(&x.name)
+                        ))
+                        .font(medium(14.5))
+                        .color(TEXT),
+                    );
+                    ui.label(
+                        RichText::new(format!("{yu} up, {xu} across"))
+                            .size(12.5)
+                            .color(DIM),
+                    );
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let (Some(c), true) = (color, cmax > cmin) {
                         let unit = pretty_units(&c.units);
-                        ui.label(RichText::new(format!("{cmax:.0} {unit}")).size(12.0).color(DIM));
+                        ui.label(
+                            RichText::new(format!("{cmax:.0} {unit}"))
+                                .size(12.0)
+                                .color(DIM),
+                        );
                         let (bar, _) = ui.allocate_exact_size(vec2(120.0, 8.0), Sense::hover());
                         for j in 0..30 {
-                            let r = Rect::from_min_size(pos2(bar.left() + bar.width() * j as f32 / 30.0, bar.top()), vec2(bar.width() / 30.0 + 0.5, bar.height()));
-                            ui.painter().rect_filled(r, 0.0, speed_color(j as f32 / 29.0));
+                            let r = Rect::from_min_size(
+                                pos2(bar.left() + bar.width() * j as f32 / 30.0, bar.top()),
+                                vec2(bar.width() / 30.0 + 0.5, bar.height()),
+                            );
+                            ui.painter()
+                                .rect_filled(r, 0.0, speed_color(j as f32 / 29.0));
                         }
-                        ui.label(RichText::new(format!("{} {cmin:.0}", short_name(&c.name))).size(12.0).color(DIM));
+                        ui.label(
+                            RichText::new(format!("{} {cmin:.0}", short_name(&c.name)))
+                                .size(12.0)
+                                .color(DIM),
+                        );
                     } else if let Some((_, g)) = &gearing {
-                        ui.label(RichText::new(format!("Line: {g} gearing from the setup sheet")).size(12.0).color(DIM));
+                        ui.label(
+                            RichText::new(format!("Line: {g} gearing from the setup sheet"))
+                                .size(12.0)
+                                .color(DIM),
+                        );
                     }
                 });
             });
@@ -315,7 +448,14 @@ impl App {
             }
             // The grip circle sits square in the middle of the card; anything else fills it.
             let area = ui.available_rect_before_wrap();
-            let area = if gg { Rect::from_center_size(area.center(), vec2(area.height().min(area.width()), area.height())) } else { area };
+            let area = if gg {
+                Rect::from_center_size(
+                    area.center(),
+                    vec2(area.height().min(area.width()), area.height()),
+                )
+            } else {
+                area
+            };
             let mut plot_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
             ui.advance_cursor_after_rect(area);
             let mut edge: Option<Vec<[f64; 2]>> = None;
@@ -323,18 +463,26 @@ impl App {
                 if gg {
                     // Rings at 0.5, 1 and 1.5 g, as RaceStudio's circular grid.
                     for r in [0.5, 1.0, 1.5] {
-                        let ring: Vec<[f64; 2]> = (0..=72).map(|k| {
-                            let a = std::f64::consts::TAU * k as f64 / 72.0;
-                            [r * a.cos(), r * a.sin()]
-                        }).collect();
-                        plot.line(Line::new(format!("{r} g"), PlotPoints::from(ring)).color(GRID).width(1.0));
+                        let ring: Vec<[f64; 2]> = (0..=72)
+                            .map(|k| {
+                                let a = std::f64::consts::TAU * k as f64 / 72.0;
+                                [r * a.cos(), r * a.sin()]
+                            })
+                            .collect();
+                        plot.line(
+                            Line::new(format!("{r} g"), PlotPoints::from(ring))
+                                .color(GRID)
+                                .width(1.0),
+                        );
                     }
                     // The grip reached, drawn over the points so it reads as the edge.
                     if let Some(l) = limit {
-                        let ring: Vec<[f64; 2]> = (0..=96).map(|k| {
-                            let a = std::f64::consts::TAU * k as f64 / 96.0;
-                            [l * a.cos(), l * a.sin()]
-                        }).collect();
+                        let ring: Vec<[f64; 2]> = (0..=96)
+                            .map(|k| {
+                                let a = std::f64::consts::TAU * k as f64 / 96.0;
+                                [l * a.cos(), l * a.sin()]
+                            })
+                            .collect();
                         edge = Some(ring);
                     }
                 }
@@ -344,26 +492,52 @@ impl App {
                         const BANDS: usize = 12;
                         let mut groups: Vec<Vec<[f64; 2]>> = vec![Vec::new(); BANDS];
                         for p in &pts {
-                            let k = (((p[2] - cmin) / (cmax - cmin)) * (BANDS - 1) as f64).round() as usize;
+                            let k = (((p[2] - cmin) / (cmax - cmin)) * (BANDS - 1) as f64).round()
+                                as usize;
                             groups[k.min(BANDS - 1)].push([p[0], p[1]]);
                         }
-                        for (k, g) in groups.into_iter().enumerate().filter(|(_, g)| !g.is_empty()) {
-                            plot.points(egui_plot::Points::new(format!("band {k}"), PlotPoints::from(g)).color(speed_color(k as f32 / (BANDS - 1) as f32)).radius(1.8));
+                        for (k, g) in groups
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, g)| !g.is_empty())
+                        {
+                            plot.points(
+                                egui_plot::Points::new(format!("band {k}"), PlotPoints::from(g))
+                                    .color(speed_color(k as f32 / (BANDS - 1) as f32))
+                                    .radius(1.8),
+                            );
                         }
                     }
                     _ => {
                         let xy: Vec<[f64; 2]> = pts.iter().map(|p| [p[0], p[1]]).collect();
-                        plot.points(egui_plot::Points::new("samples", PlotPoints::from(xy)).color(SERIES[0].gamma_multiply(0.7)).radius(1.8));
+                        plot.points(
+                            egui_plot::Points::new("samples", PlotPoints::from(xy))
+                                .color(SERIES[0].gamma_multiply(0.7))
+                                .radius(1.8),
+                        );
                     }
                 }
                 if let Some(ring) = edge.take() {
-                    plot.line(Line::new("Grip reached", PlotPoints::from(ring)).color(TEXT.gamma_multiply(0.55)).width(1.5));
+                    plot.line(
+                        Line::new("Grip reached", PlotPoints::from(ring))
+                            .color(TEXT.gamma_multiply(0.55))
+                            .width(1.5),
+                    );
                 }
                 if let Some((per, label)) = &gearing {
                     // Across the data only, so the plot isn't stretched down to 0.
-                    let (lo, hi) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
+                    let (lo, hi) = pts
+                        .iter()
+                        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
                     if lo < hi {
-                        plot.line(Line::new(format!("{label} gearing"), PlotPoints::from(vec![[lo, per * lo], [hi, per * hi]])).color(theme::GOOD).width(2.0));
+                        plot.line(
+                            Line::new(
+                                format!("{label} gearing"),
+                                PlotPoints::from(vec![[lo, per * lo], [hi, per * hi]]),
+                            )
+                            .color(theme::GOOD)
+                            .width(2.0),
+                        );
                     }
                 }
             });
