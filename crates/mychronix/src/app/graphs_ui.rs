@@ -5,36 +5,39 @@ use super::*;
 
 impl App {
     pub(super) fn channel_list(&mut self, ui: &mut Ui, session: &Session, start_ms: i64) {
-        if !self.collapsed_init {
-            self.collapsed_init = true;
-            self.collapsed_groups.insert("Lap timing");
-            self.collapsed_groups.insert("More channels");
+        if !self.analysis.collapsed_init {
+            self.analysis.collapsed_init = true;
+            self.analysis.collapsed_groups.insert("Lap timing");
+            self.analysis.collapsed_groups.insert("More channels");
             // MYCHRONIX_CHANNEL_SEARCH pre-fills the search (for screenshots).
             if let Some(q) = &crate::hooks::get().channel_search {
-                self.filter = q.clone();
+                self.analysis.filter = q.clone();
             }
         }
         let live = session.channels.iter().filter(|c| !is_dead(c)).count();
         section_header(
             ui,
             "Channels",
-            &format!("{} graphed · {live}", self.selected.len()),
+            &format!("{} graphed · {live}", self.analysis.selected.len()),
         );
-        search_field(ui, &mut self.filter, "Search channels");
+        search_field(ui, &mut self.analysis.filter, "Search channels");
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             for (view, label) in [(ChannelView::All, "All"), (ChannelView::Graphed, "Graphed")] {
-                if chip(ui, label, self.channel_view == view).clicked() {
-                    self.channel_view = view;
+                if chip(ui, label, self.analysis.channel_view == view).clicked() {
+                    self.analysis.channel_view = view;
                 }
             }
         });
         ui.add_space(6.0);
 
-        let needle = self.filter.to_lowercase();
-        let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
-        let full = self.selected.len() >= SERIES.len();
+        let needle = self.analysis.filter.to_lowercase();
+        let cursor_ms = self
+            .analysis
+            .cursor_s
+            .map(|s| start_ms + (s * 1000.0) as i64);
+        let full = self.analysis.selected.len() >= SERIES.len();
 
         egui::ScrollArea::vertical()
             .id_salt("channels")
@@ -54,8 +57,8 @@ impl App {
                             needle.is_empty() || c.name.to_lowercase().contains(&needle)
                         })
                         .filter(|(i, _)| {
-                            self.channel_view != ChannelView::Graphed
-                                || self.selected.contains_key(i)
+                            self.analysis.channel_view != ChannelView::Graphed
+                                || self.analysis.selected.contains_key(i)
                         })
                         .map(|(i, _)| i)
                         .collect();
@@ -64,11 +67,11 @@ impl App {
                     }
                     // Searching or showing graphed channels opens every group.
                     let open = !needle.is_empty()
-                        || self.channel_view == ChannelView::Graphed
-                        || !self.collapsed_groups.contains(group);
+                        || self.analysis.channel_view == ChannelView::Graphed
+                        || !self.analysis.collapsed_groups.contains(group);
                     let graphed = members
                         .iter()
-                        .filter(|i| self.selected.contains_key(i))
+                        .filter(|i| self.analysis.selected.contains_key(i))
                         .count();
                     let header = ui.horizontal(|ui| {
                         ui.add(
@@ -104,7 +107,7 @@ impl App {
                     }
                     for i in members {
                         let c = &session.channels[i];
-                        let slot = self.selected.get(&i).copied();
+                        let slot = self.analysis.selected.get(&i).copied();
                         let response = row(ui, false, |ui| {
                             swatch(ui, slot.map(|s| SERIES[s]));
                             ui.add_space(2.0);
@@ -131,21 +134,21 @@ impl App {
                         });
                         if response.clicked() {
                             if slot.is_some() {
-                                self.selected.remove(&i);
-                                self.graph_order.retain(|&c| c != i);
+                                self.analysis.selected.remove(&i);
+                                self.analysis.graph_order.retain(|&c| c != i);
                             } else if !full {
                                 self.select(i);
                                 // Show the new graph, which goes at the bottom of the stack.
-                                self.scroll_to_graph = Some(i);
+                                self.analysis.scroll_to_graph = Some(i);
                             }
                         }
                     }
                     ui.add_space(6.0);
                 }
                 if let Some(g) = toggle_group
-                    && !self.collapsed_groups.remove(g)
+                    && !self.analysis.collapsed_groups.remove(g)
                 {
-                    self.collapsed_groups.insert(g);
+                    self.analysis.collapsed_groups.insert(g);
                 }
             });
     }
@@ -163,11 +166,12 @@ impl App {
         end_ms: i64,
     ) {
         // A view that can't work for this session (no GPS) falls back to Graphs.
-        if analysis_ui::view_unavailable(session, self.analysis_view.rail_item()).is_some() {
-            self.analysis_view = AnalysisView::Session;
+        if analysis_ui::view_unavailable(session, self.analysis.analysis_view.rail_item()).is_some()
+        {
+            self.analysis.analysis_view = AnalysisView::Session;
         }
         let pill = self.session_pill(ui, session);
-        self.pill_rect = Some(pill);
+        self.analysis.pill_rect = Some(pill);
         if let Some(i) = self.path.as_ref().and_then(|p| {
             self.library
                 .as_ref()?
@@ -178,7 +182,7 @@ impl App {
             self.want_weather(&[i], &ui.ctx().clone());
         }
         ui.add_space(14.0);
-        let title = match self.analysis_view {
+        let title = match self.analysis.analysis_view {
             AnalysisView::Report => "Laps",
             AnalysisView::Splits => "Splits",
             AnalysisView::Corners => "Corners",
@@ -187,7 +191,7 @@ impl App {
             AnalysisView::Session | AnalysisView::Histogram | AnalysisView::Scatter => "Graphs",
         };
         // The map takes the whole view; everything else gets a title.
-        if self.analysis_view != AnalysisView::Map {
+        if self.analysis.analysis_view != AnalysisView::Map {
             self.view_title(ui, title);
             ui.add_space(12.0);
         }
@@ -203,7 +207,7 @@ impl App {
         start_ms: i64,
         end_ms: i64,
     ) {
-        match self.analysis_view {
+        match self.analysis.analysis_view {
             AnalysisView::Map => {
                 self.map_view(ui, session);
                 return;
@@ -268,7 +272,7 @@ impl App {
     }
 
     pub(super) fn graphs(&mut self, ui: &mut Ui, session: &Session, start_ms: i64, end_ms: i64) {
-        if self.selected.is_empty() {
+        if self.analysis.selected.is_empty() {
             card(ui, |ui| {
                 ui.set_min_height(180.0);
                 ui.centered_and_justified(|ui| {
@@ -280,9 +284,10 @@ impl App {
 
         // In the order they were added; newest at the bottom.
         let selected: Vec<(usize, usize)> = self
+            .analysis
             .graph_order
             .iter()
-            .filter_map(|c| self.selected.get(c).map(|&s| (*c, s)))
+            .filter_map(|c| self.analysis.selected.get(c).map(|&s| (*c, s)))
             .collect();
         let gap = 10.0;
         // RaceStudio's Time Compare: time gained or lost against the best lap,
@@ -296,10 +301,10 @@ impl App {
             0.0
         };
         let card_h = ((ui.available_height() - reserved - gap * (n - 1.0)) / n).max(110.0);
-        let scroll_to = self.scroll_to_graph.take();
+        let scroll_to = self.analysis.scroll_to_graph.take();
         let mut remove = None;
         // Distance mode: meters along the lap from GPS speed (time mode without GPS).
-        let profile = if self.graph_distance {
+        let profile = if self.analysis.graph_distance {
             crate::compare::DistanceProfile::from_gps(
                 session,
                 &aim_xrk::Lap {
@@ -339,11 +344,14 @@ impl App {
         });
         // A new lap (or the whole session, or axis) starts the graphs at its full length.
         let key = (start_ms, end_ms, profile.is_some());
-        let window_changed = self.graph_window != Some(key);
-        self.graph_window = Some(key);
+        let window_changed = self.analysis.graph_window != Some(key);
+        self.analysis.graph_window = Some(key);
         let unit = if profile.is_some() { "m" } else { "s" };
         let link = ui.id().with("time");
-        let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
+        let cursor_ms = self
+            .analysis
+            .cursor_s
+            .map(|s| start_ms + (s * 1000.0) as i64);
         let mut hovered = None;
 
         egui::ScrollArea::vertical().id_salt("graphs").show(ui, |ui| {
@@ -416,7 +424,7 @@ impl App {
                         .x_axis_formatter(move |mark, _| if mark.step_size < 1.0 { format!("{:.1} {unit}", mark.value) } else { format!("{:.0} {unit}", mark.value) })
                         .show(ui, |plot| {
                             plot.line(Line::new(c.name.clone(), PlotPoints::from(points)).color(color).width(2.0));
-                            if let Some(s) = self.cursor_s {
+                            if let Some(s) = self.analysis.cursor_s {
                                 plot.vline(VLine::new("cursor", to_x(start_ms as f64 + s * 1000.0)).color(SECONDARY).width(1.0));
                             }
                             plot.pointer_coordinate()
@@ -440,7 +448,7 @@ impl App {
             if let Some((best, points)) = &time_compare {
                 graph_card(ui, compare_h, |ui| {
                     // The gap at the cursor: above zero, behind the best lap there.
-                    let at_cursor = self.cursor_s.and_then(|s| {
+                    let at_cursor = self.analysis.cursor_s.and_then(|s| {
                         let x = to_x(start_ms as f64 + s * 1000.0);
                         let i = points.partition_point(|p| p[0] < x);
                         points.get(i.min(points.len().saturating_sub(1))).map(|p| p[1])
@@ -490,7 +498,7 @@ impl App {
                         .show(ui, |plot| {
                             plot.hline(egui_plot::HLine::new("even", 0.0).color(DIM).width(1.0));
                             plot.line(Line::new("Time compare", PlotPoints::from(points.clone())).color(SECONDARY).width(2.0));
-                            if let Some(s) = self.cursor_s {
+                            if let Some(s) = self.analysis.cursor_s {
                                 plot.vline(VLine::new("cursor", to_x(start_ms as f64 + s * 1000.0)).color(SECONDARY).width(1.0));
                             }
                             plot.pointer_coordinate()
@@ -505,11 +513,11 @@ impl App {
             }
         });
         if hovered.is_some() {
-            self.cursor_s = hovered;
+            self.analysis.cursor_s = hovered;
         }
         if let Some(i) = remove {
-            self.selected.remove(&i);
-            self.graph_order.retain(|&c| c != i);
+            self.analysis.selected.remove(&i);
+            self.analysis.graph_order.retain(|&c| c != i);
         }
     }
 }
@@ -542,7 +550,8 @@ impl App {
         start_ms: i64,
     ) -> Option<aim_xrk::Lap> {
         let best = session.best_lap(MIN_LAP_MS).copied();
-        self.lap
+        self.analysis
+            .lap
             .and_then(|i| session.laps.get(i))
             .filter(|l| l.start_ms == start_ms && Some(**l) != best)
             .and(best)
@@ -564,16 +573,20 @@ impl App {
                 .position(|c| c.name == *n && !is_dead(c))
         });
         let color_ch = self
+            .analysis
             .map_channel
             .filter(|&i| session.channels.get(i).is_some_and(|c| !is_dead(c)))
             .or(default)
-            .or_else(|| self.selected.keys().next().copied());
-        let cursor_ms = self.cursor_s.map(|s| start_ms + (s * 1000.0) as i64);
+            .or_else(|| self.analysis.selected.keys().next().copied());
+        let cursor_ms = self
+            .analysis
+            .cursor_s
+            .map(|s| start_ms + (s * 1000.0) as i64);
         // Time compare coloring: how fast the gap to the best lap grows (losing)
         // or shrinks (gaining), per meter, at each point.
         let reference = self.time_compare_reference(session, start_ms);
         let gap_curve = reference
-            .filter(|_| self.map_time_compare)
+            .filter(|_| self.analysis.map_time_compare)
             .and_then(|best| time_compare_curve(session, best, start_ms, end_ms));
         let gain = gap_curve.as_ref().map(|c| {
             let rate = |k: usize| {
@@ -609,7 +622,7 @@ impl App {
                             .width(118.0)
                             .show_ui(ui, |ui| {
                                 if reference.is_some() && ui.selectable_label(gain.is_some(), "Time compare").on_hover_text("Where this lap gains and loses time against the best lap").clicked() {
-                                    self.map_time_compare = true;
+                                    self.analysis.map_time_compare = true;
                                 }
                                 // Only what's worth seeing on the track: engine and movement.
                                 let imu = session.info.imu_mount.is_some();
@@ -618,8 +631,8 @@ impl App {
                                         && matches!(channel_group(c, imu), "Engine" | "Movement")
                                         && ui.selectable_label(gain.is_none() && color_ch == Some(i), &c.name).clicked()
                                     {
-                                        self.map_channel = Some(i);
-                                        self.map_time_compare = false;
+                                        self.analysis.map_channel = Some(i);
+                                        self.analysis.map_time_compare = false;
                                     }
                                 }
                             })
@@ -700,7 +713,7 @@ impl App {
                         .min_by(|a, b| a.1.total_cmp(&b.1))
                         .unwrap();
                     if d < 28.0 * 28.0 {
-                        self.cursor_s = Some((gps.times_ms[lo + k] - start_ms) as f64 / 1000.0);
+                        self.analysis.cursor_s = Some((gps.times_ms[lo + k] - start_ms) as f64 / 1000.0);
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                     }
                 }

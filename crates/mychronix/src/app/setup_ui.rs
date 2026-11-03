@@ -64,7 +64,7 @@ impl App {
             Source::Baseline => "This kart's baseline setup".to_string(),
             Source::Unknown => "No setup recorded yet".to_string(),
         };
-        let check = gearing_check(&r.setup, self.measured_ratio);
+        let check = gearing_check(&r.setup, self.analysis.measured_ratio);
         let mut edit = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
@@ -183,7 +183,7 @@ impl App {
         let i = lib.sessions.iter().position(|s| s.path == path)?;
         let baselines = self.setup_baselines.get_or_insert_with(Baselines::load);
         let r = setup::resolve(&lib, baselines).swap_remove(i);
-        match gearing_check(&r.setup, self.measured_ratio) {
+        match gearing_check(&r.setup, self.analysis.measured_ratio) {
             Some((false, text)) => Some(text),
             _ => None,
         }

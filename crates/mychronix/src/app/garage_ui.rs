@@ -1207,31 +1207,40 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             if loggers.len() > 1 {
-                if chip(ui, "All drivers", self.picker_logger.is_none()).clicked() {
-                    self.picker_logger = None;
+                if chip(ui, "All drivers", self.analysis.picker_logger.is_none()).clicked() {
+                    self.analysis.picker_logger = None;
                 }
                 for l in &loggers {
-                    if chip(ui, &name(l), self.picker_logger.as_deref() == Some(l)).clicked() {
-                        self.picker_logger = Some(l.clone());
+                    if chip(
+                        ui,
+                        &name(l),
+                        self.analysis.picker_logger.as_deref() == Some(l),
+                    )
+                    .clicked()
+                    {
+                        self.analysis.picker_logger = Some(l.clone());
                     }
                 }
                 ui.add_space(10.0);
             }
-            if chip(ui, "Show warm-ups", self.picker_warmups)
+            if chip(ui, "Show warm-ups", self.analysis.picker_warmups)
                 .on_hover_text("Sessions where the kart never left the stand")
                 .clicked()
             {
-                self.picker_warmups = !self.picker_warmups;
+                self.analysis.picker_warmups = !self.analysis.picker_warmups;
             }
         });
         ui.add_space(10.0);
         let mut shown: Vec<usize> = (0..lib.sessions.len())
             .filter(|&i| {
-                self.picker_logger
+                self.analysis
+                    .picker_logger
                     .as_ref()
                     .is_none_or(|l| *l == lib.sessions[i].logger)
             })
-            .filter(|&i| self.picker_warmups || !events::is_warm_up(&lib.sessions[i].summary))
+            .filter(|&i| {
+                self.analysis.picker_warmups || !events::is_warm_up(&lib.sessions[i].summary)
+            })
             .collect();
         shown.sort_by_key(|&i| {
             let s = &lib.sessions[i].summary;

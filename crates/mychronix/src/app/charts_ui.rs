@@ -41,7 +41,7 @@ const QUICK: [&str; 5] = [
 impl App {
     /// The time windows the charts cover: the chosen lap, or every racing lap.
     fn chart_windows(&self, session: &Session) -> (Vec<(i64, i64)>, String) {
-        match self.lap.and_then(|i| session.laps.get(i)) {
+        match self.analysis.lap.and_then(|i| session.laps.get(i)) {
             Some(l) => (vec![(l.start_ms, l.end_ms)], format!("Lap {}", l.number)),
             None => {
                 let slow = slow_laps(session);
@@ -151,7 +151,8 @@ impl App {
             }
         };
         let main = to_bars(charts::histogram(c, &windows, start, bin, bins));
-        let overlay = (st.hist_best && self.lap.and_then(|i| session.laps.get(i)).copied() != best)
+        let overlay = (st.hist_best
+            && self.analysis.lap.and_then(|i| session.laps.get(i)).copied() != best)
             .then(|| {
                 best_window
                     .as_ref()

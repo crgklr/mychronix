@@ -50,7 +50,7 @@ impl App {
     ) -> Option<std::sync::Arc<CornerModel>> {
         // The fastest lap recorded in full: a gap in the best lap would stand in for the track.
         let best = session
-            .reference_lap(MIN_LAP_MS, &self.recording_gaps)
+            .reference_lap(MIN_LAP_MS, &self.analysis.recording_gaps)
             .copied()?;
         let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
         if self
@@ -63,7 +63,7 @@ impl App {
             let counts: Vec<bool> = slow_laps(session)
                 .into_iter()
                 .zip(&session.laps)
-                .map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.recording_gaps))
+                .map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.analysis.recording_gaps))
                 .collect();
             let started = std::time::Instant::now();
             let model = CornerModel::build(session, &best, &counts);
@@ -94,7 +94,7 @@ impl App {
             return;
         };
         // The lap picked in the strip, or the best for the whole session.
-        let trace = match self.lap {
+        let trace = match self.analysis.lap {
             Some(i) => match model.trace_of(i) {
                 Some(t) => t,
                 None => {
@@ -196,7 +196,7 @@ impl App {
         selected: usize,
         row_h: f32,
     ) -> (Option<usize>, f32) {
-        let gaps = self.recording_gaps.clone();
+        let gaps = self.analysis.recording_gaps.clone();
         let mut clicked = None;
         let mut hovered = None;
         let card = Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 12 }).show(ui, |ui| {

@@ -48,14 +48,14 @@ impl App {
 
     /// Imports `paths` (files or folders) in the background.
     pub(super) fn start_import(&mut self, paths: Vec<PathBuf>, ctx: &egui::Context) {
-        if self.import_rx.is_some() {
+        if self.background.import_rx.is_some() {
             return;
         }
         log::info!("import: starting with {paths:?}");
         let lib = self.lib();
-        self.import_rx = Some(crate::import::spawn(paths, &lib, ctx.clone()));
-        self.import_progress = Some((0, 0));
-        self.import_report = None;
+        self.background.import_rx = Some(crate::import::spawn(paths, &lib, ctx.clone()));
+        self.background.import_progress = Some((0, 0));
+        self.background.import_report = None;
     }
 
     /// Whether this window can receive dropped files: on a Mac and under X11,
@@ -90,24 +90,26 @@ impl App {
     pub(super) fn import_poll(&mut self) {
         use std::sync::mpsc::TryRecvError;
         loop {
-            let Some(rx) = &self.import_rx else { return };
+            let Some(rx) = &self.background.import_rx else {
+                return;
+            };
             match rx.try_recv() {
                 Ok(crate::import::Event::Progress { done, total }) => {
-                    self.import_progress = Some((done, total))
+                    self.background.import_progress = Some((done, total))
                 }
                 Ok(crate::import::Event::Finished(report)) => {
-                    self.import_rx = None;
-                    self.import_progress = None;
+                    self.background.import_rx = None;
+                    self.background.import_progress = None;
                     self.reload_library();
-                    self.import_report = Some(report);
+                    self.background.import_report = Some(report);
                     self.page = Page::Garage;
                 }
                 Err(TryRecvError::Empty) => return,
                 // Stopped without finishing (it shouldn't): don't wait forever.
                 Err(TryRecvError::Disconnected) => {
                     log::warn!("import: stopped without finishing");
-                    self.import_rx = None;
-                    self.import_progress = None;
+                    self.background.import_rx = None;
+                    self.background.import_progress = None;
                     self.reload_library();
                 }
             }
@@ -164,7 +166,7 @@ impl App {
                             ui.add_space(22.0);
                             ui.label(RichText::new("Import session files").font(semibold(22.0)).color(TEXT));
                             ui.add_space(8.0);
-                            let progress = self.import_progress;
+                            let progress = self.background.import_progress;
                             let text = match progress {
                                 Some((_, 0)) => "Looking for sessions…".to_string(),
                                 Some((done, total)) => format!("Importing {} of {} files…", group_thousands(done), group_thousands(total)),
@@ -172,7 +174,7 @@ impl App {
                                 None => "Already have sessions from RaceStudio, a USB stick or a friend? Choose their folder: Mychronix finds the sessions in it.".to_string(),
                             };
                             ui.add(egui::Label::new(RichText::new(text).font(regular(15.5)).color(SECONDARY)).wrap());
-                        }, |ui| match self.import_progress {
+                        }, |ui| match self.background.import_progress {
                             Some((done, total)) => {
                                 let (bar, _) = ui.allocate_exact_size(vec2(card_w * 0.7, 8.0), Sense::hover());
                                 ui.painter().rect_filled(bar, CornerRadius::same(4), SURFACE_ACTIVE);
@@ -186,7 +188,7 @@ impl App {
                             }
                         });
                         // While files are dragged over the window, the card says where they go.
-                        if dragging && Self::can_drop() && self.import_progress.is_none() {
+                        if dragging && Self::can_drop() && self.background.import_progress.is_none() {
                             ui.painter().rect_filled(card, CornerRadius::same(18), SURFACE_HOVER);
                             ui.painter().rect_stroke(card.shrink(2.0), CornerRadius::same(16), Stroke::new(2.0, theme::GOOD), egui::StrokeKind::Inside);
                             Icon::Download.image(theme::GOOD, 44.0).paint_at(ui, Rect::from_center_size(card.center() - vec2(0.0, 26.0), Vec2::splat(44.0)));
@@ -248,7 +250,7 @@ impl App {
 
     /// After an import, on the Garage: what came in and what to do next.
     pub(super) fn import_banner(&mut self, ui: &mut Ui) {
-        let Some(r) = self.import_report.clone() else {
+        let Some(r) = self.background.import_report.clone() else {
             return;
         };
         let mut close = false;
@@ -344,7 +346,7 @@ impl App {
             });
         ui.add_space(12.0);
         if close {
-            self.import_report = None;
+            self.background.import_report = None;
         }
     }
 }

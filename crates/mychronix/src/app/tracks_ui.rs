@@ -91,7 +91,8 @@ impl App {
 
         if lib.tracks.is_empty() {
             // The banner above already says why (downloading, or offline).
-            if self.aim_tracks_progress.is_none() && !self.aim_tracks_offline {
+            if self.background.aim_tracks_progress.is_none() && !self.background.aim_tracks_offline
+            {
                 card(ui, |ui| {
                     ui.label(
                         RichText::new("No tracks yet")
@@ -855,7 +856,7 @@ impl App {
             "Map data © OpenStreetMap contributors."
         };
         // Offline, maps viewed before come from the cache; others draw the track on a blank background.
-        let credit = if self.aim_tracks_offline {
+        let credit = if self.background.aim_tracks_offline {
             format!("{credit}  Offline: maps you haven't viewed before appear once you're online.")
         } else {
             credit.to_string()
@@ -1621,22 +1622,22 @@ impl App {
     /// a note when they couldn't be fetched because the computer is offline.
     pub(super) fn aim_tracks_banner(&self, ui: &mut Ui, lib: &Library) {
         let have_list = crate::aim_tracks::list_path().is_some();
-        let (icon, title, detail, progress) = match self.aim_tracks_progress {
+        let (icon, title, detail, progress) = match self.background.aim_tracks_progress {
             Some((done, total)) => (
                 Icon::Download,
-                if self.aim_tracks_first {
+                if self.background.aim_tracks_first {
                     "Downloading AiM's track database"
                 } else {
                     "Updating AiM's track database"
                 },
-                if self.aim_tracks_first {
+                if self.background.aim_tracks_first {
                     "First time only: every AiM track with its outline, straight from AiM. Keep using Mychronix meanwhile; from now on it only fetches what changed.".to_string()
                 } else {
                     "Fetching the tracks AiM added or changed since last time.".to_string()
                 },
                 Some((done, total)),
             ),
-            None if self.aim_tracks_offline && !have_list => (
+            None if self.background.aim_tracks_offline && !have_list => (
                 Icon::CloudOff,
                 "AiM's tracks will download when you're online",
                 if lib.count(Kind::Aim) > 0 {

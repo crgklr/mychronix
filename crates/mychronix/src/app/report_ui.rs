@@ -415,10 +415,10 @@ impl App {
                 .error(format!("Couldn't save the report columns: {e}"));
         }
         if let Some((i, t, k)) = to_corner {
-            self.lap = Some(i);
-            self.cursor_s = None;
+            self.analysis.lap = Some(i);
+            self.analysis.cursor_s = None;
             self.corners.selected = Some((t, k));
-            self.analysis_view = AnalysisView::Corners;
+            self.analysis.analysis_view = AnalysisView::Corners;
         }
     }
 }
@@ -499,9 +499,13 @@ impl App {
             }
         });
         if let (Some(k), Some(m)) = (go, model) {
-            let t = self.lap.and_then(|i| m.trace_of(i)).unwrap_or(m.best);
+            let t = self
+                .analysis
+                .lap
+                .and_then(|i| m.trace_of(i))
+                .unwrap_or(m.best);
             self.corners.selected = Some((t, k));
-            self.analysis_view = AnalysisView::Corners;
+            self.analysis.analysis_view = AnalysisView::Corners;
         }
     }
 }

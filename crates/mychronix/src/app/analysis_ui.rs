@@ -263,7 +263,7 @@ impl App {
                             vec2(width - 20.0, 44.0),
                         );
                         let resp = ui.interact(card, egui::Id::new("rail_session"), Sense::click());
-                        let lit = resp.hovered() || self.session_panel;
+                        let lit = resp.hovered() || self.analysis.session_panel;
                         painter.rect(
                             card,
                             CornerRadius::same(theme::RADIUS_SMALL + 2),
@@ -304,14 +304,14 @@ impl App {
                             .on_hover_text("What you're looking at: click to change")
                             .clicked()
                         {
-                            self.session_panel = !self.session_panel;
+                            self.analysis.session_panel = !self.analysis.session_panel;
                             self.page = Page::Analysis;
                         }
                         y += 52.0;
                     }
                     for (view, icon, label, hint) in VIEWS {
-                        let selected =
-                            self.page == Page::Analysis && self.analysis_view.rail_item() == view;
+                        let selected = self.page == Page::Analysis
+                            && self.analysis.analysis_view.rail_item() == view;
                         let off = session.and_then(|s| view_unavailable(s, view));
                         let label = if view == AnalysisView::Compare && compare_n > 0 {
                             format!("{label} ({compare_n})")
@@ -333,8 +333,8 @@ impl App {
                         .clicked()
                         {
                             self.page = Page::Analysis;
-                            if self.analysis_view.rail_item() != view {
-                                self.analysis_view = view;
+                            if self.analysis.analysis_view.rail_item() != view {
+                                self.analysis.analysis_view = view;
                             }
                         }
                         y += ROW_STEP;
@@ -406,7 +406,7 @@ impl App {
             })
             .map(crate::dates::day_numeric)
             .or_else(|| i.date.clone());
-        let lap = match self.lap.and_then(|k| session.laps.get(k)) {
+        let lap = match self.analysis.lap.and_then(|k| session.laps.get(k)) {
             Some(l) => format!("Lap {}", l.number),
             None => "All laps".to_string(),
         };
@@ -438,6 +438,7 @@ impl App {
             .map(|s| format!("  ·  {s}"))
             .collect();
         let time = self
+            .analysis
             .lap
             .and_then(|k| session.laps.get(k))
             .or_else(|| session.best_lap(MIN_LAP_MS))
@@ -463,7 +464,7 @@ impl App {
             add(&rest, regular(14.0), SECONDARY);
             if let Some(t) = &time {
                 // With all laps open, the time is the best lap's: say so.
-                if self.lap.is_none() {
+                if self.analysis.lap.is_none() {
                     add("   Best ", regular(14.0), SECONDARY);
                     add(t, semibold(14.0), TEXT);
                 } else {
@@ -473,7 +474,7 @@ impl App {
             let galley = ui.painter().layout_job(job);
             let size = galley.size() + vec2(32.0 + 22.0, 16.0);
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-            let lit = resp.hovered() || self.session_panel;
+            let lit = resp.hovered() || self.analysis.session_panel;
             ui.painter().rect(
                 rect,
                 CornerRadius::same(255),
@@ -504,7 +505,7 @@ impl App {
                 )
                 .clicked()
             {
-                self.session_panel = !self.session_panel;
+                self.analysis.session_panel = !self.analysis.session_panel;
             }
             pill = rect;
             // Sensors that stopped recording in this session.
@@ -544,7 +545,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.label(RichText::new(title).font(semibold(26.0)).color(TEXT));
-            if self.analysis_view.rail_item() == AnalysisView::Session {
+            if self.analysis.analysis_view.rail_item() == AnalysisView::Session {
                 ui.add_space(14.0);
                 for (view, label, hint) in [
                     (
@@ -563,11 +564,11 @@ impl App {
                         "One channel against another: RPM vs speed, the grip circle",
                     ),
                 ] {
-                    if chip(ui, label, self.analysis_view == view)
+                    if chip(ui, label, self.analysis.analysis_view == view)
                         .on_hover_text(hint)
                         .clicked()
                     {
-                        self.analysis_view = view;
+                        self.analysis.analysis_view = view;
                     }
                 }
             }
@@ -578,7 +579,11 @@ impl App {
     /// columns: the session (today's header and details), its laps, and other
     /// sessions at the track.
     pub(super) fn session_panel(&mut self, ctx: &egui::Context, session: &std::sync::Arc<Session>) {
-        let Some(pill) = self.pill_rect.filter(|_| self.session_panel) else {
+        let Some(pill) = self
+            .analysis
+            .pill_rect
+            .filter(|_| self.analysis.session_panel)
+        else {
             return;
         };
         let screen = ctx.content_rect();
@@ -655,19 +660,19 @@ impl App {
         // Click anywhere else (but the pill and the rail's indicator, which toggle it) or Escape to close.
         let outside = ui_clicked_outside(ctx, area.response.rect, pill, self.rail_rect);
         if close || outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.session_panel = false;
+            self.analysis.session_panel = false;
         }
         if let Some(p) = open_path {
-            self.session_panel = false;
+            self.analysis.session_panel = false;
             self.load(p);
         }
         if self.page != Page::Analysis {
-            self.session_panel = false;
+            self.analysis.session_panel = false;
         }
         // A link in it that opened a window (change track, edit setup, a
         // sensor's report) closes it, so the window has the screen to itself.
         if self.track_pick.is_some() || self.setup_edit.is_some() || self.sensors.report.is_some() {
-            self.session_panel = false;
+            self.analysis.session_panel = false;
         }
     }
 
@@ -834,7 +839,7 @@ impl App {
                 );
             }
         }
-        if let Some(gaps) = recording_gaps_note(session, &self.recording_gaps) {
+        if let Some(gaps) = recording_gaps_note(session, &self.analysis.recording_gaps) {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(gaps).size(13.0).color(DIM)).wrap());
         }
@@ -916,7 +921,7 @@ impl App {
             .corner_radius(CornerRadius::same(255))
             .min_size(vec2(92.0, 38.0));
         if ui.add(open).on_hover_text("Open a session file").clicked() {
-            self.session_panel = false;
+            self.analysis.session_panel = false;
             self.open_dialog();
         }
     }
@@ -992,7 +997,7 @@ impl App {
                 };
                 let r = cell(
                     ui,
-                    self.lap == Some(k),
+                    self.analysis.lap == Some(k),
                     &lap.number.to_string(),
                     &format_lap_time(lap.duration_ms()),
                     color,
@@ -1006,7 +1011,7 @@ impl App {
                     picked = Some(Some(k));
                 }
             }
-            if cell(ui, self.lap.is_none(), "All", "", TEXT)
+            if cell(ui, self.analysis.lap.is_none(), "All", "", TEXT)
                 .on_hover_text("The whole session")
                 .clicked()
             {
@@ -1020,8 +1025,8 @@ impl App {
                 .color(DIM),
         );
         if let Some(choice) = picked {
-            self.lap = choice;
-            self.cursor_s = None;
+            self.analysis.lap = choice;
+            self.analysis.cursor_s = None;
             return true;
         }
         false
@@ -1341,7 +1346,7 @@ impl App {
             } else {
                 // The whole session.
                 let (rect, resp) = ui.allocate_exact_size(vec2(all_w, h), Sense::click());
-                let on = self.lap.is_none();
+                let on = self.analysis.lap.is_none();
                 let p = ui.painter();
                 p.rect_filled(
                     rect,
@@ -1379,7 +1384,7 @@ impl App {
                 let selected = if compare_mode {
                     false
                 } else {
-                    self.lap == Some(i)
+                    self.analysis.lap == Some(i)
                 };
                 let is_best = Some(*lap) == best;
                 let compare_slot = self
@@ -1540,8 +1545,8 @@ impl App {
             }
         });
         if let Some(choice) = pick {
-            self.lap = choice;
-            self.cursor_s = None;
+            self.analysis.lap = choice;
+            self.analysis.cursor_s = None;
         }
         if let Some(lap) = toggle {
             self.toggle_compare(session, lap);
@@ -1558,23 +1563,23 @@ impl App {
                     .on_hover_text("Graph steering, speed and braking/acceleration (and throttle and brake pressure when recorded)")
                     .clicked()
             {
-                self.selected.clear();
-                self.graph_order.clear();
+                self.analysis.selected.clear();
+                self.analysis.graph_order.clear();
                 for i in inputs {
                     self.select(i);
                 }
             }
-            let n = self.selected.len();
+            let n = self.analysis.selected.len();
             ui.label(RichText::new(format!("{n} graphed  ·  ✕ on a graph removes it")).size(12.5).color(DIM));
             // Time or distance along the bottom axis (distance needs GPS).
             if session.gps.is_some() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if chip(ui, "Distance", self.graph_distance).on_hover_text("Meters around the lap, so corners line up").clicked() {
-                        self.graph_distance = true;
+                    if chip(ui, "Distance", self.analysis.graph_distance).on_hover_text("Meters around the lap, so corners line up").clicked() {
+                        self.analysis.graph_distance = true;
                     }
-                    if chip(ui, "Time", !self.graph_distance).clicked() {
-                        self.graph_distance = false;
+                    if chip(ui, "Time", !self.analysis.graph_distance).clicked() {
+                        self.analysis.graph_distance = false;
                     }
                     ui.label(RichText::new("Axis").size(12.5).color(DIM));
                 });
@@ -1583,9 +1588,9 @@ impl App {
         });
         let button_rect = resp.inner.rect;
         if resp.inner.clicked() {
-            self.channel_picker_open = !self.channel_picker_open;
+            self.analysis.channel_picker_open = !self.analysis.channel_picker_open;
         }
-        if !self.channel_picker_open {
+        if !self.analysis.channel_picker_open {
             return;
         }
         let size = vec2(340.0, 460.0_f32.min(button_rect.top() - 40.0).max(200.0));
@@ -1617,7 +1622,7 @@ impl App {
                 .pointer_interact_pos()
                 .is_some_and(|p| !area.response.rect.contains(p) && !button_rect.contains(p));
         if clicked_outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.channel_picker_open = false;
+            self.analysis.channel_picker_open = false;
         }
     }
 }

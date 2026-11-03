@@ -138,6 +138,10 @@ enum ChannelView {
 
 #[derive(Default)]
 pub struct App {
+    /// The open session as it's looked at: graphs, cursor, lap, panels (see `AnalysisState`).
+    analysis: AnalysisState,
+    /// Jobs running in the background and what they found (update check, AiM tracks, import).
+    background: Background,
     page: Page,
     path: Option<PathBuf>,
     session: Option<std::sync::Arc<Session>>,
@@ -146,25 +150,6 @@ pub struct App {
     close_session: bool,
     /// Statuses and problems, shown in one place (see `notices`).
     notices: notices::Notices,
-    /// Selected channels and the color slot each keeps while selected.
-    selected: BTreeMap<usize, usize>,
-    /// Graphed channels in the order they were added (graphs stack in this order).
-    graph_order: Vec<usize>,
-    /// The time window the graphs last showed, to reset their range when it changes.
-    graph_window: Option<(i64, i64, bool)>,
-    /// Graphs against distance instead of time.
-    graph_distance: bool,
-    /// Channel groups folded away in the sidebar (Lap timing starts folded).
-    collapsed_groups: std::collections::HashSet<&'static str>,
-    collapsed_init: bool,
-    /// A graph just added, to scroll into view.
-    scroll_to_graph: Option<usize>,
-    lap: Option<usize>,
-    filter: String,
-    channel_view: ChannelView,
-    /// Shared cursor, in seconds from the start of the current window.
-    cursor_s: Option<f64>,
-    analysis_view: AnalysisView,
     report: report_ui::ReportState,
     splits: splits_ui::SplitsState,
     corners: corners_ui::CornersState,
@@ -189,38 +174,12 @@ pub struct App {
     charts: charts_ui::ChartsState,
     /// Where the icon rail is (for opening it on hover), the session details and channel picker.
     rail_rect: Option<Rect>,
-    /// The session panel (opened from the pill or the rail), and where the pill is.
-    session_panel: bool,
-    pill_rect: Option<Rect>,
     /// The Map view: corner or whole track, line colors, imagery, its own view of the map.
     map_view: map_ui::MapState,
-    channel_picker_open: bool,
     /// Setup sheets: baselines, the editor, the open session's measured RPM per km/h,
     /// and a sheet to write once a download finishes.
     setup_baselines: Option<crate::setup::Baselines>,
     setup_edit: Option<setup_ui::SetupEdit>,
-    /// The update check, a newer release found, and its notes window.
-    update_rx: Option<std::sync::mpsc::Receiver<crate::update::Release>>,
-    /// AiM's track database being brought up to date, and how far along.
-    aim_tracks_rx: Option<std::sync::mpsc::Receiver<crate::aim_tracks::Event>>,
-    aim_tracks_progress: Option<(usize, usize)>,
-    /// Session files being imported, how far along, and what came in.
-    import_rx: Option<std::sync::mpsc::Receiver<crate::import::Event>>,
-    import_progress: Option<(usize, usize)>,
-    import_report: Option<crate::import::Report>,
-    /// This is the first download of AiM's tracks (not just changes).
-    aim_tracks_first: bool,
-    /// The last try couldn't reach AiM's server.
-    aim_tracks_offline: bool,
-    update: Option<crate::update::Release>,
-    update_notes: bool,
-    measured_ratio: Option<f64>,
-    /// Stretches of the open session with nothing recorded (see `aim_xrk::checks::recording_gaps`).
-    recording_gaps: Vec<(i64, i64)>,
-    /// Channel that colors the track map (None: RPM if present).
-    map_channel: Option<usize>,
-    /// Color the Graphs map by where the open lap gains and loses time against the best lap.
-    map_time_compare: bool,
     pub screenshot_to: Option<PathBuf>,
     frames: u32,
 
@@ -230,9 +189,6 @@ pub struct App {
     /// The Garage: a session to open after the frame, and Events' plan dialog to open.
     pending_open: Option<PathBuf>,
     plan_on_open: bool,
-    /// The Analysis session picker's driver filter and warm-up toggle.
-    picker_logger: Option<String>,
-    picker_warmups: bool,
 
     profiles: Option<crate::profiles::Profiles>,
     /// The Sessions page's filters (right column).
@@ -255,6 +211,65 @@ pub struct App {
     /// The Compare tab: the laps compared and its cursor (see `compare_ui`).
     comparison: compare_ui::CompareState,
 }
+/// How the open session is looked at on the Analysis page: which channels
+/// are graphed and how, the cursor and lap, the views and panels. Reset (in
+/// part) when another session opens.
+#[derive(Default)]
+struct AnalysisState {
+    /// Selected channels and the color slot each keeps while selected.
+    selected: BTreeMap<usize, usize>,
+    /// Graphed channels in the order they were added (graphs stack in this order).
+    graph_order: Vec<usize>,
+    /// The time window the graphs last showed, to reset their range when it changes.
+    graph_window: Option<(i64, i64, bool)>,
+    /// Graphs against distance instead of time.
+    graph_distance: bool,
+    /// Channel groups folded away in the sidebar (Lap timing starts folded).
+    collapsed_groups: std::collections::HashSet<&'static str>,
+    collapsed_init: bool,
+    /// A graph just added, to scroll into view.
+    scroll_to_graph: Option<usize>,
+    lap: Option<usize>,
+    filter: String,
+    channel_view: ChannelView,
+    /// Shared cursor, in seconds from the start of the current window.
+    cursor_s: Option<f64>,
+    analysis_view: AnalysisView,
+    /// The session panel (opened from the pill or the rail), and where the pill is.
+    session_panel: bool,
+    pill_rect: Option<Rect>,
+    channel_picker_open: bool,
+    measured_ratio: Option<f64>,
+    /// Stretches of the open session with nothing recorded (see `aim_xrk::checks::recording_gaps`).
+    recording_gaps: Vec<(i64, i64)>,
+    /// Channel that colors the track map (None: RPM if present).
+    map_channel: Option<usize>,
+    /// Color the Graphs map by where the open lap gains and loses time against the best lap.
+    map_time_compare: bool,
+    /// The Analysis session picker's driver filter and warm-up toggle.
+    picker_logger: Option<String>,
+    picker_warmups: bool,
+}
+
+/// Jobs running in the background, and what they found.
+#[derive(Default)]
+struct Background {
+    /// The update check, a newer release found, and its notes window.
+    update_rx: Option<std::sync::mpsc::Receiver<crate::update::Release>>,
+    /// AiM's track database being brought up to date, and how far along.
+    aim_tracks_rx: Option<std::sync::mpsc::Receiver<crate::aim_tracks::Event>>,
+    aim_tracks_progress: Option<(usize, usize)>,
+    /// Session files being imported, how far along, and what came in.
+    import_rx: Option<std::sync::mpsc::Receiver<crate::import::Event>>,
+    import_progress: Option<(usize, usize)>,
+    import_report: Option<crate::import::Report>,
+    /// This is the first download of AiM's tracks (not just changes).
+    aim_tracks_first: bool,
+    /// The last try couldn't reach AiM's server.
+    aim_tracks_offline: bool,
+    update: Option<crate::update::Release>,
+    update_notes: bool,
+}
 
 /// See `settings_ui::repair_assistants`.
 pub fn repair_assistants() {
@@ -267,21 +282,22 @@ impl App {
         match crate::jobs::open_session(&path) {
             Ok(mut session) => {
                 self.fill_names(&mut session, &path);
-                self.measured_ratio = crate::setup::measured_rpm_per_kmh(&session);
-                self.recording_gaps = aim_xrk::checks::recording_gaps(&session);
-                self.selected.clear();
-                self.graph_order.clear();
+                self.analysis.measured_ratio = crate::setup::measured_rpm_per_kmh(&session);
+                self.analysis.recording_gaps = aim_xrk::checks::recording_gaps(&session);
+                self.analysis.selected.clear();
+                self.analysis.graph_order.clear();
                 for i in default_channels(&session) {
                     self.select(i);
                 }
                 // Open on the best lap with the cursor halfway round, as RaceStudio does.
-                self.lap = session
+                self.analysis.lap = session
                     .best_lap(MIN_LAP_MS)
                     .and_then(|b| session.laps.iter().position(|l| l == b));
-                self.cursor_s = self
+                self.analysis.cursor_s = self
+                    .analysis
                     .lap
                     .map(|i| session.laps[i].duration_ms() as f64 / 1000.0 * 0.5);
-                self.map_channel = None;
+                self.analysis.map_channel = None;
                 self.session = Some(std::sync::Arc::new(session));
                 self.path = Some(path);
                 self.page = Page::Analysis;
@@ -300,14 +316,18 @@ impl App {
     /// channels graphed.
     pub(super) fn reopen(&mut self, path: PathBuf) {
         let (selected, order, map_channel, page) = (
-            self.selected.clone(),
-            self.graph_order.clone(),
-            self.map_channel,
+            self.analysis.selected.clone(),
+            self.analysis.graph_order.clone(),
+            self.analysis.map_channel,
             self.page,
         );
         if self.load(path) {
-            (self.selected, self.graph_order, self.map_channel, self.page) =
-                (selected, order, map_channel, page);
+            (
+                self.analysis.selected,
+                self.analysis.graph_order,
+                self.analysis.map_channel,
+                self.page,
+            ) = (selected, order, map_channel, page);
         }
     }
 
@@ -374,15 +394,15 @@ impl App {
         let Some(best) = session.best_lap(MIN_LAP_MS).copied() else {
             return;
         };
-        self.lap = session.laps.iter().position(|l| *l == best);
-        self.cursor_s = Some(best.duration_ms() as f64 / 1000.0 * 0.4);
+        self.analysis.lap = session.laps.iter().position(|l| *l == best);
+        self.analysis.cursor_s = Some(best.duration_ms() as f64 / 1000.0 * 0.4);
     }
 
     /// Compare tab with the best laps at this track, for screenshots.
     pub fn demo_compare(&mut self) {
         self.add_best_laps_here(None);
         self.comparison.laps.truncate(3);
-        self.analysis_view = AnalysisView::Compare;
+        self.analysis.analysis_view = AnalysisView::Compare;
         self.comparison.cursor_m = Some(120.0);
     }
 
@@ -409,23 +429,23 @@ impl App {
     }
 
     pub fn show_distance(&mut self) {
-        self.graph_distance = true;
+        self.analysis.graph_distance = true;
     }
 
     pub fn show_view(&mut self, name: &str) {
-        self.analysis_view = match name {
+        self.analysis.analysis_view = match name {
             "histogram" => AnalysisView::Histogram,
             "scatter" => AnalysisView::Scatter,
-            _ => self.analysis_view,
+            _ => self.analysis.analysis_view,
         };
     }
 
     pub fn show_splits(&mut self) {
-        self.analysis_view = AnalysisView::Splits;
+        self.analysis.analysis_view = AnalysisView::Splits;
     }
 
     pub fn show_report(&mut self) {
-        self.analysis_view = AnalysisView::Report;
+        self.analysis.analysis_view = AnalysisView::Report;
     }
 
     pub fn show_analysis_page(&mut self) {
@@ -449,17 +469,17 @@ impl App {
     }
 
     fn select(&mut self, channel: usize) {
-        let used: Vec<usize> = self.selected.values().copied().collect();
+        let used: Vec<usize> = self.analysis.selected.values().copied().collect();
         if let Some(slot) = (0..SERIES.len()).find(|s| !used.contains(s)) {
-            self.selected.insert(channel, slot);
-            self.graph_order.retain(|&c| c != channel);
-            self.graph_order.push(channel);
+            self.analysis.selected.insert(channel, slot);
+            self.analysis.graph_order.retain(|&c| c != channel);
+            self.analysis.graph_order.push(channel);
         }
     }
 
     /// Time window in logger ms: the selected lap, or the whole session.
     fn window(&self, session: &Session) -> (i64, i64) {
-        if let Some(lap) = self.lap.and_then(|i| session.laps.get(i)) {
+        if let Some(lap) = self.analysis.lap.and_then(|i| session.laps.get(i)) {
             return (lap.start_ms, lap.end_ms);
         }
         let start = session

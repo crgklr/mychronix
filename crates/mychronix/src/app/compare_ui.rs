@@ -211,6 +211,7 @@ impl App {
         let reset = self.comparison.window != Some(ref_len.to_bits());
         self.comparison.window = Some(ref_len.to_bits());
         let channels: Vec<String> = self
+            .analysis
             .selected
             .keys()
             .filter_map(|&i| session.channels.get(i))

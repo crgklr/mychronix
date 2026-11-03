@@ -224,8 +224,8 @@ impl App {
                     if let (Some(n), Some(s)) = (lap, &self.session)
                         && let Some(i) = s.laps.iter().position(|l| l.number as u32 == n)
                     {
-                        self.lap = Some(i);
-                        self.cursor_s = Some(s.laps[i].duration_ms() as f64 / 2000.0);
+                        self.analysis.lap = Some(i);
+                        self.analysis.cursor_s = Some(s.laps[i].duration_ms() as f64 / 2000.0);
                     }
                     return;
                 }

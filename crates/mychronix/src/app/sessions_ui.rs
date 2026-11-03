@@ -41,7 +41,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Sessions").font(semibold(28.0)).color(TEXT));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let busy = self.import_progress.is_some();
+                let busy = self.background.import_progress.is_some();
                 if button(
                     ui,
                     Some(Icon::FolderOpen),

@@ -237,7 +237,7 @@ impl App {
         };
         let (lat0, lon0) = (gps.latitude[0], gps.longitude[0]);
         // The lap looked at (the best for the whole session), and the corner, shared with Corners.
-        let picked = self.lap.and_then(|i| model.trace_of(i));
+        let picked = self.analysis.lap.and_then(|i| model.trace_of(i));
         let trace = picked.unwrap_or(model.best);
         let corner = match self.corners.selected {
             Some((t, k)) if t == trace && k < model.segments.len() => k,
@@ -570,7 +570,7 @@ impl App {
                     }
                     if picked.is_none() {
                         ui.label(
-                            RichText::new(if self.lap.is_some() {
+                            RichText::new(if self.analysis.lap.is_some() {
                                 "(that lap doesn't go all the way round: showing the best)"
                             } else {
                                 ""
@@ -673,9 +673,9 @@ impl App {
             None => {}
         }
         if let Some(t) = step {
-            self.lap = Some(model.traces[t].lap);
+            self.analysis.lap = Some(model.traces[t].lap);
             self.corners.selected = Some((t, corner));
-            self.cursor_s = None;
+            self.analysis.cursor_s = None;
         }
     }
 

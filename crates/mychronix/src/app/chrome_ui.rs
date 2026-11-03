@@ -8,55 +8,63 @@ impl App {
     pub(super) fn update_bar(&mut self, ui: &mut Ui) {
         // Screenshot runs leave AiM's server alone unless MYCHRONIX_AIM_SYNC=1 (development only).
         let sync = self.screenshot_to.is_none() || crate::hooks::get().aim_sync;
-        if self.frames == 1 && self.aim_tracks_rx.is_none() && sync {
-            self.aim_tracks_rx = Some(crate::aim_tracks::spawn(ui.ctx().clone()));
+        if self.frames == 1 && self.background.aim_tracks_rx.is_none() && sync {
+            self.background.aim_tracks_rx = Some(crate::aim_tracks::spawn(ui.ctx().clone()));
         }
         // MYCHRONIX_IMPORT=<file or folder> imports it at start (for testing; the file picker can't be clicked).
         static IMPORT_ONCE: std::sync::Once = std::sync::Once::new();
-        if self.frames >= 3 && self.import_rx.is_none() && !IMPORT_ONCE.is_completed() {
+        if self.frames >= 3 && self.background.import_rx.is_none() && !IMPORT_ONCE.is_completed() {
             IMPORT_ONCE.call_once(|| {});
             if let Some(p) = crate::hooks::get().import.clone() {
                 let lib = self.lib();
-                self.import_rx = Some(crate::import::spawn(vec![p], &lib, ui.ctx().clone()));
-                self.import_progress = Some((0, 0));
+                self.background.import_rx =
+                    Some(crate::import::spawn(vec![p], &lib, ui.ctx().clone()));
+                self.background.import_progress = Some((0, 0));
             }
         }
         self.import_poll();
-        let (events, ended) = crate::jobs::drain(self.aim_tracks_rx.as_ref());
+        let (events, ended) = crate::jobs::drain(self.background.aim_tracks_rx.as_ref());
         // The sync ended without finishing (it crashed): drop its progress bar.
-        if ended && self.aim_tracks_progress.is_some() && events.is_empty() {
-            self.aim_tracks_progress = None;
+        if ended && self.background.aim_tracks_progress.is_some() && events.is_empty() {
+            self.background.aim_tracks_progress = None;
         }
         for e in events {
             use crate::aim_tracks::Event;
             match e {
                 Event::List => {
-                    self.aim_tracks_first = true;
+                    self.background.aim_tracks_first = true;
                     self.reload_library();
                 }
                 Event::Progress { done, total } => {
-                    self.aim_tracks_progress = (done < total).then_some((done, total))
+                    self.background.aim_tracks_progress = (done < total).then_some((done, total))
                 }
                 Event::Failed { offline } => {
-                    self.aim_tracks_progress = None;
-                    self.aim_tracks_offline = offline;
+                    self.background.aim_tracks_progress = None;
+                    self.background.aim_tracks_offline = offline;
                 }
                 Event::Finished { changed } => {
-                    self.aim_tracks_progress = None;
-                    self.aim_tracks_offline = false;
+                    self.background.aim_tracks_progress = None;
+                    self.background.aim_tracks_offline = false;
                     if changed > 0 {
                         self.reload_library(); // pick up the new tracks and outlines
                     }
                 }
             }
         }
-        if self.frames == 1 && self.update_rx.is_none() {
-            self.update_rx = Some(crate::update::spawn(ui.ctx().clone()));
+        if self.frames == 1 && self.background.update_rx.is_none() {
+            self.background.update_rx = Some(crate::update::spawn(ui.ctx().clone()));
         }
-        if let Some(r) = self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.update = Some(r);
+        if let Some(r) = self
+            .background
+            .update_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            self.background.update = Some(r);
         }
-        let Some(r) = self.update.clone() else { return };
+        let Some(r) = self.background.update.clone() else {
+            return;
+        };
         let mut dismiss = false;
         egui::Panel::top("update")
             .exact_size(38.0)
@@ -98,20 +106,20 @@ impl App {
                             crate::update::open_url(&r.url);
                         }
                         if !r.notes.trim().is_empty()
-                            && chip(ui, "What's new", self.update_notes).clicked()
+                            && chip(ui, "What's new", self.background.update_notes).clicked()
                         {
-                            self.update_notes = !self.update_notes;
+                            self.background.update_notes = !self.background.update_notes;
                         }
                     });
                 });
             });
         if dismiss {
             crate::update::dismiss(&r.version);
-            self.update = None;
-            self.update_notes = false;
+            self.background.update = None;
+            self.background.update_notes = false;
             return;
         }
-        if self.update_notes {
+        if self.background.update_notes {
             let mut close = false;
             let closed = look::dialog(ui.ctx(), "whats_new", look::WIDTH, |ui| {
                 use look;
@@ -177,7 +185,7 @@ impl App {
                 }
                 close = l;
             });
-            self.update_notes = !closed && !close;
+            self.background.update_notes = !closed && !close;
         }
     }
 
@@ -216,7 +224,7 @@ impl App {
                             ui.add_space(10.0);
                             ui.label(RichText::new(file_name(path)).size(12.0).color(DIM));
                         }
-                        if let Some((done, total)) = self.import_progress.filter(|p| p.1 > 0) {
+                        if let Some((done, total)) = self.background.import_progress.filter(|p| p.1 > 0) {
                             ui.add_space(10.0);
                             ui.label(RichText::new(format!("{} of {}", group_thousands(done), group_thousands(total))).size(12.0).color(SECONDARY));
                             progress_bar(ui, 180.0, 6.0, done as f32 / total.max(1) as f32);
@@ -224,11 +232,11 @@ impl App {
                             ui.add(Icon::FolderOpen.image(TEXT, 14.0));
                         }
                         // Right to left: count, bar, label, icon.
-                        if let Some((done, total)) = self.aim_tracks_progress {
+                        if let Some((done, total)) = self.background.aim_tracks_progress {
                             ui.add_space(10.0);
                             ui.label(RichText::new(format!("{} of {}", group_thousands(done), group_thousands(total))).size(12.0).color(SECONDARY));
                             progress_bar(ui, 180.0, 6.0, done as f32 / total.max(1) as f32);
-                            let what = if self.aim_tracks_first { "Downloading AiM's tracks" } else { "Updating AiM's tracks" };
+                            let what = if self.background.aim_tracks_first { "Downloading AiM's tracks" } else { "Updating AiM's tracks" };
                             ui.label(RichText::new(what).font(medium(12.5)).color(TEXT));
                             ui.add(Icon::Download.image(TEXT, 14.0));
                         }
