@@ -677,7 +677,7 @@ impl App {
             }
             // A MyChron is on one kart at a time; the ones it replaces keep their sessions so far.
             let lib = self.library.get_or_insert_with(Library::load);
-            let newest = |l: &str| lib.newest_start(l);
+            let newest = |l: &str| crate::profiles::moved_now(lib.newest_start(l));
             if edit.logger.is_empty() {
                 profiles.unmount(id, &newest);
             } else {

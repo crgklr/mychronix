@@ -137,6 +137,16 @@ pub struct PastMyChron {
 }
 
 /// A session's start as compared with `PastMyChron::until`: "2026-10-11 02:21:31".
+/// When a MyChron moved (in the Garage) whose newest session here started
+/// at `newest`: now, so sessions it recorded before the move but that aren't
+/// downloaded yet stay with the kart it was on. (A download that names a kart
+/// moves it from its newest session here instead: the sessions downloaded
+/// then are that kart's.)
+pub fn moved_now(newest: String) -> String {
+    let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S").to_string();
+    newest.max(now)
+}
+
 pub fn stamp(date: Option<aim_xrk::summary::Date>, time: Option<&str>) -> String {
     match date {
         Some(d) => format!("{:04}-{:02}-{:02} {}", d.year, d.month, d.day, time.unwrap_or("00:00:00")),
@@ -633,5 +643,21 @@ mod tests {
         assert_eq!(p.drivers.len(), 1);
         assert_eq!(p.karts.len(), 1);
         assert_eq!(p.for_logger("4444").driver, "Bo");
+    }
+
+    #[test]
+    fn a_move_in_the_garage_leaves_sessions_not_yet_downloaded_with_the_old_kart() {
+        let mut p = Profiles::default();
+        for id in [1, 2] {
+            p.karts.push(Kart { id, name: format!("Kart {id}"), ..Default::default() });
+        }
+        p.mount("5555", 1, &|_: &str| String::new());
+        // Saturday's race was downloaded up to the morning; the afternoon is still on the MyChron.
+        let newest = "2020-06-06 09:00:00".to_string();
+        // Moved to kart 2 in the Garage the next day, before downloading.
+        p.mount("5555", 2, &|_: &str| moved_now(newest.clone()));
+        assert_eq!(p.kart_for("5555", "2020-06-06 14:00:00").map(|k| k.id), Some(1));
+        // Sessions recorded after the move are kart 2's.
+        assert_eq!(p.kart_for("5555", "2999-01-01 10:00:00").map(|k| k.id), Some(2));
     }
 }

@@ -588,7 +588,7 @@ impl App {
             if let Some(kart) = kart {
                 // The MyChron it replaces keeps its sessions so far; this one's
                 // sessions without a kart become this kart's.
-                profiles.mount(&s.logger, kart, &|l: &str| lib.newest_start(l));
+                profiles.mount(&s.logger, kart, &|l: &str| crate::profiles::moved_now(lib.newest_start(l)));
                 log::info!("MyChron {} set up on kart {kart}", s.logger);
                 if let Err(e) = profiles.save() {
                     self.error = Some(format!("Couldn't save: {e}"));
@@ -772,7 +772,7 @@ impl App {
                 self.garage.page = 0;
             }
             Confirm::RemoveKart { id, .. } => profiles.remove_kart(id),
-            Confirm::RemoveMyChron { logger, .. } => profiles.remove_logger(&logger, &|l: &str| lib.newest_start(l)),
+            Confirm::RemoveMyChron { logger, .. } => profiles.remove_logger(&logger, &|l: &str| crate::profiles::moved_now(lib.newest_start(l))),
         }
         if let Err(e) = self.profiles.as_ref().map(|p| p.save()).unwrap_or(Ok(())) {
             self.error = Some(format!("Couldn't save: {e}"));
