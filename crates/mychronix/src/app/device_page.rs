@@ -81,60 +81,7 @@ impl App {
                     networks,
                     current,
                 } => {
-                    self.device.scanning = false;
-                    // Switched to another network some other way (e.g. GNOME's menu):
-                    // undo the pause on the other networks' auto-connect.
-                    if self.device.joined.is_some()
-                        && current.as_deref().is_some_and(|c| !c.starts_with("AiM-"))
-                    {
-                        let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
-                        self.notices.success(format!(
-                            "You're back on {}. Your networks will connect automatically again.",
-                            current.clone().unwrap_or_default()
-                        ));
-                    }
-                    // Newly connected, or moved between USB and WiFi: read the list again.
-                    let newly = logger.is_some()
-                        && (self.device.logger.is_none() || usb != self.device.usb);
-                    if logger.is_none() {
-                        self.device.tracks = Default::default();
-                    }
-                    self.device.logger = logger;
-                    self.device.usb = usb;
-                    self.device.networks = networks;
-                    self.device.current_wifi = current;
-                    if self.device.busy.as_deref() == Some("Looking for your MyChron…") {
-                        self.device.busy = None;
-                    }
-                    // Remember which MyChron model this logger is, from its WiFi name.
-                    if let (Some(id), Some(ssid)) = (
-                        self.device.logger.as_ref().and_then(|b| b.logger_id),
-                        self.device.current_wifi.as_deref().filter(|_| !usb),
-                    ) {
-                        let model = model_from_ssid(ssid);
-                        if model.starts_with("MyChron") {
-                            let profiles = self
-                                .profiles
-                                .get_or_insert_with(crate::profiles::Profiles::load);
-                            let entry = profiles.loggers.entry(id.to_string()).or_default();
-                            if entry.model != model {
-                                entry.model = model.to_string();
-                                self.profiles_changed();
-                            }
-                        }
-                    }
-                    if newly {
-                        self.device.busy = Some("Reading the session list…".into());
-                        let serial = self.device.logger.as_ref().and_then(|b| b.logger_id);
-                        let dir = self.logger_dir();
-                        let _ = self
-                            .device
-                            .worker
-                            .as_ref()
-                            .unwrap()
-                            .tx
-                            .send(Command::List { serial, dir });
-                    }
+                    self.on_scanned(logger, usb, networks, current);
                 }
                 Event::Joined { ssid } => {
                     self.device.joined = Some(ssid);
@@ -155,60 +102,7 @@ impl App {
                     summaries,
                     tracks,
                 } => {
-                    let new_tracks = tracks.copied();
-                    self.device.tracks = tracks;
-                    self.device.files = files;
-                    self.device.summaries = summaries;
-                    self.device.busy = None;
-                    if new_tracks > 0 {
-                        self.reload_library(); // pick up the new custom tracks
-                        self.notices.success(format!("Copied {new_tracks} custom track{} from the MyChron into your track library.", if new_tracks == 1 { "" } else { "s" }));
-                    }
-                    // New sessions are picked, except engine warm-ups (as RaceStudio does); All new picks those too.
-                    let warm_up = |name: &str| {
-                        self.device
-                            .summaries
-                            .iter()
-                            .find(|s| s.file.as_deref() == Some(name))
-                            .is_some_and(listed_warm_up)
-                    };
-                    self.device.selected = self
-                        .new_on_logger()
-                        .into_iter()
-                        .filter(|e| !warm_up(&e.name))
-                        .map(|e| e.name)
-                        .collect();
-                    // Why each session counts as new or already downloaded.
-                    let dir = self.logger_dir();
-                    let sessions: Vec<_> = self
-                        .device
-                        .files
-                        .iter()
-                        .filter(|e| e.is_session())
-                        .collect();
-                    log::info!(
-                        "{} of {} sessions on the logger are new (compared with {:?})",
-                        self.device.selected.len(),
-                        sessions.len(),
-                        dir
-                    );
-                    for e in sessions {
-                        let local = dir
-                            .as_ref()
-                            .and_then(|d| std::fs::metadata(d.join(&e.name)).ok())
-                            .map(|m| m.len());
-                        log::debug!(
-                            "  {}: logger {} bytes, here {:?} → {}",
-                            e.name,
-                            e.size,
-                            local,
-                            if local == Some(e.size) {
-                                "downloaded"
-                            } else {
-                                "new"
-                            }
-                        );
-                    }
+                    self.on_listed(files, summaries, tracks);
                 }
                 Event::Progress {
                     index,
@@ -220,60 +114,7 @@ impl App {
                     self.device.progress = Some((index, count, file, done, total));
                 }
                 Event::Downloaded { saved } => {
-                    // Replaced sessions' saved lap summaries were dropped: don't save old ones back.
-                    self.sensors.digests = None;
-                    self.sensors.digests_asked.clear();
-                    self.device.unsaved_setup = None;
-                    if let Some((path, setup)) = self.device.pending_setup.take() {
-                        // A session's own sheet is only changed from its Setup.
-                        if crate::setup::Setup::path_for(&path).exists() {
-                            self.notices.error("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.");
-                        } else if let Err(e) = setup.save(&path) {
-                            self.notices.error(format!("Couldn't save the setup: {e}"));
-                        } else if let Some(id) =
-                            self.device.logger.as_ref().and_then(|b| b.logger_id)
-                        {
-                            // The kart's next setup is now that session's.
-                            let profiles = self
-                                .profiles
-                                .get_or_insert_with(crate::profiles::Profiles::load);
-                            if let Some(k) = profiles
-                                .karts
-                                .iter_mut()
-                                .find(|k| k.logger == id.to_string() && k.next_setup.is_some())
-                            {
-                                k.next_setup = None;
-                                self.profiles_changed();
-                            }
-                        }
-                    }
-                    self.device.busy = None;
-                    self.device.progress = None;
-                    let mut done = format!("Downloaded {}.", plural(saved.len(), "session"));
-                    // Check the new sessions' sensors in the background: the files as saved.
-                    if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
-                        self.check_downloaded(saved, &id.to_string(), &ctx);
-                    }
-                    self.reload_library(); // reload sessions and tracks
-                    self.device.selected.clear();
-                    // Done with the MyChron: back to the computer's own WiFi.
-                    if self.device.joined.is_some() {
-                        log::info!("download finished: leaving the MyChron's WiFi");
-                        self.device.busy = Some("Reconnecting to your network…".into());
-                        let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
-                        done.push_str(" Mychronix is reconnecting you to your WiFi.");
-                    } else if cfg!(target_os = "macos")
-                        && self
-                            .device
-                            .current_wifi
-                            .as_deref()
-                            .is_some_and(|w| w.starts_with("AiM-"))
-                    {
-                        done.push_str(" You can switch back to your WiFi from the menu bar.");
-                    }
-                    self.notices
-                        .success(done)
-                        .go_to("Open Sessions", Page::Sessions);
+                    self.on_downloaded(saved, &ctx);
                 }
                 Event::Error(msg) => {
                     // A setup typed for a download that failed is offered again next time.
@@ -407,6 +248,192 @@ impl App {
             let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Scan);
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+    /// A scan finished: what was found, and whether to read the list again.
+    fn on_scanned(
+        &mut self,
+        logger: Option<aim_link::Beacon>,
+        usb: bool,
+        networks: Vec<(String, u8)>,
+        current: Option<String>,
+    ) {
+        use crate::device::Command;
+        self.device.scanning = false;
+        // Switched to another network some other way (e.g. GNOME's menu):
+        // undo the pause on the other networks' auto-connect.
+        if self.device.joined.is_some()
+            && current.as_deref().is_some_and(|c| !c.starts_with("AiM-"))
+        {
+            let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
+            self.notices.success(format!(
+                "You're back on {}. Your networks will connect automatically again.",
+                current.clone().unwrap_or_default()
+            ));
+        }
+        // Newly connected, or moved between USB and WiFi: read the list again.
+        let newly = logger.is_some() && (self.device.logger.is_none() || usb != self.device.usb);
+        if logger.is_none() {
+            self.device.tracks = Default::default();
+        }
+        self.device.logger = logger;
+        self.device.usb = usb;
+        self.device.networks = networks;
+        self.device.current_wifi = current;
+        if self.device.busy.as_deref() == Some("Looking for your MyChron…") {
+            self.device.busy = None;
+        }
+        // Remember which MyChron model this logger is, from its WiFi name.
+        if let (Some(id), Some(ssid)) = (
+            self.device.logger.as_ref().and_then(|b| b.logger_id),
+            self.device.current_wifi.as_deref().filter(|_| !usb),
+        ) {
+            let model = model_from_ssid(ssid);
+            if model.starts_with("MyChron") {
+                let profiles = self
+                    .profiles
+                    .get_or_insert_with(crate::profiles::Profiles::load);
+                let entry = profiles.loggers.entry(id.to_string()).or_default();
+                if entry.model != model {
+                    entry.model = model.to_string();
+                    self.profiles_changed();
+                }
+            }
+        }
+        if newly {
+            self.device.busy = Some("Reading the session list…".into());
+            let serial = self.device.logger.as_ref().and_then(|b| b.logger_id);
+            let dir = self.logger_dir();
+            let _ = self
+                .device
+                .worker
+                .as_ref()
+                .unwrap()
+                .tx
+                .send(Command::List { serial, dir });
+        }
+    }
+
+    /// The MyChron's session list arrived: which are new, and which to pick.
+    fn on_listed(
+        &mut self,
+        files: Vec<aim_link::DirEntry>,
+        summaries: Vec<aim_xrk::SessionSummary>,
+        tracks: crate::device::MyChronTracks,
+    ) {
+        let new_tracks = tracks.copied();
+        self.device.tracks = tracks;
+        self.device.files = files;
+        self.device.summaries = summaries;
+        self.device.busy = None;
+        if new_tracks > 0 {
+            self.reload_library(); // pick up the new custom tracks
+            self.notices.success(format!(
+                "Copied {new_tracks} custom track{} from the MyChron into your track library.",
+                if new_tracks == 1 { "" } else { "s" }
+            ));
+        }
+        // New sessions are picked, except engine warm-ups (as RaceStudio does); All new picks those too.
+        let warm_up = |name: &str| {
+            self.device
+                .summaries
+                .iter()
+                .find(|s| s.file.as_deref() == Some(name))
+                .is_some_and(listed_warm_up)
+        };
+        self.device.selected = self
+            .new_on_logger()
+            .into_iter()
+            .filter(|e| !warm_up(&e.name))
+            .map(|e| e.name)
+            .collect();
+        // Why each session counts as new or already downloaded.
+        let dir = self.logger_dir();
+        let sessions: Vec<_> = self
+            .device
+            .files
+            .iter()
+            .filter(|e| e.is_session())
+            .collect();
+        log::info!(
+            "{} of {} sessions on the logger are new (compared with {:?})",
+            self.device.selected.len(),
+            sessions.len(),
+            dir
+        );
+        for e in sessions {
+            let local = dir
+                .as_ref()
+                .and_then(|d| std::fs::metadata(d.join(&e.name)).ok())
+                .map(|m| m.len());
+            log::debug!(
+                "  {}: logger {} bytes, here {:?} → {}",
+                e.name,
+                e.size,
+                local,
+                if local == Some(e.size) {
+                    "downloaded"
+                } else {
+                    "new"
+                }
+            );
+        }
+    }
+
+    /// A download finished: its setup sheet, the message, the sensor check, and back to your WiFi.
+    fn on_downloaded(&mut self, saved: Vec<PathBuf>, ctx: &egui::Context) {
+        use crate::device::Command;
+        // Replaced sessions' saved lap summaries were dropped: don't save old ones back.
+        self.sensors.digests = None;
+        self.sensors.digests_asked.clear();
+        self.device.unsaved_setup = None;
+        if let Some((path, setup)) = self.device.pending_setup.take() {
+            // A session's own sheet is only changed from its Setup.
+            if crate::setup::Setup::path_for(&path).exists() {
+                self.notices.error("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.");
+            } else if let Err(e) = setup.save(&path) {
+                self.notices.error(format!("Couldn't save the setup: {e}"));
+            } else if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
+                // The kart's next setup is now that session's.
+                let profiles = self
+                    .profiles
+                    .get_or_insert_with(crate::profiles::Profiles::load);
+                if let Some(k) = profiles
+                    .karts
+                    .iter_mut()
+                    .find(|k| k.logger == id.to_string() && k.next_setup.is_some())
+                {
+                    k.next_setup = None;
+                    self.profiles_changed();
+                }
+            }
+        }
+        self.device.busy = None;
+        self.device.progress = None;
+        let mut done = format!("Downloaded {}.", plural(saved.len(), "session"));
+        // Check the new sessions' sensors in the background: the files as saved.
+        if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
+            self.check_downloaded(saved, &id.to_string(), ctx);
+        }
+        self.reload_library(); // reload sessions and tracks
+        self.device.selected.clear();
+        // Done with the MyChron: back to the computer's own WiFi.
+        if self.device.joined.is_some() {
+            log::info!("download finished: leaving the MyChron's WiFi");
+            self.device.busy = Some("Reconnecting to your network…".into());
+            let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Leave);
+            done.push_str(" Mychronix is reconnecting you to your WiFi.");
+        } else if cfg!(target_os = "macos")
+            && self
+                .device
+                .current_wifi
+                .as_deref()
+                .is_some_and(|w| w.starts_with("AiM-"))
+        {
+            done.push_str(" You can switch back to your WiFi from the menu bar.");
+        }
+        self.notices
+            .success(done)
+            .go_to("Open Sessions", Page::Sessions);
     }
 
     pub(super) fn device_page(&mut self, ui: &mut Ui) {
