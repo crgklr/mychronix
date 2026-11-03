@@ -518,6 +518,15 @@ impl App {
     }
 
     fn track_detail(&mut self, ui: &mut Ui, lib: &Library, i: usize, map_h: f32) {
+        self.track_info(ui, lib, i);
+        ui.add_space(10.0);
+        self.track_detail_map(ui, lib, i, map_h);
+        ui.add_space(10.0);
+        self.track_sessions(ui, lib, i);
+    }
+
+    /// The track's details: AiM's for the venue, laid out like RaceStudio's track view.
+    fn track_info(&mut self, ui: &mut Ui, lib: &Library, i: usize) {
         let t = &lib.tracks[i];
         let file = self
             .track_page
@@ -528,7 +537,6 @@ impl App {
         // The track file's own start/finish, read on selection (AiM tracks' come with the details).
         let start_finish = file.and_then(|f| f.start_finish).or(t.start_finish);
         let info = file.map(|f| &f.info);
-
         // AiM's details for the venue, laid out like RaceStudio's track view.
         section(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -678,8 +686,19 @@ impl App {
                 }
             });
         });
-        ui.add_space(10.0);
+    }
 
+    /// The map: streets or satellite, with the track, your lap, its splits or its elevation on top.
+    fn track_detail_map(&mut self, ui: &mut Ui, lib: &Library, i: usize, map_h: f32) {
+        let t = &lib.tracks[i];
+        let file = self
+            .track_page
+            .file
+            .as_ref()
+            .filter(|(j, _)| *j == i)
+            .map(|(_, f)| f);
+        // The track file's own start/finish, read on selection (AiM tracks' come with the details).
+        let start_finish = file.and_then(|f| f.start_finish).or(t.start_finish);
         // Map: OpenStreetMap with the track drawn on top.
         let file_outline = self
             .track_page
@@ -972,9 +991,11 @@ impl App {
                 );
             }
         }
-        ui.add_space(10.0);
+    }
 
-        // Sessions recorded here, everyone's or one driver's.
+    /// Sessions recorded at the track, everyone's or one driver's.
+    fn track_sessions(&mut self, ui: &mut Ui, lib: &Library, i: usize) {
+        let t = &lib.tracks[i];
         let mut open = None;
         let profiles = self
             .profiles
