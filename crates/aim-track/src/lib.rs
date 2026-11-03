@@ -14,6 +14,8 @@ use std::path::Path;
 
 use aim_link::frame;
 
+pub mod write;
+
 pub const RIA_RECORD: usize = 128;
 
 #[derive(Debug, thiserror::Error)]

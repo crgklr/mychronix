@@ -351,7 +351,7 @@ impl App {
     }
 
     /// The panel's first column: today's session header and details.
-    fn panel_session(&mut self, ui: &mut Ui, session: &Session) {
+    fn panel_session(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let i = &session.info;
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let title = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
@@ -375,6 +375,16 @@ impl App {
             }
             if link.on_hover_text("Change the track this session was at").clicked() && let Some(p) = self.path.clone() {
                 self.open_track_pick(p);
+            }
+            // Moving a track's start/finish line (or making a track) needs GPS.
+            if session.gps.is_some() {
+                let line = ui.add(egui::Label::new(RichText::new("Start/finish line…").size(14.0).color(theme::ACCENT)).sense(Sense::click()));
+                if line.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Set where laps start: on one of your tracks, or as a new track").clicked()
+                    && let Some(p) = self.path.clone()
+                {
+                    let track = self.session_track_name(&p).or_else(|| session.info.venue.clone()).unwrap_or_default();
+                    self.line_pick = line_pick_ui::LinePick::new(p, track, session.clone());
+                }
             }
         });
         // Session · when · driver · kart, the driver in bold (click to change who drove).
@@ -416,13 +426,13 @@ impl App {
             ui.add(egui::Label::new(RichText::new(why).size(13.0).color(DIM)).wrap());
         }
         // Still one long lap after GPS timing: no start/finish line known here. Set one.
-        if session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session) && let Some(gps) = &session.gps {
+        if session.info.laps_from_gps.is_none() && aim_xrk::relap::needs_retiming(session) && session.gps.is_some() {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new("The MyChron recorded one long lap here, and Mychronix doesn't know this track's start/finish line.").size(13.0).color(theme::FAVORITE)).wrap());
             let link = ui.add(egui::Label::new(RichText::new("Set the start/finish line").size(14.0).color(theme::ACCENT)).sense(Sense::click()));
             if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && let Some(p) = self.path.clone() {
                 let track = self.session_track_name(&p).or_else(|| i.venue.clone()).unwrap_or_default();
-                self.line_pick = line_pick_ui::LinePick::new(p, track, gps);
+                self.line_pick = line_pick_ui::LinePick::new(p, track, session.clone());
             }
         }
         if let Some(gaps) = recording_gaps_note(session, &self.recording_gaps) {

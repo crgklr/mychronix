@@ -374,7 +374,7 @@ Roughly in priority order:
 - [ ] Edit sessions' details after downloading, one or many at once.
 - [ ] Export sessions and laps to CSV.
 - [ ] Drag and drop on Linux under Wayland (waiting on the windowing library).
-- [ ] Make a custom track from a session's lap; import and export `.tkk` files.
+- [ ] Import and export `.tkk` files, and check tracks made in Mychronix in RaceStudio 3.
 - [ ] Device information: firmware version and odometers (read-only).
 - [ ] Compare laps by time when there's no GPS and no gearing.
 - [ ] Read the MyChron 4's CAN devices' own readings.

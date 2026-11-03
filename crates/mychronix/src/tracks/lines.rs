@@ -4,47 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use aim_track::LatLon;
-use serde::{Deserialize, Serialize};
 
 use super::files_with_ext;
-
-/// Start/finish lines set in Mychronix (a session's Set the start/finish
-/// line), for tracks it knows no line for: `~/Mychronix/lines.json`. GPS lap
-/// timing tries them like your own tracks' lines.
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MyLines {
-    pub lines: Vec<MyLine>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MyLine {
-    pub lat: f64,
-    pub lon: f64,
-    /// Where it is, as the session named it ("" when it didn't).
-    #[serde(default)]
-    pub track: String,
-}
-
-impl MyLines {
-    fn path() -> Option<PathBuf> {
-        crate::paths::data("lines.json")
-    }
-
-    pub fn load() -> Self {
-        crate::storage::load_or_default(Self::path())
-    }
-
-    /// Adds a line, replacing one set within 50 m of it (set again, a bit along).
-    pub fn add(lat: f64, lon: f64, track: &str) -> std::io::Result<()> {
-        let path = Self::path().ok_or_else(|| std::io::Error::other("no home folder"))?;
-        let mut all = Self::load();
-        let here = LatLon { lat, lon };
-        all.lines.retain(|l| LatLon { lat: l.lat, lon: l.lon }.distance_m(&here) > 50.0);
-        all.lines.push(MyLine { lat, lon, track: track.to_string() });
-        crate::storage::save(&path, &all)
-    }
-}
 
 /// What GPS lap timing had to go on: your custom tracks and AiM's lists, by
 /// name and size. Changes when a track is added or a list is updated.
@@ -55,7 +16,6 @@ pub fn stamp() -> String {
     files.extend(files_with_ext(&ours, "ria"));
     files.extend(crate::aim_tracks::list_path());
     files.extend(crate::aim_tracks::mychron_list_path());
-    files.extend(MyLines::path());
     for f in files {
         let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
         parts.push(format!("{}:{size}", f.file_name().unwrap_or_default().to_string_lossy()));
@@ -80,7 +40,6 @@ pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<Line>, Vec
     let here = LatLon { lat, lon };
     let line = |t: aim_track::TrackFile, guid: Option<String>| t.start_finish.map(|p| (p, guid.or(t.guid).unwrap_or_default()));
     let mut own: Vec<(LatLon, String)> = files_with_ext(&ours, "tkk").iter().filter_map(|p| line(aim_track::read_tkk(p).ok()?, None)).collect();
-    own.extend(MyLines::load().lines.into_iter().map(|l| (LatLon { lat: l.lat, lon: l.lon }, String::new())));
     let mut aim: Vec<(LatLon, String)> = Vec::new();
     let mut rias = files_with_ext(&ours, "ria");
     rias.extend(crate::aim_tracks::list_path());
@@ -104,4 +63,30 @@ pub fn start_finishes_near(lat: f64, lon: f64, within_m: f64) -> (Vec<Line>, Vec
         v.into_iter().map(|(_, p, guid)| Line { at: (p.lat, p.lon), guid }).collect::<Vec<_>>()
     };
     (near(own), near(aim))
+}
+
+/// One of your track files (in `~/Mychronix/tracks`) near a spot, whose
+/// start/finish line can be moved.
+#[derive(Debug, Clone)]
+pub struct NearTrack {
+    pub path: PathBuf,
+    pub name: String,
+    pub distance_m: f64,
+}
+
+/// Your track files whose start/finish (or center) is within `within_m` of a
+/// spot, nearest first. AiM's aren't changed: they're replaced when its list updates.
+pub fn tracks_near(lat: f64, lon: f64, within_m: f64) -> Vec<NearTrack> {
+    let ours = crate::paths::data("tracks").unwrap_or_default();
+    let here = LatLon { lat, lon };
+    let mut out: Vec<NearTrack> = files_with_ext(&ours, "tkk")
+        .into_iter()
+        .filter_map(|path| {
+            let t = aim_track::read_tkk(&path).ok()?;
+            let d = t.start_finish.or(t.center).map(|p| p.distance_m(&here)).filter(|d| *d <= within_m)?;
+            Some(NearTrack { path, name: if t.full_name.is_empty() { t.name } else { t.full_name }, distance_m: d })
+        })
+        .collect();
+    out.sort_by(|a, b| a.distance_m.total_cmp(&b.distance_m));
+    out
 }

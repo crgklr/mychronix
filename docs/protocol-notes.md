@@ -547,3 +547,9 @@ MyChron 6 made itself (track learning). **observed** unless marked otherwise.
   `idn` record naming the MyChron that made it (its serial at bytes 12..16).
 - Unknown still: `Vidx`, the `ppi`/`ipl` records, the second `anf` value, most
   of `lid`, and what RaceStudio 3 or a MyChron require of a track they load.
+- **What Mychronix writes** (`aim_track::write`, Nov 3, 2026): moving a line
+  changes only `Vnfo` 80..88 (and 48..56 when the center was on the line) and
+  re-frames the file; a new track from a session's fastest lap is laid out as a
+  MyChron lays out its own (`Ptkk Vnfo Vidx pts anf lid`, a point every ~4 m,
+  speed in `anf`, the second `anf` value written as 30, `lid` only `idn\x01`).
+  Not yet tried in RaceStudio 3 or on a MyChron.
