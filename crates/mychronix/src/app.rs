@@ -136,6 +136,9 @@ pub struct App {
     page: Page,
     path: Option<PathBuf>,
     session: Option<std::sync::Arc<Session>>,
+    /// Close the open session at the end of this frame (`self.session` is
+    /// held aside while the page draws, so setting it to None there is undone).
+    close_session: bool,
     error: Option<String>,
     /// Selected channels and the color slot each keeps while selected.
     selected: BTreeMap<usize, usize>,
@@ -691,8 +694,10 @@ impl eframe::App for App {
         // After the pages and dialogs: a change they made starts reloading now.
         self.library_poll(&ui.ctx().clone());
 
-        // Put the session back, unless the page opened another one this frame.
-        if self.session.is_none() {
+        // Put the session back, unless the page opened another one or closed it this frame.
+        if std::mem::take(&mut self.close_session) {
+            drop(session);
+        } else if self.session.is_none() {
             self.session = session;
         }
         self.screenshot(ui);

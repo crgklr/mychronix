@@ -386,7 +386,12 @@ impl App {
     }
 
     /// The card at the top of the Garage for a MyChron that needs a home.
-    pub(super) fn unplaced_card(&mut self, ui: &mut Ui, u: &Unplaced, model: &str) {
+    /// A MyChron that needs a kart, with Set up and Not now. True when Not now
+    /// was clicked: the caller then calls `snooze` once its profiles are back
+    /// in `self` (the Garage holds them aside while it draws).
+    #[must_use]
+    pub(super) fn unplaced_card(&mut self, ui: &mut Ui, u: &Unplaced, model: &str) -> bool {
+        let mut not_now = false;
         let (title, line) = match &u.before {
             Some((driver, kart, until)) => {
                 let whose = if driver.is_empty() { kart.clone() } else { format!("{driver}'s {kart}") };
@@ -416,19 +421,25 @@ impl App {
                         self.garage.mychron_setup = Some(MyChronSetup::new(&u.logger, named));
                     }
                     if look::big_button(ui, "Not now", None, Kind::Quiet, true) {
-                        let connected = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
-                        if connected.as_deref() == Some(u.logger.as_str()) {
-                            self.garage.snoozed_while_on.insert(u.logger.clone());
-                        }
-                        let profiles = self.profiles.get_or_insert_with(Profiles::load);
-                        profiles.snoozed.insert(u.logger.clone(), u.sessions);
-                        if let Err(e) = profiles.save() {
-                            self.error = Some(format!("Couldn't save: {e}"));
-                        }
+                        not_now = true;
                     }
                 });
             });
         });
+        not_now
+    }
+
+    /// "Not now" for a MyChron that needs a kart: not asked again until it has new sessions.
+    pub(super) fn snooze(&mut self, u: &Unplaced) {
+        let connected = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
+        if connected.as_deref() == Some(u.logger.as_str()) {
+            self.garage.snoozed_while_on.insert(u.logger.clone());
+        }
+        let profiles = self.profiles.get_or_insert_with(Profiles::load);
+        profiles.snoozed.insert(u.logger.clone(), u.sessions);
+        if let Err(e) = profiles.save() {
+            self.error = Some(format!("Couldn't save: {e}"));
+        }
     }
 
     /// Setting up a MyChron: whose it is, which kart, and (if that kart has
@@ -583,6 +594,7 @@ impl App {
                     self.error = Some(format!("Couldn't save: {e}"));
                 }
                 self.setup_baselines = None;
+                self.library = Some(lib);
                 return;
             }
         }
@@ -719,6 +731,7 @@ impl App {
         };
         if done {
             self.apply_confirm(c, &lib);
+            self.library = Some(lib);
             return;
         }
         self.library = Some(lib);
@@ -752,6 +765,7 @@ impl App {
                 log::info!("deleted driver {name}: {} karts, {} sessions ({} files) to the Trash", karts.len(), theirs.len(), files.len());
                 if open_is_theirs {
                     self.session = None;
+                    self.close_session = true;
                     self.path = None;
                     self.page = Page::Garage;
                 }

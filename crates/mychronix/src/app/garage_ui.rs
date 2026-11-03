@@ -284,8 +284,11 @@ impl App {
         self.import_banner(ui);
 
         // MyChrons that need a home: whose they are and which kart.
+        let mut snoozed = Vec::new();
         for u in self.unplaced_mychrons(&lib, &profiles) {
-            self.unplaced_card(ui, &u, &model_of(&u.logger));
+            if self.unplaced_card(ui, &u, &model_of(&u.logger)) {
+                snoozed.push(u);
+            }
             ui.add_space(12.0);
         }
 
@@ -349,6 +352,9 @@ impl App {
         self.profiles = Some(profiles);
         self.setup_baselines = Some(baselines);
         self.events_page.events = Some(defs);
+        for u in &snoozed {
+            self.snooze(u);
+        }
         self.setup_dialog(ui.ctx());
         if let Some(c) = act.confirm.take() {
             self.garage.confirm = Some(c);

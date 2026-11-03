@@ -356,7 +356,9 @@ impl App {
         self.library = Some(lib);
         self.profiles = Some(profiles);
         for (u, model) in cards {
-            self.unplaced_card(ui, &u, &model);
+            if self.unplaced_card(ui, &u, &model) {
+                self.snooze(&u);
+            }
             ui.add_space(14.0);
         }
     }
