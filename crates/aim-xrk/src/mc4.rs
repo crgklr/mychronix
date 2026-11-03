@@ -399,7 +399,7 @@ pub fn summary(path: &std::path::Path) -> Result<crate::summary::SessionSummary>
         let p: Vec<u32> = d.split('/').filter_map(|x| x.parse().ok()).collect();
         (p.len() == 3).then(|| crate::summary::Date { year: p[2] as u16, month: p[0] as u8, day: p[1] as u8 })
     });
-    let best = s.laps.iter().skip(1).filter(|l| l.duration_ms() >= 10_000).min_by_key(|l| l.duration_ms());
+    let best = s.best_lap(crate::laps::MIN_LAP_MS);
     let duration = s.channels.iter().filter_map(|c| c.times_ms.last()).max().copied().max(s.laps.last().map(|l| l.end_ms));
     let max_rpm = s.channel("Engine").and_then(|c| c.values.iter().copied().reduce(f64::max)).map(|v| v as u32);
     Ok(crate::summary::SessionSummary {

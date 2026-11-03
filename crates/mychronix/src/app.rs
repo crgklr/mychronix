@@ -60,8 +60,8 @@ use crate::theme::{
 
 /// Points drawn per channel; longer series are min/max-decimated to this many buckets.
 const MAX_POINTS: usize = 4000;
-/// Laps shorter than this are out/in laps cut by the session start or end.
-pub(crate) const MIN_LAP_MS: i64 = 10_000;
+/// No kart lap is shorter (see `aim_xrk::laps`).
+pub(crate) use aim_xrk::laps::MIN_LAP_MS;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum Page {

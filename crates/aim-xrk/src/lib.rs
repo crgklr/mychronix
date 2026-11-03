@@ -9,6 +9,7 @@ use std::path::Path;
 pub mod checks;
 pub mod drk;
 pub mod imu;
+pub mod laps;
 pub mod mc4;
 pub mod notes;
 pub mod relap;
@@ -175,11 +176,12 @@ impl Session {
         if self.laps.len() < 3 { &[] } else { &self.laps[1..self.laps.len() - 1] }
     }
 
-    /// The fastest complete lap no shorter than `min_ms`.
+    /// The fastest complete lap no shorter than `min_ms`, nor cut short (see `laps`).
     pub fn best_lap(&self, min_ms: i64) -> Option<&Lap> {
+        let shortest = laps::shortest(self, min_ms);
         self.complete_laps()
             .iter()
-            .filter(|l| l.duration_ms() >= min_ms)
+            .filter(|l| l.duration_ms() >= shortest)
             .min_by_key(|l| l.duration_ms())
     }
 
@@ -188,9 +190,10 @@ impl Session {
     /// `checks::recording_gaps`, passed as `gaps`) never stands in for the
     /// track. The best lap when every lap has a gap.
     pub fn reference_lap(&self, min_ms: i64, gaps: &[(i64, i64)]) -> Option<&Lap> {
+        let shortest = laps::shortest(self, min_ms);
         self.complete_laps()
             .iter()
-            .filter(|l| l.duration_ms() >= min_ms && !has_gap(l, gaps))
+            .filter(|l| l.duration_ms() >= shortest && !has_gap(l, gaps))
             .min_by_key(|l| l.duration_ms())
             .or_else(|| self.best_lap(min_ms))
     }

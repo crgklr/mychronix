@@ -17,13 +17,9 @@ pub enum Note {
     TempTrend { channel: String, units: String, from: f64, to: f64, per_lap: f64 },
 }
 
-/// The racing laps of a session.
+/// The racing laps of a session (see `laps::racing`).
 pub fn racing_laps(session: &Session) -> Vec<Lap> {
-    let laps = session.complete_laps();
-    let mut d: Vec<i64> = laps.iter().map(|l| l.duration_ms()).filter(|&d| d >= 10_000).collect();
-    d.sort_unstable();
-    let Some(&median) = d.get(d.len() / 2) else { return Vec::new() };
-    laps.iter().filter(|l| l.duration_ms() >= 10_000 && l.duration_ms() as f64 <= median as f64 * 1.15).copied().collect()
+    session.laps.iter().zip(crate::laps::racing(session)).filter(|(_, r)| *r).map(|(l, _)| *l).collect()
 }
 
 pub fn session_notes(session: &Session) -> Vec<Note> {

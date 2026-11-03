@@ -211,7 +211,7 @@ pub fn summarize(s: &crate::Session, file: Option<&str>) -> SessionSummary {
         let p: Vec<u16> = d.split('/').filter_map(|x| x.trim().parse().ok()).collect();
         (p.len() == 3 && (1..=12).contains(&p[0]) && (1..=31).contains(&p[1])).then(|| Date { year: p[2], month: p[0] as u8, day: p[1] as u8 })
     });
-    let best = s.best_lap(10_000);
+    let best = s.best_lap(crate::laps::MIN_LAP_MS);
     // Where the first timed lap started: the start/finish line, for matching the track.
     let start_finish = crate::relap::logger_line(s);
     let rpm = ["RPM", "Engine", "Engine RPM"].iter().find_map(|n| s.channel(n));

@@ -49,23 +49,9 @@ pub(super) fn pretty_units(units: &str) -> &str {
     }
 }
 
-/// Laps that aren't timed laps: the out-lap (first) and in-lap (last), which
-/// run to or from the ends of the recording, plus any lap far off the pace
-/// (cool-downs, cautions): shorter than `MIN_LAP_MS` or 15% slower than the
-/// median complete lap.
+/// Laps that don't count: not racing laps (see `aim_xrk::laps::racing`).
 pub(crate) fn slow_laps(session: &Session) -> Vec<bool> {
-    let n = session.laps.len();
-    let mut times: Vec<i64> = session.complete_laps().iter().map(|l| l.duration_ms()).filter(|&d| d >= MIN_LAP_MS).collect();
-    times.sort_unstable();
-    let median = times.get(times.len() / 2).copied().unwrap_or(i64::MAX);
-    session
-        .laps
-        .iter()
-        .enumerate()
-        .map(|(i, l)| {
-            i == 0 || i + 1 == n || l.duration_ms() < MIN_LAP_MS || l.duration_ms() as f64 > median as f64 * 1.15
-        })
-        .collect()
+    aim_xrk::laps::racing(session).into_iter().map(|r| !r).collect()
 }
 
 /// Lap-timing channels are stored in milliseconds; show them in seconds.

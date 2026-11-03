@@ -2,7 +2,7 @@
 //! session: its racing lap times (for sparklines), the sensors that recorded
 //! real readings, and the sensor problems found (see `aim_xrk::checks`).
 //! Worked out in the background once per file and cached in
-//! `session-digests.json` in the cache folder, keyed by path and size.
+//! `session-digests-v5.json` in the cache folder (the version goes up when what a digest holds changes), keyed by path and size.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,7 +96,7 @@ impl Digests {
     fn file() -> Option<PathBuf> {
         // v3: laps timed from GPS (see `jobs::relap`); v4: against tracks'
         // real start/finish lines, and with few laps.
-        crate::paths::cache_dir().map(|d| d.join("session-digests-v4.json"))
+        crate::paths::cache_dir().map(|d| d.join("session-digests-v5.json"))
     }
 
     /// The saved digests. When the tracks have changed since (a custom track
