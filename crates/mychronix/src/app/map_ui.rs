@@ -379,7 +379,10 @@ impl App {
         let map = if satellite {
             let tiles =
                 super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
-            ui.add(walkers::Map::new(Some(tiles), &mut memory, start).with_plugin(overlay))
+            ui.add(
+                walkers::Map::new(super::tracks_ui::shown(tiles), &mut memory, start)
+                    .with_plugin(overlay),
+            )
         } else {
             ui.add(walkers::Map::new(None, &mut memory, start).with_plugin(overlay))
         };

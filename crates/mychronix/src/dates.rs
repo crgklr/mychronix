@@ -31,6 +31,9 @@ impl Stamp {
 
     /// Now, on this computer's clock.
     pub fn now() -> Self {
+        if let Some(t) = crate::hooks::get().today {
+            return Stamp(t);
+        }
         Stamp(
             jiff::Zoned::now()
                 .datetime()
@@ -217,7 +220,9 @@ pub fn week_start(d: Date) -> Date {
 
 /// Today on this computer's clock (local time: a race-day evening is still that day).
 pub fn today() -> Date {
-    let d = jiff::Zoned::now().date();
+    let d = crate::hooks::get()
+        .today
+        .map_or_else(|| jiff::Zoned::now().date(), |t| t.date());
     Date {
         year: d.year() as u16,
         month: d.month() as u8,

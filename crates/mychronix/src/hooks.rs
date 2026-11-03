@@ -14,6 +14,12 @@ pub struct Hooks {
     pub screenshot_frame: u32,
     /// MYCHRONIX_DEMO: made-up names in place of the real ones.
     pub demo: bool,
+    /// `MYCHRONIX_TODAY=<YYYY-MM-DD>`: the date it is (6 PM that day), so ages,
+    /// seasons and "last race day" come out the same in screenshot tests.
+    pub today: Option<jiff::civil::DateTime>,
+    /// MYCHRONIX_NO_TILES: maps without street or satellite tiles (nothing
+    /// fetched), as when offline.
+    pub no_tiles: bool,
     /// MYCHRONIX_WINDOWED: open at the normal window size, not maximized.
     pub windowed: bool,
     /// `MYCHRONIX_PAGE=<page>`: start on that page.
@@ -84,6 +90,10 @@ impl Hooks {
                 .unwrap_or(20),
             demo: set("MYCHRONIX_DEMO"),
             windowed: set("MYCHRONIX_WINDOWED"),
+            today: text("MYCHRONIX_TODAY")
+                .and_then(|v| v.parse::<jiff::civil::Date>().ok())
+                .map(|d| d.at(18, 0, 0, 0)),
+            no_tiles: set("MYCHRONIX_NO_TILES"),
             page: text("MYCHRONIX_PAGE"),
             view: text("MYCHRONIX_VIEW"),
             distance: set("MYCHRONIX_DISTANCE"),

@@ -267,7 +267,7 @@ impl App {
                         let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite);
                         let overlay = LineOverlay { trace: pick.trace.clone(), outline: pick.outline.clone(), racing: pick.racing.clone(), chosen: pick.chosen, clicked: clicked.clone() };
                         let center = pick.trace.first().map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
-                        let map = ui.add_sized(size, walkers::Map::new(Some(tiles), &mut pick.memory, center).with_plugin(overlay));
+                        let map = ui.add_sized(size, walkers::Map::new(super::tracks_ui::shown(tiles), &mut pick.memory, center).with_plugin(overlay));
                         let corner = Rect::from_min_size(map.rect.right_top() + vec2(-190.0, 10.0), vec2(180.0, 36.0));
                         // Over the map's corner, without taking room below it.
                         let mut over = ui.new_child(egui::UiBuilder::new().max_rect(corner).layout(Layout::right_to_left(Align::Center)));

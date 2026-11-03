@@ -711,7 +711,7 @@ impl App {
                     self.map_tiles.as_mut().unwrap()
                 };
                 let map = ui.add(
-                    walkers::Map::new(Some(tiles), &mut self.track_page.map_memory, center)
+                    walkers::Map::new(shown(tiles), &mut self.track_page.map_memory, center)
                         .with_plugin(overlay),
                 );
                 // Map / Satellite switch in the map's top-right corner.
@@ -1288,6 +1288,11 @@ fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
             .color(SECONDARY),
         );
     });
+}
+
+/// `tiles` for a map, or none with MYCHRONIX_NO_TILES (see `hooks`).
+pub(super) fn shown(tiles: &mut walkers::HttpTiles) -> Option<&mut dyn walkers::Tiles> {
+    (!crate::hooks::get().no_tiles).then_some(tiles as &mut dyn walkers::Tiles)
 }
 
 /// The map's tiles, OpenStreetMap or satellite, made on first use (shared by Tracks and Map).
