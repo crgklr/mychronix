@@ -44,17 +44,18 @@ struct DriverRow {
 }
 
 fn driver_rows(lib: &Library, profiles: &Profiles) -> Vec<DriverRow> {
-    // Each driver's numbers come from every MyChron their karts have had
-    // (removed ones too); a MyChron with no home is set up from its own card.
+    // Each driver's numbers come from the sessions they drove (`session_driver`:
+    // named at download, else on their kart then), on any MyChron; a MyChron
+    // with no home is set up from its own card.
     // (driver id, name, their karts in the Garage, their sessions)
     type Group<'a> = (Option<u32>, String, Vec<&'a Kart>, Vec<usize>);
+    let driver_of: Vec<String> = lib.sessions.iter().map(|s| super::sessions_filter_ui::session_driver(s, profiles)).collect();
     let groups: Vec<Group> = profiles
         .drivers
         .iter()
         .map(|d| {
             let karts: Vec<&Kart> = profiles.garage_karts().filter(|k| k.driver == Some(d.id)).collect();
-            let theirs: Vec<u32> = profiles.karts.iter().filter(|k| k.driver == Some(d.id)).map(|k| k.id).collect();
-            let sessions = (0..lib.sessions.len()).filter(|&i| lib.sessions[i].kart.is_some_and(|k| theirs.contains(&k))).collect();
+            let sessions = (0..lib.sessions.len()).filter(|&i| driver_of[i].eq_ignore_ascii_case(&d.name)).collect();
             (Some(d.id), d.name.clone(), karts, sessions)
         })
         .collect();
