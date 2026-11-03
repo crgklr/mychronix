@@ -510,3 +510,40 @@ aim-racestudio3-mac bridge notes) to drop or silently stall the TCP
 connection without it. Mychronix now does the same for every connection; a
 run of unanswered keepalives is logged as the first sign of a hung logger.
 
+
+## Track files (`.tkk`) — findings, Nov 3, 2026
+
+From 5,582 `.tkk` files in AiM's published track list and one custom track a
+MyChron 6 made itself (track learning). **observed** unless marked otherwise.
+
+- **Framing:** the logger's `<h TAG len flag> payload <TAG sum>` records (u16
+  byte-sum), one after another. Re-encoding every one of the 5,583 files from
+  its parsed records gives back the same bytes, so a record can be changed and
+  the file re-framed safely.
+- **Two layouts.**
+  - AiM-published: `Ptkk Vnfo V_sw Vidx pts zots srfs [lgo] plus` (5,256 files);
+    some add `ppi`/`ipl` (about 280) or `ptsl ptsr ppil ppir` (one). 45 have no
+    `lgo` (logo), so it's optional.
+  - Made by a MyChron: `Ptkk Vnfo Vidx pts anf lid`: no `V_sw`, `zots`, `srfs`
+    or `plus`.
+- **Sizes:** `Ptkk` 268 (name from byte 4, id in the last 8), `Vnfo` 476,
+  `V_sw` 256 (begins with the track's full name, NUL-padded), `Vidx` 8
+  (all zeros in AiM's; `ffff0000ffffffff` in the MyChron-made one), `zots` 408
+  (time zone name), `srfs` 4 (surface bits), `lid` 64.
+- **`Vnfo`:** name 0..28, country 28..32, region 32..36, a per-track word at 36
+  (1,032 distinct values; inferred: a version or date stamp), length f32 at
+  44, center (lat, lon i32 × 1e-7) at 48, type at 72, **start/finish at 80**,
+  guid in the last 8 bytes. From 96 on, 16-byte slots of (lat, lon, a, b)
+  filled on only some tracks, `a`/`b` mostly 1000, 5000, 7500, 8000, 10000
+  (inferred: more lines, e.g. splits or pit lane, with widths in mm). 92 holds
+  10000 or 7500 on most tracks (inferred: the start/finish line's width, mm).
+- **A MyChron-made track:** `Vnfo` center = start/finish (both the same
+  point), which is also one of the outline's points; length, 56 and 88..96
+  left 0. `pts`: one recorded lap, a point every ~4.3 m (lat, lon, then 4
+  bytes the logger leaves uninitialized where AiM's hold elevation in mm).
+  **`anf`: 8 bytes per `pts` point: f32 speed in km/h at that point** (slowest
+  corners to the top of the straight, matching the session), then a u32 of 30
+  or 31 throughout (unknown; inferred: GPS satellites in use). **`lid`:** an
+  `idn` record naming the MyChron that made it (its serial at bytes 12..16).
+- Unknown still: `Vidx`, the `ppi`/`ipl` records, the second `anf` value, most
+  of `lid`, and what RaceStudio 3 or a MyChron require of a track they load.
