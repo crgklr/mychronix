@@ -112,11 +112,7 @@ pub(super) fn channel_group(c: &Channel, imu: bool) -> &'static str {
         "More channels"
     } else if n == "forward g" || n == "vertical g" || n == "grip used" {
         "Movement"
-    } else if n.contains("predictive")
-        || n.contains("diff")
-        || n.contains("lap time")
-        || n.contains("split")
-    {
+    } else if crate::channels::is_lap_timing(&n) {
         "Lap timing"
     } else if n.contains("rpm")
         || n.contains("exhaust")

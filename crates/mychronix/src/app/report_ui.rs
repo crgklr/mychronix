@@ -40,27 +40,7 @@ impl App {
         if config.columns.is_empty() {
             config.columns = Preset::Default.columns(session);
         }
-        // The logger's own lap-timing channels (Prev Lap Diff, Predictive Time…) are written about once a
-        // lap, against its own timing: no number per lap to show, so they're left out (and never offered).
-        let lap_timing = |name: &str| {
-            session
-                .channels
-                .iter()
-                .find(|c| c.name == name)
-                .is_some_and(|c| channel_group(c, false) == "Lap timing")
-        };
-        let mut columns: Vec<Column> = config
-            .columns
-            .iter()
-            .filter(|c| report::channel(session, &c.channel).is_some() && !lap_timing(&c.channel))
-            .cloned()
-            .collect();
-        // A layout picked on another logger that hardly fits this session (GPS
-        // g-forces on a MyChron 4 without GPS): show the overview instead, and
-        // keep the saved layout for the sessions it suits.
-        if columns.len() < 2 && config.columns.len() >= 2 {
-            columns = Preset::Default.columns(session);
-        }
+        let columns = report::shown_columns(session, &config.columns);
         let mut changed = false;
 
         // Toolbar: presets, add a column.
@@ -97,7 +77,7 @@ impl App {
                         for c in session
                             .channels
                             .iter()
-                            .filter(|c| !is_dead(c) && channel_group(c, false) != "Lap timing")
+                            .filter(|c| !is_dead(c) && !crate::channels::is_lap_timing(&c.name))
                         {
                             let label = if report::short_name(&c.name) != c.name {
                                 format!("{} ({})", report::short_name(&c.name), c.name)
@@ -129,14 +109,7 @@ impl App {
         // Values: [lap][column], lap time first.
         let laps = &session.laps;
         let best = session.best_lap(MIN_LAP_MS).copied();
-        let mut cells: Vec<Vec<Option<f64>>> = Vec::with_capacity(laps.len());
-        for lap in laps {
-            let mut row = vec![Some(lap.duration_ms() as f64 / 1000.0)];
-            for c in &columns {
-                row.push(report::cell(session, c, lap.start_ms, lap.end_ms));
-            }
-            cells.push(row);
-        }
+        let cells = report::table(session, &columns);
         let n_cols = columns.len() + 1;
         let included: Vec<usize> = (0..laps.len())
             .filter(|&i| !st.excluded.contains(&laps[i].number))

@@ -42,6 +42,13 @@ impl Role {
     }
 }
 
+/// Whether a channel is the logger's own lap timing (Predictive Time, Prev
+/// Lap Diff, splits…): written about once a lap against its own timing.
+pub fn is_lap_timing(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains("predictive") || n.contains("diff") || n.contains("lap time") || n.contains("split")
+}
+
 /// `session`'s channel for `role` that recorded something: by the role's
 /// names in order (so GPS speed before speed from RPM).
 pub fn find(session: &Session, role: Role) -> Option<&Channel> {

@@ -209,6 +209,43 @@ pub fn channel<'a>(session: &'a Session, name: &str) -> Option<&'a Channel> {
 const LATERAL: [&str; 2] = ["GPS LatAcc", "AccelerometerY"];
 
 /// A report cell: `column` over [start_ms, end_ms].
+/// The columns a session's Laps table shows from a saved layout: those whose
+/// channel it has, never the logger's own lap timing (no number per lap to
+/// show). A layout that hardly fits the session (GPS g-forces on a MyChron 4
+/// without GPS) gives the overview instead; the saved one stays for the
+/// sessions it suits.
+pub fn shown_columns(session: &Session, saved: &[Column]) -> Vec<Column> {
+    let shown: Vec<Column> = saved
+        .iter()
+        .filter(|c| {
+            channel(session, &c.channel).is_some() && !crate::channels::is_lap_timing(&c.channel)
+        })
+        .cloned()
+        .collect();
+    if shown.len() < 2 && saved.len() >= 2 {
+        Preset::Default.columns(session)
+    } else {
+        shown
+    }
+}
+
+/// The Laps table's values, `[lap][column]`, the lap time (s) first.
+pub fn table(session: &Session, columns: &[Column]) -> Vec<Vec<Option<f64>>> {
+    session
+        .laps
+        .iter()
+        .map(|lap| {
+            std::iter::once(Some(lap.duration_ms() as f64 / 1000.0))
+                .chain(
+                    columns
+                        .iter()
+                        .map(|c| cell(session, c, lap.start_ms, lap.end_ms)),
+                )
+                .collect()
+        })
+        .collect()
+}
+
 pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> Option<f64> {
     let channel = self::channel(session, &column.channel)?;
     if column.stat == Stat::Corrections {
@@ -414,5 +451,49 @@ mod tests {
     fn column_summary() {
         let [max, min, mean, sd] = summary(&[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]).unwrap();
         assert_eq!((max, min, mean, sd), (9.0, 2.0, 5.0, 2.0));
+    }
+
+    #[test]
+    fn the_laps_table_shows_its_columns_and_a_value_per_lap() {
+        let named = |name: &str, values: &[f64]| Channel {
+            name: name.into(),
+            ..channel(values)
+        };
+        let session = Session {
+            info: Default::default(),
+            channels: vec![
+                named("RPM", &[8000.0, 9000.0, 8500.0, 9500.0]),
+                named("Prev Lap Diff", &[-12.29; 4]),
+            ],
+            laps: vec![
+                aim_xrk::Lap {
+                    number: 1,
+                    start_ms: 0,
+                    end_ms: 150,
+                },
+                aim_xrk::Lap {
+                    number: 2,
+                    start_ms: 150,
+                    end_ms: 300,
+                },
+            ],
+            gps: None,
+        };
+        let col = |c: &str, stat| Column {
+            channel: c.into(),
+            stat,
+        };
+        // The logger's lap timing is never a column; a channel the session lacks isn't either.
+        let saved = [
+            col("RPM", Stat::Max),
+            col("RPM", Stat::Min),
+            col("Prev Lap Diff", Stat::Max),
+            col("Exhaust Temp", Stat::Max),
+        ];
+        let shown = shown_columns(&session, &saved);
+        assert_eq!(shown, [col("RPM", Stat::Max), col("RPM", Stat::Min)]);
+        let rows = table(&session, &shown);
+        assert_eq!(rows[0], [Some(0.15), Some(9000.0), Some(8000.0)]);
+        assert_eq!(rows[1], [Some(0.15), Some(9500.0), Some(8500.0)]);
     }
 }
