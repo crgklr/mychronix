@@ -76,9 +76,17 @@ impl App {
         let load = &mut self.library_load;
         if let Some((n, rx)) = &load.running {
             match rx.try_recv() {
-                Ok(lib) => {
+                Ok(mut lib) => {
                     load.shown = *n;
                     load.running = None;
+                    // The track list's details carry over; any still to read are read for
+                    // this library (the old reader's indexes were the old library's).
+                    if let (Some(old), Some(since)) = (&self.library, self.track_page.details_since)
+                    {
+                        lib.keep_details(old, since);
+                    }
+                    self.track_page.details = None;
+                    self.track_page.details_since = None;
                     self.library = Some(std::sync::Arc::new(lib));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,

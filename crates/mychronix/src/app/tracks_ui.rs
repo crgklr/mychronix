@@ -16,6 +16,8 @@ pub(super) struct TrackPageState {
     /// Set once the list has opened the system country and scrolled to it.
     pub(super) list_ready: bool,
     pub(super) details: Option<std::sync::mpsc::Receiver<(usize, tracks::Details)>>,
+    /// When the details now in the library started being read (see `Library::keep_details`).
+    pub(super) details_since: Option<std::time::SystemTime>,
     /// The selected track's full file (logo, contact details), read on selection.
     pub(super) file: Option<(usize, aim_track::TrackFile)>,
     /// Satellite imagery under the Tracks map instead of OpenStreetMap.
@@ -37,6 +39,9 @@ impl App {
     pub(super) fn tracks_page(&mut self, ui: &mut Ui) {
         // Full names, cities and outlines arrive from a background reader, into the library itself.
         if self.track_page.details.is_none() {
+            self.track_page
+                .details_since
+                .get_or_insert_with(std::time::SystemTime::now);
             self.track_page.details = Some(tracks::load_details(
                 self.lib().pending_details(),
                 ui.ctx().clone(),
