@@ -224,6 +224,16 @@ impl CornerModel {
         (0..self.segments.len()).max_by(|&a, &b| self.loss(trace, a).total_cmp(&self.loss(trace, b))).unwrap_or(0)
     }
 
+    /// When `trace` went through corner `k`: seconds from its lap's start, (in, out).
+    pub fn span_s(&self, trace: usize, k: usize) -> (f64, f64) {
+        let tr = &self.traces[trace];
+        let last = tr.t.len() - 1;
+        let idx = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(last);
+        let s = &self.segments[k];
+        let end = if k + 1 == self.segments.len() { last } else { idx(s.to) };
+        (tr.t[idx(s.from)], tr.t[end])
+    }
+
     /// The trace for session lap `lap`.
     pub fn trace_of(&self, lap: usize) -> Option<usize> {
         self.traces.iter().position(|t| t.lap == lap)

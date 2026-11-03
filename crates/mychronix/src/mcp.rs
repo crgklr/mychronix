@@ -356,8 +356,9 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
 /// The corner model for session `i`, and the trace of `lap` in it.
 fn corners_of(lib: &Library, profiles: &crate::profiles::Profiles, i: usize, lap: Option<i64>) -> Result<(aim_xrk::Session, CornerModel, usize), String> {
     let session = open(lib, profiles, i)?;
-    let best = session.best_lap(crate::app::MIN_LAP_MS).copied().ok_or("This session has no complete timed lap")?;
-    let counts: Vec<bool> = crate::app::slow_laps(&session).into_iter().map(|s| !s).collect();
+    let gaps = aim_xrk::checks::recording_gaps(&session);
+    let best = session.reference_lap(crate::app::MIN_LAP_MS, &gaps).copied().ok_or("This session has no complete timed lap")?;
+    let counts: Vec<bool> = crate::app::slow_laps(&session).into_iter().zip(&session.laps).map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps)).collect();
     let model = CornerModel::build(&session, &best, &counts).ok_or("Corners need GPS (this session has none, or no corner to brake for)")?;
     let lap = pick_lap(&session, lap)?;
     let index = session.laps.iter().position(|l| *l == lap).unwrap_or(0);

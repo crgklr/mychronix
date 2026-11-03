@@ -182,6 +182,23 @@ impl Session {
             .filter(|l| l.duration_ms() >= min_ms)
             .min_by_key(|l| l.duration_ms())
     }
+
+    /// The lap others are measured against (corners, distance): the fastest
+    /// complete lap the logger recorded all of, so a stretch it missed (see
+    /// `checks::recording_gaps`, passed as `gaps`) never stands in for the
+    /// track. The best lap when every lap has a gap.
+    pub fn reference_lap(&self, min_ms: i64, gaps: &[(i64, i64)]) -> Option<&Lap> {
+        self.complete_laps()
+            .iter()
+            .filter(|l| l.duration_ms() >= min_ms && !has_gap(l, gaps))
+            .min_by_key(|l| l.duration_ms())
+            .or_else(|| self.best_lap(min_ms))
+    }
+}
+
+/// Whether a stretch the logger didn't record (`gaps`, from `checks::recording_gaps`) falls in `lap`.
+pub fn has_gap(lap: &Lap, gaps: &[(i64, i64)]) -> bool {
+    gaps.iter().any(|&(from, to)| from < lap.end_ms && to > lap.start_ms)
 }
 
 impl From<libxrk::XrkFile> for Session {
@@ -342,6 +359,18 @@ mod tests {
         assert_eq!(s.best_lap(10_000).map(|l| l.number), Some(2));
         // With no lap that crosses the line twice there is no best lap.
         assert!(session(vec![lap(0, 0, 20_000), lap(1, 20_000, 75_000)]).best_lap(0).is_none());
+    }
+
+    #[test]
+    fn the_reference_lap_skips_one_with_a_recording_gap() {
+        let lap = |number, start_ms, end_ms| Lap { number, start_ms, end_ms };
+        let s = Session { info: SessionInfo::default(), channels: vec![], gps: None, laps: vec![lap(0, 0, 30_000), lap(1, 30_000, 55_100), lap(2, 55_100, 80_500), lap(3, 80_500, 99_000)] };
+        // Lap 1 is fastest, but 6.7 s of it wasn't recorded.
+        let gaps = [(40_000, 46_700)];
+        assert_eq!(s.best_lap(10_000).map(|l| l.number), Some(1));
+        assert_eq!(s.reference_lap(10_000, &gaps).map(|l| l.number), Some(2));
+        // Every lap with a gap: the best lap still.
+        assert_eq!(s.reference_lap(10_000, &[(31_000, 32_000), (60_000, 61_000)]).map(|l| l.number), Some(1));
     }
 }
 

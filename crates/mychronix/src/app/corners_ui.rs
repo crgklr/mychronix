@@ -45,10 +45,12 @@ impl App {
     /// The session's corners (see `corner_model`), built once per session and
     /// best lap, for Corners, Laps and Map. None without GPS or a best lap.
     pub(super) fn corner_model(&mut self, session: &std::sync::Arc<Session>) -> Option<std::sync::Arc<CornerModel>> {
-        let best = session.best_lap(MIN_LAP_MS).copied()?;
+        // The fastest lap recorded in full: a gap in the best lap would stand in for the track.
+        let best = session.reference_lap(MIN_LAP_MS, &self.recording_gaps).copied()?;
         let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
         if self.corners.model.as_ref().is_none_or(|m| (m.0, m.1) != key) {
-            let counts: Vec<bool> = slow_laps(session).into_iter().map(|slow| !slow).collect();
+            // A lap with a stretch the logger missed has no true time for the corners in it.
+            let counts: Vec<bool> = slow_laps(session).into_iter().zip(&session.laps).map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.recording_gaps)).collect();
             let started = std::time::Instant::now();
             let model = CornerModel::build(session, &best, &counts);
             log::debug!("corners: model built in {:?}", started.elapsed());
@@ -116,7 +118,7 @@ impl App {
                 let column = Layout::top_down(Align::Min);
                 ui.allocate_ui_with_layout(vec2(table_w, table_h), column, |ui| {
                     ui.set_width(table_w);
-                    let (k, card_h) = self.corners_table(ui, &model, trace, corner, row_h);
+                    let (k, card_h) = self.corners_table(ui, session, &model, trace, corner, row_h);
                     pick = pick.or(k);
                     measured.0 = Some(card_h - row_h * n);
                 });
@@ -144,7 +146,8 @@ impl App {
     }
 
     /// The table: one row per corner. Returns a corner clicked, and the card's height.
-    fn corners_table(&mut self, ui: &mut Ui, model: &CornerModel, trace: usize, selected: usize, row_h: f32) -> (Option<usize>, f32) {
+    fn corners_table(&mut self, ui: &mut Ui, session: &Session, model: &CornerModel, trace: usize, selected: usize, row_h: f32) -> (Option<usize>, f32) {
+        let gaps = self.recording_gaps.clone();
         let mut clicked = None;
         let mut hovered = None;
         let card = Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(theme::RADIUS)).inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 12 }).show(ui, |ui| {
@@ -267,11 +270,21 @@ impl App {
                         p.circle_filled(pos2(x(3) + 4.0 + c as f32 * 9.0, mid + 2.0), 3.0, SECONDARY);
                     }
                 }
-                // Time: the whole corner, against the best of it.
+                // Time: the whole corner, against the best of it. None where the
+                // logger missed part of it: the time would be made up.
                 let tx = x(xs.len() - 1);
-                p.text(pos2(tx, rect.top() + pad + 14.0), egui::Align2::LEFT_CENTER, format!("{:.2} s", a.time_s), semibold(15.0), TEXT);
+                let missed = {
+                    let lap = &session.laps[model.traces[trace].lap];
+                    let (from, to) = model.span_s(trace, k);
+                    let (from, to) = (lap.start_ms + (from * 1000.0) as i64, lap.start_ms + (to * 1000.0) as i64);
+                    gaps.iter().any(|&(a, b)| a < to && b > from)
+                };
+                let time = if missed { "—".to_string() } else { format!("{:.2} s", a.time_s) };
+                p.text(pos2(tx, rect.top() + pad + 14.0), egui::Align2::LEFT_CENTER, time, semibold(15.0), TEXT);
                 let is_best = model.best_of[k] == trace;
-                let (pill, fill, ink) = if is_best {
+                let (pill, fill, ink) = if missed {
+                    ("no data".to_string(), SURFACE_ACTIVE, SECONDARY)
+                } else if is_best {
                     ("best".to_string(), theme::GOOD.gamma_multiply(0.18), theme::GOOD)
                 } else if model.loss(trace, k) < 0.005 {
                     // Slower only in the thousandths: no loss worth coloring.
