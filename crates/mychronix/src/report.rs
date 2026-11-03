@@ -246,6 +246,41 @@ pub fn table(session: &Session, columns: &[Column]) -> Vec<Vec<Option<f64>>> {
         .collect()
 }
 
+/// The Laps table's summary rows, for each of its `n_cols` columns (the lap
+/// time first): [`summary`] over the laps `included` (indexes into its rows).
+pub fn summaries(
+    table: &[Vec<Option<f64>>],
+    n_cols: usize,
+    included: &[usize],
+) -> Vec<Option<[f64; 4]>> {
+    (0..n_cols)
+        .map(|k| {
+            summary(
+                &included
+                    .iter()
+                    .filter_map(|&i| table[i][k])
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
+}
+
+/// Decimals to show per column of [`table`]: the lap time to the
+/// millisecond, shares and counts whole, a channel at its own (at most 2).
+pub fn decimals(session: &Session, columns: &[Column]) -> Vec<usize> {
+    std::iter::once(3)
+        .chain(columns.iter().map(|c| {
+            if c.stat.is_share() || c.stat == Stat::Corrections {
+                0
+            } else {
+                channel(session, &c.channel)
+                    .map(|ch| ch.decimals.min(2) as usize)
+                    .unwrap_or(1)
+            }
+        }))
+        .collect()
+}
+
 pub fn cell(session: &Session, column: &Column, start_ms: i64, end_ms: i64) -> Option<f64> {
     let channel = self::channel(session, &column.channel)?;
     if column.stat == Stat::Corrections {
@@ -495,5 +530,15 @@ mod tests {
         let rows = table(&session, &shown);
         assert_eq!(rows[0], [Some(0.15), Some(9000.0), Some(8000.0)]);
         assert_eq!(rows[1], [Some(0.15), Some(9500.0), Some(8500.0)]);
+        // Summaries over the laps ticked: lap 2 alone, then both.
+        let only_2 = summaries(&rows, 3, &[1]);
+        assert_eq!(only_2[1].map(|s| s[0]), Some(9500.0));
+        assert_eq!(
+            summaries(&rows, 3, &[0, 1])[1].map(|s| (s[0], s[1])),
+            Some((9500.0, 9000.0))
+        );
+        assert_eq!(decimals(&session, &shown), [3, 1, 1]);
+        // No laps: still a (blank) summary per column.
+        assert_eq!(summaries(&[], 3, &[]), [None, None, None]);
     }
 }

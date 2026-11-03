@@ -114,27 +114,8 @@ impl App {
         let included: Vec<usize> = (0..laps.len())
             .filter(|&i| !st.excluded.contains(&laps[i].number))
             .collect();
-        let summaries: Vec<Option<[f64; 4]>> = (0..n_cols)
-            .map(|k| {
-                report::summary(
-                    &included
-                        .iter()
-                        .filter_map(|&i| cells[i][k])
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        let decimals: Vec<usize> = std::iter::once(3)
-            .chain(columns.iter().map(|c| {
-                if c.stat.is_share() || c.stat == Stat::Corrections {
-                    0
-                } else {
-                    report::channel(session, &c.channel)
-                        .map(|ch| ch.decimals.min(2) as usize)
-                        .unwrap_or(1)
-                }
-            }))
-            .collect();
+        let summaries = report::summaries(&cells, n_cols, &included);
+        let decimals = report::decimals(session, &columns);
         let units: Vec<String> = std::iter::once("s".to_string())
             .chain(columns.iter().map(|c| {
                 if c.stat.is_share() {
