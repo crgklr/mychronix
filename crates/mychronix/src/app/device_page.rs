@@ -1305,75 +1305,84 @@ impl App {
         });
         let open = !closed;
         if go {
-            let id = self
-                .device
-                .logger
-                .as_ref()
-                .and_then(|b| b.logger_id)
-                .map(|i| i.to_string())
-                .unwrap_or_default();
-            // Remember these for next time (not the comment or session type, which change every time).
-            // The MyChron is now on the kart named, so the kart's baseline applies to it.
-            // A MyChron moving to another kart leaves its sessions so far with the old one.
-            let lib = self.lib();
-            let profiles = self
-                .profiles
-                .get_or_insert_with(crate::profiles::Profiles::load);
-            profiles.note_download(
-                &id,
-                &dlg.meta.driver,
-                &dlg.meta.kart,
-                &dlg.meta.championship,
-                (!multiple).then_some(dlg.meta.track.as_str()),
-                &|l: &str| lib.newest_start(l),
-            );
-            self.profiles_changed();
-            // Each file gets the dialog's details; with several tracks, its own track from the logger.
-            let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
-                .device
-                .files
-                .iter()
-                .filter(|e| self.device.selected.contains(&e.name))
-                .map(|e| {
-                    let mut meta = dlg.meta.clone();
-                    if multiple || meta.track.is_empty() {
-                        meta.track = self
-                            .device
-                            .summaries
-                            .iter()
-                            .find(|s| s.file.as_deref() == Some(e.name.as_str()))
-                            .and_then(|s| s.track.clone())
-                            .unwrap_or_default();
-                    }
-                    (e.clone(), meta)
-                })
-                .collect();
-            // A setup sheet goes on the earliest new session only, and only when there's something new.
-            let changed =
-                !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
-            self.device.pending_setup = match (changed, target) {
-                (true, Some((path, _))) => Some((path, dlg.setup.clone())),
-                _ => None,
-            };
-            if crate::hooks::get().fake_device.is_some() {
-                // Preview mode: there's no MyChron to download from.
-                self.notices.info(format!(
-                    "Preview only: would download {} session{} with these details. Turn on the MyChron to do it for real.",
-                    files.len(),
-                    if files.len() == 1 { "" } else { "s" }
-                ));
-            } else if let Some(dir) = self.logger_dir() {
-                self.device.busy = Some("Downloading…".into());
-                let _ = self.device.worker.as_ref().unwrap().tx.send(
-                    crate::device::Command::Download {
+            self.start_download(dlg, target, multiple);
+        } else if open && !cancel {
+            self.device.dialog = Some(dlg);
+        }
+    }
+
+    /// Download pressed: remember the driver, kart and championship for this
+    /// MyChron, set aside the setup sheet for the earliest new session, and
+    /// start downloading the picked sessions with the dialog's details.
+    fn start_download(
+        &mut self,
+        dlg: DownloadDialog,
+        target: Option<(std::path::PathBuf, crate::dates::Stamp)>,
+        multiple: bool,
+    ) {
+        let id = self
+            .device
+            .logger
+            .as_ref()
+            .and_then(|b| b.logger_id)
+            .map(|i| i.to_string())
+            .unwrap_or_default();
+        // Remember these for next time (not the comment or session type, which change every time).
+        // The MyChron is now on the kart named, so the kart's baseline applies to it.
+        // A MyChron moving to another kart leaves its sessions so far with the old one.
+        let lib = self.lib();
+        let profiles = self
+            .profiles
+            .get_or_insert_with(crate::profiles::Profiles::load);
+        profiles.note_download(
+            &id,
+            &dlg.meta.driver,
+            &dlg.meta.kart,
+            &dlg.meta.championship,
+            (!multiple).then_some(dlg.meta.track.as_str()),
+            &|l: &str| lib.newest_start(l),
+        );
+        self.profiles_changed();
+        // Each file gets the dialog's details; with several tracks, its own track from the logger.
+        let files: Vec<(aim_link::DirEntry, crate::device::SessionMeta)> = self
+            .device
+            .files
+            .iter()
+            .filter(|e| self.device.selected.contains(&e.name))
+            .map(|e| {
+                (
+                    e.clone(),
+                    meta_for(&dlg.meta, &e.name, &self.device.summaries, multiple),
+                )
+            })
+            .collect();
+        // A setup sheet goes on the earliest new session only, and only when there's something new.
+        let changed =
+            !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
+        self.device.pending_setup = match (changed, target) {
+            (true, Some((path, _))) => Some((path, dlg.setup.clone())),
+            _ => None,
+        };
+        if crate::hooks::get().fake_device.is_some() {
+            // Preview mode: there's no MyChron to download from.
+            self.notices.info(format!(
+                "Preview only: would download {} session{} with these details. Turn on the MyChron to do it for real.",
+                files.len(),
+                if files.len() == 1 { "" } else { "s" }
+            ));
+        } else if let Some(dir) = self.logger_dir() {
+            self.device.busy = Some("Downloading…".into());
+            let _ =
+                self.device
+                    .worker
+                    .as_ref()
+                    .unwrap()
+                    .tx
+                    .send(crate::device::Command::Download {
                         files,
                         dir,
                         replace: dlg.replace,
-                    },
-                );
-            }
-        } else if open && !cancel {
-            self.device.dialog = Some(dlg);
+                    });
         }
     }
 }
@@ -1393,5 +1402,65 @@ pub(super) fn model_from_ssid(ssid: &str) -> &'static str {
         "MYC5S" => "MyChron 5S",
         "MYC5" => "MyChron 5",
         _ => "AiM logger",
+    }
+}
+
+/// The details a downloaded file is saved with: the dialog's, with its own
+/// track from the MyChron when the sessions picked were at several tracks
+/// (or no track was entered).
+fn meta_for(
+    base: &crate::device::SessionMeta,
+    file: &str,
+    summaries: &[aim_xrk::SessionSummary],
+    multiple: bool,
+) -> crate::device::SessionMeta {
+    let mut meta = base.clone();
+    if multiple || meta.track.is_empty() {
+        meta.track = summaries
+            .iter()
+            .find(|s| s.file.as_deref() == Some(file))
+            .and_then(|s| s.track.clone())
+            .unwrap_or_default();
+    }
+    meta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_file_keeps_its_own_track_when_there_were_several() {
+        let summary = |file: &str, track: &str| aim_xrk::SessionSummary {
+            file: Some(file.into()),
+            track: Some(track.into()),
+            ..Default::default()
+        };
+        let summaries = [
+            summary("a_0001.xrz", "North Loop"),
+            summary("a_0002.xrz", "South Loop"),
+        ];
+        let base = crate::device::SessionMeta {
+            driver: "Sam".into(),
+            track: "North Loop".into(),
+            ..Default::default()
+        };
+        // One track: the dialog's, as typed.
+        assert_eq!(
+            meta_for(&base, "a_0002.xrz", &summaries, false).track,
+            "North Loop"
+        );
+        // Several: each session's own, the rest of the details from the dialog.
+        let m = meta_for(&base, "a_0002.xrz", &summaries, true);
+        assert_eq!((m.track.as_str(), m.driver.as_str()), ("South Loop", "Sam"));
+        // None typed: the MyChron's.
+        let blank = crate::device::SessionMeta {
+            track: String::new(),
+            ..base
+        };
+        assert_eq!(
+            meta_for(&blank, "a_0001.xrz", &summaries, false).track,
+            "North Loop"
+        );
     }
 }
