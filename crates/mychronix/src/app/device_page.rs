@@ -616,7 +616,7 @@ impl App {
                         ui.add_space(6.0);
                         let number = aim_xrk::summary::session_number(&e.name).map(|n| format!("Session {n}")).unwrap_or(e.name.clone());
                         ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                        let when = sum.as_ref().map(|s| [s.date.map(crate::events::us_short), s.start_time.as_deref().map(crate::events::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
+                        let when = sum.as_ref().map(|s| [s.date.map(crate::dates::us_short), s.start_time.as_deref().map(crate::dates::clock_time)].into_iter().flatten().collect::<Vec<_>>().join("  ·  ")).unwrap_or(e.date.clone());
                         ui.label(RichText::new(when).color(DIM));
                         if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
                             ui.label(RichText::new(t).color(SECONDARY));
@@ -678,7 +678,7 @@ impl App {
         // Where a changed setup is saved, shown with it so a wrong session is caught before downloading.
         let target = dlg.setup_target.get_or_insert_with(|| self.download_setup_target(&lib)).clone();
         let setup_from = match &target {
-            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", start_words(start)),
+            Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", crate::dates::stamp_words(start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
         };
         // The Garage's drivers and karts, and what this MyChron is on now.
@@ -883,17 +883,6 @@ const AP_ADDRESS_FAKE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 1)
 /// summary's top speed (read for new sessions only; unknown counts as not).
 fn listed_warm_up(s: &aim_xrk::SessionSummary) -> bool {
     s.max_speed.is_some() && crate::events::is_warm_up(s)
-}
-
-/// "2026-10-31 08:58:10" → "Oct 31, 2026 at 8:58 AM".
-fn start_words(start: &str) -> String {
-    let (date, time) = start.split_once(' ').unwrap_or((start, ""));
-    let mut ymd = date.split('-').map(|p| p.parse::<u16>().ok());
-    let day = match (ymd.next().flatten(), ymd.next().flatten(), ymd.next().flatten()) {
-        (Some(year), Some(month), Some(day)) => crate::events::us_short(aim_xrk::summary::Date { year, month: month as u8, day: day as u8 }),
-        _ => return start.to_string(),
-    };
-    if time.is_empty() { day } else { format!("{day} at {}", crate::events::clock_time(time)) }
 }
 
 /// "AiM-MYC6-345678" → "MyChron 6".

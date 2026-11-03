@@ -48,7 +48,7 @@ impl App {
         }
 
         let all = events::group(&lib, &profiles, &defs);
-        let today = events::today();
+        let today = crate::dates::today();
         let mut championships: Vec<String> = all.iter().map(|e| e.championship.clone()).filter(|c| !c.trim().is_empty()).collect();
         championships.sort();
         championships.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -185,7 +185,7 @@ impl App {
             }
         }
         if plan {
-            let start = events::iso(events::from_days(events::days(today) + 7));
+            let start = crate::dates::iso(crate::dates::from_days(crate::dates::days(today) + 7));
             self.events_page.dialog = Some(EventDef {
                 start: start.clone(),
                 end: start,
@@ -220,8 +220,8 @@ impl App {
                         "Name this event",
                         EventDef {
                             track: e.track.clone(),
-                            start: events::iso(e.start),
-                            end: events::iso(e.end),
+                            start: crate::dates::iso(e.start),
+                            end: crate::dates::iso(e.end),
                             championship: e.championship.clone(),
                             ..Default::default()
                         },
@@ -240,7 +240,7 @@ impl App {
 
         if e.sessions.is_empty() {
             card(ui, |ui| {
-                let until = events::days(e.start) - events::days(today);
+                let until = crate::dates::days(e.start) - crate::dates::days(today);
                 let when = match until {
                     0 => "Today".to_string(),
                     1 => "Tomorrow".to_string(),
@@ -263,7 +263,7 @@ impl App {
                                 "Best lap here so far: {} by {}, {}.",
                                 format_lap_time(b as i64),
                                 driver_for(s, profiles),
-                                s.summary.date.map(long_date).unwrap_or_default()
+                                s.summary.date.map(crate::dates::long).unwrap_or_default()
                             ))
                             .color(SECONDARY),
                         );
@@ -391,7 +391,7 @@ impl App {
                 .min();
             ui.horizontal(|ui| {
                 ui.add(Icon::Calendar.image(SECONDARY, 16.0));
-                ui.label(RichText::new(long_date(day)).font(semibold(16.0)).color(TEXT));
+                ui.label(RichText::new(crate::dates::long(day)).font(semibold(16.0)).color(TEXT));
                 ui.label(RichText::new(plural(in_day.len(), "session")).color(SECONDARY));
             });
             ui.add_space(6.0);
@@ -419,8 +419,8 @@ impl App {
         let Some(mut def) = self.events_page.dialog.take() else { return };
         // Saved dates are ISO; show them as written in the US.
         for d in [&mut def.start, &mut def.end] {
-            if d.contains('-') && let Some(p) = events::parse_date(d) {
-                *d = events::us_numeric(p);
+            if d.contains('-') && let Some(p) = crate::dates::parse_date(d) {
+                *d = crate::dates::us_numeric(p);
             }
         }
         let s = Suggestions::gather(lib, profiles);
@@ -438,7 +438,7 @@ impl App {
             Some("Give the event a name.")
         } else if def.track.trim().is_empty() {
             Some("Choose a track.")
-        } else if events::parse_date(&def.start).is_none() || events::parse_date(&def.end).is_none() {
+        } else if crate::dates::parse_date(&def.start).is_none() || crate::dates::parse_date(&def.end).is_none() {
             Some("Dates look like 10/17/2026.")
         } else {
             None
@@ -489,8 +489,8 @@ impl App {
         if save {
             // Store dates in one form.
             for d in [&mut def.start, &mut def.end] {
-                if let Some(p) = events::parse_date(d) {
-                    *d = events::iso(p);
+                if let Some(p) = crate::dates::parse_date(d) {
+                    *d = crate::dates::iso(p);
                 }
             }
             let id = defs.upsert(def);
@@ -761,7 +761,7 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
         let (right, color) = match (best, e.sessions.is_empty()) {
             (Some(b), _) => (format_lap_time(b as i64), theme::GOOD),
             (None, true) => {
-                let n = events::days(e.start) - events::days(today);
+                let n = crate::dates::days(e.start) - crate::dates::days(today);
                 (if n > 1 { format!("in {n} days") } else if n == 1 { "tomorrow".into() } else if n == 0 { "today".into() } else { "planned".into() }, SECONDARY)
             }
             (None, false) => (plural(e.sessions.len(), "session"), DIM),
@@ -773,13 +773,7 @@ fn event_row(ui: &mut Ui, lib: &Library, profiles: &crate::profiles::Profiles, e
 
 /// "Sat, Oct 10, 2026", or "Sat, Oct 17 – Sun, Oct 18, 2026".
 fn date_range(a: aim_xrk::summary::Date, b: aim_xrk::summary::Date) -> String {
-    // "Sat, Oct 10" from "Saturday, October 10, 2026".
-    let short = |d: aim_xrk::summary::Date| {
-        let long = long_date(d);
-        let day = long.split(", ").next().unwrap_or("");
-        let month = long.split(", ").nth(1).and_then(|m| m.split(' ').next()).unwrap_or("");
-        format!("{}, {} {}", day.get(..3).unwrap_or(day), month.get(..3).unwrap_or(month), d.day)
-    };
+    let short = crate::dates::day_month_day;
     if a == b {
         format!("{}, {}", short(a), a.year)
     } else if a.year != b.year {

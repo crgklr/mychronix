@@ -148,7 +148,7 @@ impl App {
                     look::note(ui, "No tracks here yet. Type the track's name.", DIM);
                 }
                 if same_day.len() > 1 {
-                    let date = this.1.map(crate::events::us_short).unwrap_or_default();
+                    let date = this.1.map(crate::dates::us_short).unwrap_or_default();
                     ui.add_space(8.0);
                     look::label(ui, "Change");
                     if look::option(ui, !pick.whole_day, None, "Just this session", "") {
@@ -230,8 +230,8 @@ impl App {
         days.sort_unstable();
         days.dedup();
         let when = match (days.first(), days.last()) {
-            (Some(a), Some(b)) if a != b => format!(" from {} to {}", crate::events::us_short(*a), crate::events::us_short(*b)),
-            (Some(a), _) => format!(" on {}", crate::events::us_short(*a)),
+            (Some(a), Some(b)) if a != b => format!(" from {} to {}", crate::dates::us_short(*a), crate::dates::us_short(*b)),
+            (Some(a), _) => format!(" on {}", crate::dates::us_short(*a)),
             _ => String::new(),
         };
         let tracks: Vec<usize> = offer.tracks.iter().copied().take(SHOWN).collect();

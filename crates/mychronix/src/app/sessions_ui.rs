@@ -88,7 +88,7 @@ impl App {
                                 let hay = format!(
                                     "{} {} {} {} {} {} {} {} {} {} {}",
                                     sum.number.unwrap_or(0),
-                                    sum.date.map(|d| format!("{d} {}", crate::events::us_short(d))).unwrap_or_default(),
+                                    sum.date.map(|d| format!("{d} {}", crate::dates::us_short(d))).unwrap_or_default(),
                                     sum.track.clone().unwrap_or_default(),
                                     s.track.map(|t| lib.tracks[t].full_name.clone().unwrap_or_default()).unwrap_or_default(),
                                     driver_of(i),
@@ -131,7 +131,7 @@ impl App {
                         ui.add_space(if k == 0 { 0.0 } else { 14.0 });
                         ui.horizontal(|ui| {
                             ui.add(Icon::Calendar.image(SECONDARY, 16.0));
-                            let heading = date.map(long_date).unwrap_or_else(|| "Unknown date".into());
+                            let heading = date.map(crate::dates::long).unwrap_or_else(|| "Unknown date".into());
                             ui.label(RichText::new(heading).font(semibold(16.0)).color(TEXT));
                             ui.label(RichText::new(format!("{}  ·  {} session{}", tracks.join(", "), day.len(), if day.len() == 1 { "" } else { "s" })).color(SECONDARY));
                             if let Some(b) = best {
@@ -301,7 +301,7 @@ pub(super) fn session_row_with(ui: &mut Ui, lib: &Library, i: usize, driver: &st
         }
         let track = s.track_name(&lib.tracks).unwrap_or_else(|| "No track".into());
         let championship = s.meta.as_ref().map(|m| m.championship.clone()).filter(|c| !c.is_empty());
-        let line = [sum.start_time.as_deref().map(crate::events::clock_time), Some(driver.to_string()), Some(track), championship]
+        let line = [sum.start_time.as_deref().map(crate::dates::clock_time), Some(driver.to_string()), Some(track), championship]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -344,13 +344,3 @@ pub(super) fn same_channel<'a>(session: &'a Session, name: &str) -> Option<&'a a
     crate::report::channel(session, name)
 }
 
-/// "Saturday, October 10, 2026".
-pub(super) fn long_date(d: aim_xrk::summary::Date) -> String {
-    const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    // Sakamoto's day-of-week method.
-    let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-    let y = if d.month < 3 { d.year as i32 - 1 } else { d.year as i32 };
-    let dow = (y + y / 4 - y / 100 + y / 400 + t[d.month as usize - 1] + d.day as i32).rem_euclid(7) as usize;
-    format!("{}, {} {}, {}", DAYS[dow], MONTHS[d.month as usize - 1], d.day, d.year)
-}

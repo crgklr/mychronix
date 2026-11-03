@@ -59,7 +59,7 @@ const NO_DRIVER: &str = "No driver";
 impl SessionFilter {
     /// The dates shown, from and to (inclusive): from the preset or range.
     fn bounds(&self, newest: Option<Day>) -> (Option<Day>, Option<Day>) {
-        let today = naive(crate::events::today());
+        let today = naive(crate::dates::today());
         match self.range {
             Range::All => (None, None),
             Range::ThisYear => (today.and_then(|t| Day::new(t.year(), 1, 1).ok()), None),
@@ -223,7 +223,7 @@ fn date_field(ui: &mut Ui, calendar: &mut Option<(u8, Day)>, k: u8, label: &str,
     }
     let (_, month) = calendar.filter(|c| c.0 == k)?;
 
-    let today = naive(crate::events::today());
+    let today = naive(crate::dates::today());
     let (mut picked, mut nav) = (None, None);
     let cell = 40.0;
     let area = egui::Area::new(ui.id().with(("calendar", k)))
@@ -325,7 +325,7 @@ impl App {
         let us = |d: Day| d.strftime("%b %-d, %Y").to_string();
 
         // When.
-        let today = naive(crate::events::today()).unwrap_or_default();
+        let today = naive(crate::dates::today()).unwrap_or_default();
         let first = lib.sessions.iter().filter_map(|s| s.summary.date).min().and_then(naive);
         let (bf, bt) = f.bounds(newest);
         // The dates shown are the ones in force: the preset's, else the range picked.

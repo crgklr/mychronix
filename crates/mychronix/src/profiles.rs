@@ -62,7 +62,7 @@ impl Driver {
 /// "2017-03-14", or "3/14/2017" as written in the US.
 pub fn parse_birthday(s: &str) -> Option<aim_xrk::summary::Date> {
     let s = s.trim();
-    if let Some(d) = crate::events::parse_date(s) {
+    if let Some(d) = crate::dates::parse_date(s) {
         return Some(d);
     }
     let mut parts = s.split('/').map(|p| p.trim().parse::<u32>().ok());

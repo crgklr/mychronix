@@ -161,7 +161,7 @@ impl App {
                             if k.model.starts_with("MyChron 6") { "Downloads over WiFi or USB · not connected" } else { "Downloads over WiFi · off or out of range" }
                         };
                         ui.label(RichText::new(status).size(13.0).color(SECONDARY));
-                        let newest = k.newest.map(|d| format!("  ·  newest {}", crate::events::us_short(d))).unwrap_or_default();
+                        let newest = k.newest.map(|d| format!("  ·  newest {}", crate::dates::us_short(d))).unwrap_or_default();
                         ui.label(RichText::new(format!("Logger {}  ·  {} sessions{newest}", k.id, k.sessions)).size(12.5).color(DIM));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

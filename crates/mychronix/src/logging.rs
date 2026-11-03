@@ -66,7 +66,7 @@ fn open(path: &PathBuf) -> Option<std::fs::File> {
 fn timestamp() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs() as i64;
-    let d = crate::events::from_days(secs.div_euclid(86_400));
+    let d = crate::dates::from_days(secs.div_euclid(86_400));
     let s = secs.rem_euclid(86_400);
     format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z", d.year, d.month, d.day, s / 3600, s % 3600 / 60, s % 60, now.subsec_millis())
 }

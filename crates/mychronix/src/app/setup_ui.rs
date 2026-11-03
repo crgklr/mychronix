@@ -21,8 +21,8 @@ pub(super) struct SetupEdit {
 pub(super) fn session_title(s: &crate::tracks::LocalSession) -> String {
     let n = s.summary.number.map(|n| format!("Session {n}")).unwrap_or_else(|| "this session".into());
     match (s.summary.date, s.summary.start_time.as_deref()) {
-        (Some(d), Some(t)) => format!("{n}, {} at {}", crate::events::us_short(d), crate::events::clock_time(t)),
-        (Some(d), None) => format!("{n}, {}", crate::events::us_short(d)),
+        (Some(d), Some(t)) => format!("{n}, {} at {}", crate::dates::us_short(d), crate::dates::clock_time(t)),
+        (Some(d), None) => format!("{n}, {}", crate::dates::us_short(d)),
         _ => n,
     }
 }
@@ -44,7 +44,7 @@ impl App {
                 format!(
                     "Same as session {}{}",
                     s.number.unwrap_or(0),
-                    s.date.map(|d| format!(" ({} {})", short_month(d.month), d.day)).unwrap_or_default()
+                    s.date.map(|d| format!(" ({} {})", crate::dates::short_month(d.month), d.day)).unwrap_or_default()
                 )
             }
             Source::Baseline => "This kart's baseline setup".to_string(),
@@ -324,6 +324,3 @@ fn gearing_check(s: &Setup, measured: Option<f64>) -> Option<(bool, String)> {
     }
 }
 
-fn short_month(m: u8) -> &'static str {
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][(m.clamp(1, 12) - 1) as usize]
-}

@@ -196,11 +196,6 @@ impl KartEdit {
     }
 }
 
-fn short_date(d: aim_xrk::summary::Date) -> String {
-    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    format!("{} {}", M[(d.month.clamp(1, 12) - 1) as usize], d.day)
-}
-
 fn hours(ms: u64) -> String {
     let m = ms / 60_000;
     if m >= 60 { format!("{}h {:02}m", m / 60, m % 60) } else { format!("{m}m") }
@@ -246,7 +241,7 @@ impl App {
         let karts = kart_rows(&lib, &profiles);
         let resolved = setup::resolve(&lib, &baselines);
         let all_events = events::group(&lib, &profiles, &defs);
-        let today = events::today();
+        let today = crate::dates::today();
         let connected_logger = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string());
         let new_count = self.new_on_logger().len();
         // MyChron models come from session digests (and the WiFi name once connected).
@@ -400,7 +395,7 @@ impl App {
         let mut classes: Vec<String> = profiles.drivers.iter().map(|d| d.class.trim().to_string()).chain(CLASSES.iter().map(|c| c.to_string())).filter(|c| !c.is_empty()).collect();
         let mut seen = std::collections::HashSet::new();
         classes.retain(|c| seen.insert(c.to_lowercase()));
-        let today = events::today();
+        let today = crate::dates::today();
         let (mut save, mut cancel, mut delete) = (false, false, false);
         let mut open_kart: Option<KartEdit> = None;
         let label = look::label;
@@ -784,7 +779,7 @@ impl App {
                 ui.add_space(if k == 0 { 0.0 } else { 14.0 });
                 ui.horizontal(|ui| {
                     ui.add(Icon::Calendar.image(SECONDARY, 16.0));
-                    ui.label(RichText::new(date.map(long_date).unwrap_or_else(|| "Unknown date".into())).font(semibold(16.0)).color(TEXT));
+                    ui.label(RichText::new(date.map(crate::dates::long).unwrap_or_else(|| "Unknown date".into())).font(semibold(16.0)).color(TEXT));
                     let mut tracks: Vec<String> = day.iter().filter_map(|&i| lib.sessions[i].track_name(&lib.tracks)).collect();
                     tracks.dedup();
                     ui.label(RichText::new(tracks.join(", ")).color(SECONDARY));
@@ -927,7 +922,7 @@ fn driver_column(
                 ui.label(RichText::new(line).size(13.0).color(if (on && wifi) || key_new.is_some() { theme::GOOD } else { SECONDARY }));
                 let mine: Vec<&tracks::LocalSession> = lib.sessions.iter().filter(|s| &s.logger == logger).collect();
                 let newest = mine.iter().filter_map(|s| s.summary.date).max();
-                ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", short_date(n))).unwrap_or_default())).size(12.5).color(DIM));
+                ui.label(RichText::new(format!("{} sessions downloaded{}", mine.len(), newest.map(|n| format!("  ·  newest {}", crate::dates::month_day(n))).unwrap_or_default())).size(12.5).color(DIM));
             });
             // One row from the right edge: Remove, then Download (data key) or Connect (WiFi).
             let key_new = status.key.as_ref().filter(|(s, _)| s == logger).map(|k| k.1).filter(|&n| n > 0);
@@ -973,7 +968,7 @@ fn driver_column(
             let bar = Rect::from_min_max(pos2(x + 5.0, rect.bottom() - label_h - h), pos2(x + slot - 5.0, rect.bottom() - label_h));
             ui.painter().rect_filled(bar, CornerRadius::same(4), SERIES[k % SERIES.len()].gamma_multiply(0.9));
             ui.painter().text(pos2(bar.center().x, bar.top() - 7.0), egui::Align2::CENTER_CENTER, format!("{}m", ms / 60_000), regular(11.0), SECONDARY);
-            ui.painter().text(pos2(bar.center().x, rect.bottom() - 5.0), egui::Align2::CENTER_CENTER, short_date(*date), regular(11.0), DIM);
+            ui.painter().text(pos2(bar.center().x, rect.bottom() - 5.0), egui::Align2::CENTER_CENTER, crate::dates::month_day(*date), regular(11.0), DIM);
         }
     });
     ui.add_space(10.0);
@@ -1011,7 +1006,7 @@ fn driver_column(
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(RichText::new(e.title()).font(semibold(15.5)).color(TEXT));
-                    ui.label(RichText::new(format!("{}  ·  {} session{} on track", long_date(e.start), theirs.len(), if theirs.len() == 1 { "" } else { "s" })).size(12.5).color(DIM));
+                    ui.label(RichText::new(format!("{}  ·  {} session{} on track", crate::dates::long(e.start), theirs.len(), if theirs.len() == 1 { "" } else { "s" })).size(12.5).color(DIM));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(b) = best {
@@ -1172,7 +1167,7 @@ fn setup_last_changed(lib: &Library, resolved: &[setup::Resolved], logger: &str)
     match changed {
         Some(i) => {
             let s = &lib.sessions[i].summary;
-            format!("Last changed in session {}{}", s.number.unwrap_or(0), s.date.map(|d| format!(" ({})", short_date(d))).unwrap_or_default())
+            format!("Last changed in session {}{}", s.number.unwrap_or(0), s.date.map(|d| format!(" ({})", crate::dates::month_day(d))).unwrap_or_default())
         }
         None => "Unchanged since the baseline".to_string(),
     }

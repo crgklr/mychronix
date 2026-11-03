@@ -79,7 +79,7 @@ fn session_files(path: &std::path::Path) -> Vec<PathBuf> {
 
 /// Copies sessions' files into a new folder inside `into`, by MyChron; returns it.
 fn back_up(driver: &str, sessions: &[(String, PathBuf)], into: &std::path::Path) -> Result<PathBuf, String> {
-    let today = crate::events::today();
+    let today = crate::dates::today();
     let folder = into.join(format!("Mychronix backup - {} - {:04}-{:02}-{:02}", driver.replace(['/', '\\'], "-"), today.year, today.month, today.day));
     let mut files = 0;
     for (logger, path) in sessions {
@@ -92,16 +92,6 @@ fn back_up(driver: &str, sessions: &[(String, PathBuf)], into: &std::path::Path)
     }
     log::info!("backed up {files} files of {driver}'s sessions to {}", folder.display());
     Ok(folder)
-}
-
-/// "Dec 20".
-fn short_day(stamp: &str) -> String {
-    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let mut p = stamp.get(..10).unwrap_or("").split('-').map(|x| x.parse::<usize>().ok());
-    match (p.next().flatten(), p.next().flatten(), p.next().flatten()) {
-        (Some(_), Some(m), Some(d)) if (1..=12).contains(&m) => format!("{} {d}", M[m - 1]),
-        _ => String::new(),
-    }
 }
 
 impl App {
@@ -167,7 +157,7 @@ impl App {
         let (title, line) = match &u.before {
             Some((driver, kart, until)) => {
                 let whose = if driver.is_empty() { kart.clone() } else { format!("{driver}'s {kart}") };
-                let when = short_day(until);
+                let when = crate::dates::stamp_month_day(until);
                 (format!("Previously used {model} detected"), format!("Last on {whose}{}", if when.is_empty() { String::new() } else { format!(", until {when}") }))
             }
             None => (format!("New {model} detected"), "Not set up yet".to_string()),
@@ -557,6 +547,6 @@ mod tests {
         got.sort();
         assert_eq!(got, ["a_0001.meta.json", "a_0001.xri", "a_0001.xrz"]);
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(short_day("2026-12-20 10:00:00"), "Dec 20");
+        assert_eq!(crate::dates::stamp_month_day("2026-12-20 10:00:00"), "Dec 20");
     }
 }

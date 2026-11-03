@@ -22,6 +22,7 @@ mod charts;
 mod compare;
 mod corner_model;
 mod countries;
+mod dates;
 mod device;
 mod digest;
 mod logging;

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use aim_xrk::summary::{Date, SessionSummary};
 use serde::{Deserialize, Serialize};
 
+use crate::dates::{parse_date, week_start};
 use crate::tracks::Library;
 
 /// Sessions slower than this flat out never left the stand: engine warm-ups.
@@ -187,90 +188,6 @@ pub fn is_warm_up(s: &SessionSummary) -> bool {
         Some(v) => v < WARM_UP_MAX_KMH,
         None => s.laps.unwrap_or(0) == 0,
     }
-}
-
-/// Days since 1970-01-01 (Howard Hinnant's days_from_civil).
-pub fn days(d: Date) -> i64 {
-    let (m, dd) = (d.month as i64, d.day as i64);
-    let y = d.year as i64 - if m <= 2 { 1 } else { 0 };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + dd - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
-/// The date `n` days after 1970-01-01.
-pub fn from_days(n: i64) -> Date {
-    let z = n + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u8;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u8;
-    let year = (yoe + era * 400 + if month <= 2 { 1 } else { 0 }) as u16;
-    Date { year, month, day }
-}
-
-/// The Monday of `d`'s week, so a Saturday–Sunday race weekend stays together.
-pub fn week_start(d: Date) -> Date {
-    let n = days(d);
-    // 1970-01-01 was a Thursday (3 days after Monday).
-    from_days(n - (n + 3).rem_euclid(7))
-}
-
-/// Today on this computer's clock (local time: a race-day evening is still that day).
-pub fn today() -> Date {
-    let d = jiff::Zoned::now().date();
-    Date { year: d.year() as u16, month: d.month() as u8, day: d.day() as u8 }
-}
-
-/// "10/17/2026" as written in the US, or "2026-10-17" (also "2026-10-7").
-pub fn parse_date(s: &str) -> Option<Date> {
-    let s = s.trim();
-    let (sep, us) = if s.contains('/') { ('/', true) } else { ('-', false) };
-    let mut p = s.split(sep).map(|x| x.trim().parse::<u16>().ok());
-    let (a, b, c) = (p.next()??, p.next()??, p.next()??);
-    let (year, month, day) = if us { (c, a, b) } else { (a, b, c) };
-    if p.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1990 {
-        return None;
-    }
-    let d = Date { year, month: month as u8, day: day as u8 };
-    // Reject days the month doesn't have (e.g. 31 September).
-    (from_days(days(d)) == d).then_some(d)
-}
-
-/// "10/17/2026", for date fields.
-pub fn us_numeric(d: Date) -> String {
-    format!("{}/{}/{}", d.month, d.day, d.year)
-}
-
-/// "Oct 17, 2026".
-pub fn us_short(d: Date) -> String {
-    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    format!("{} {}, {}", M[(d.month.clamp(1, 12) - 1) as usize], d.day, d.year)
-}
-
-/// "2:19 PM" (or "14:19" on a 24-hour clock, see Settings) from the logger's "14:19:05".
-pub fn clock_time(t: &str) -> String {
-    format_time(t, crate::settings::clock_24())
-}
-
-fn format_time(t: &str, h24: bool) -> String {
-    let mut p = t.split(':');
-    let (Some(Ok(h)), Some(m)) = (p.next().map(|h| h.trim().parse::<u32>()), p.next()) else { return t.to_string() };
-    let m = m.get(..2).unwrap_or(m);
-    if h24 {
-        return format!("{h:02}:{m}");
-    }
-    let (h12, ampm) = match h { 0 => (12, "AM"), 1..=11 => (h, "AM"), 12 => (12, "PM"), _ => (h - 12, "PM") };
-    format!("{h12}:{m} {ampm}")
-}
-
-pub fn iso(d: Date) -> String {
-    format!("{:04}-{:02}-{:02}", d.year, d.month, d.day)
 }
 
 /// Peak exhaust temperature of each session, read from the session files in

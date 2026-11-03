@@ -203,7 +203,7 @@ fn find_session(lib: &Library, id: &str) -> Result<usize, String> {
 }
 
 fn date_text(d: Option<aim_xrk::summary::Date>) -> Option<String> {
-    d.map(crate::events::iso)
+    d.map(crate::dates::iso)
 }
 
 /// Opens session `i`, with speed worked out from RPM when there's no GPS (as the app does).
@@ -267,7 +267,7 @@ fn list_sessions(lib: &Library, profiles: &crate::profiles::Profiles, args: &Val
                 "session": session_id(lib, i),
                 "number": s.summary.number,
                 "date": date,
-                "start": s.summary.start_time.as_deref().map(crate::events::clock_time),
+                "start": s.summary.start_time.as_deref().map(crate::dates::clock_time),
                 "driver": d,
                 "kart": kart_name(s, profiles),
                 "track": t,
@@ -331,7 +331,7 @@ fn get_session(lib: &Library, profiles: &crate::profiles::Profiles, args: &Value
     Ok(json!({
         "session": session_id(lib, i),
         "date": date_text(s.summary.date),
-        "start": s.summary.start_time.as_deref().map(crate::events::clock_time),
+        "start": s.summary.start_time.as_deref().map(crate::dates::clock_time),
         "driver": crate::app::session_driver(s, profiles),
         "kart": kart_name(s, profiles),
         "track": crate::app::session_track(lib, i),

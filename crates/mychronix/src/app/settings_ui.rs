@@ -58,7 +58,7 @@ impl App {
                     Some("24") => Choice::B,
                     _ => Choice::Auto,
                 };
-                let example = crate::events::clock_time("14:19");
+                let example = crate::dates::clock_time("14:19");
                 section(ui, Icon::Clock, "Clock", &format!("Times read like {example}"), false, |ui| {
                     let before = clock;
                     segments_in(ui, &mut clock, &[(Choice::Auto, "From your region"), (Choice::A, "12-hour  ·  2:19 PM"), (Choice::B, "24-hour  ·  14:19")], 3);

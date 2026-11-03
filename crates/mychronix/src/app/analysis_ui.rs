@@ -48,11 +48,6 @@ pub(super) fn view_unavailable(session: &Session, view: AnalysisView) -> Option<
     }
 }
 
-/// "Sat 10/10".
-fn short_day(d: aim_xrk::summary::Date) -> String {
-    long_date(d).get(..3).map(|day| format!("{day} {}/{}", d.month, d.day)).unwrap_or_default()
-}
-
 /// One row of the rail: icon, and the label as it slides out; on hover, what
 /// it is (`hint`), or why it can't be used (`off`). Returns its response.
 #[allow(clippy::too_many_arguments)]
@@ -194,7 +189,7 @@ impl App {
             .path
             .as_ref()
             .and_then(|p| lib.sessions.iter().find(|s| &s.path == p).and_then(|s| s.summary.date))
-            .map(short_day)
+            .map(crate::dates::day_numeric)
             .or_else(|| i.date.clone());
         let lap = match self.lap.and_then(|k| session.laps.get(k)) {
             Some(l) => format!("Lap {}", l.number),
@@ -361,7 +356,7 @@ impl App {
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let title = chosen.or_else(|| i.venue.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Session".into());
         let when = match (i.date.as_deref(), i.time.as_deref()) {
-            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::events::clock_time(t))),
+            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::dates::clock_time(t))),
             (Some(d), None) => Some(d.to_string()),
             _ => None,
         };
@@ -564,7 +559,7 @@ impl App {
                     ui.add_space(10.0);
                 }
                 last_date = Some(s.summary.date);
-                let date = s.summary.date.map(|d| long_date(d).rsplit_once(", ").map(|(day, _)| day.to_string()).unwrap_or_default()).unwrap_or_else(|| "Unknown date".into());
+                let date = s.summary.date.map(|d| crate::dates::long(d).rsplit_once(", ").map(|(day, _)| day.to_string()).unwrap_or_default()).unwrap_or_else(|| "Unknown date".into());
                 let place = s.track_name(&lib.tracks).unwrap_or_default();
                 let head = if place.is_empty() { date } else { format!("{date} · {place}") };
                 ui.label(RichText::new(head.to_uppercase()).font(medium(12.0)).color(DIM).extra_letter_spacing(0.5));

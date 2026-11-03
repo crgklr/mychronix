@@ -118,7 +118,7 @@ pub fn back_up_daily(path: &Path, keep: usize) {
         return;
     }
     let backups = dir.join("backups");
-    let today = crate::events::today();
+    let today = crate::dates::today();
     let name = format!("{stem}-{:04}-{:02}-{:02}.json", today.year, today.month, today.day);
     if backups.join(&name).exists() {
         return;
@@ -215,7 +215,7 @@ mod tests {
         back_up_daily(&path, 2);
         let mut kept: Vec<String> = std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         kept.sort();
-        let t = crate::events::today();
+        let t = crate::dates::today();
         assert_eq!(kept, vec!["profiles-2026-01-03.json".to_string(), format!("profiles-{:04}-{:02}-{:02}.json", t.year, t.month, t.day)]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
