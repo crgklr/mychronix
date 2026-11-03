@@ -40,8 +40,11 @@ pub struct Driver {
     pub class: String,
     /// Birthday as typed ("2017-03-14" or "3/14/2017"), so the age stays right.
     pub born: String,
-    /// In race gear, lb, as typed.
+    /// In race gear, as typed: lb, or kg when `weight_kg`.
     pub weight_lb: String,
+    /// The weight was typed in kg (Settings on metric).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub weight_kg: bool,
 }
 
 impl Driver {

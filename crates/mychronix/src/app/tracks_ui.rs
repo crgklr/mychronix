@@ -410,7 +410,7 @@ impl App {
                                 row("AiM id", t.id.clone());
                                 row("Track guid", t.guid.clone());
                                 if let Some(l) = t.length_m {
-                                    row("Length", format!("{l:.1} m ({:.3} mi)", l / 1609.344));
+                                    row("Length", if crate::units::imperial() { format!("{:.0} ft ({:.2} mi)", crate::units::distance(l as f64), l / 1609.344) } else { format!("{l:.0} m ({:.2} km)", l / 1000.0) });
                                 }
                                 row("Type", t.track_kind.label());
                                 if let Some(f) = file {
@@ -594,7 +594,7 @@ impl App {
                         let r = Rect::from_min_size(pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
                         ui.painter().rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
                     }
-                    ui.label(RichText::new(format!("{hi:.0} m above sea level  ·  {:.0} m between lowest and highest point", hi - lo)).size(12.0).color(DIM));
+                    ui.label(RichText::new(format!("{:.0} {u} above sea level  ·  {:.0} {u} between lowest and highest point", crate::units::distance(hi as f64), crate::units::distance((hi - lo) as f64), u = crate::units::distance_unit())).size(12.0).color(DIM));
                 });
                 ui.label(RichText::new(format!("Elevation from AiM's track file, as in RaceStudio's track preview.  {credit}")).size(11.5).color(DIM));
             }

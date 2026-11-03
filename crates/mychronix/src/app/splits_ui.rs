@@ -191,7 +191,7 @@ impl App {
                                     ui.painter().rect_filled(r, CornerRadius::same(theme::RADIUS_SMALL), if on { SURFACE_ACTIVE } else { SURFACE_HOVER });
                                 }
                                 ui.painter().text(r.left_top() + vec2(6.0, 9.0), egui::Align2::LEFT_CENTER, format!("Split {}", k + 1), medium(13.0), if on { TEXT } else { SECONDARY });
-                                ui.painter().text(r.left_top() + vec2(6.0, 25.0), egui::Align2::LEFT_CENTER, format!("{:.0} m", c.lengths[k]), regular(11.5), DIM);
+                                ui.painter().text(r.left_top() + vec2(6.0, 25.0), egui::Align2::LEFT_CENTER, format!("{:.0} {}", crate::units::distance(c.lengths[k]), crate::units::distance_unit()), regular(11.5), DIM);
                                 if resp.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }

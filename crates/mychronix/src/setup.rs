@@ -37,6 +37,10 @@ pub struct Setup {
     pub jetting: String,
     /// About this session only; not carried to the next.
     pub notes: String,
+    /// Pressures in bar and weights in kg, as typed with Settings on metric;
+    /// otherwise psi and lb (every sheet from before this was kept).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metric: bool,
 }
 
 /// A sheet as stored; older sheets have the tire size inside `tires`, which
@@ -56,6 +60,7 @@ struct SetupFile {
     ballast_lb: String,
     jetting: String,
     notes: String,
+    metric: bool,
 }
 
 impl From<SetupFile> for Setup {
@@ -72,6 +77,7 @@ impl From<SetupFile> for Setup {
             ballast_lb: f.ballast_lb,
             jetting: f.jetting,
             notes: f.notes,
+            metric: f.metric,
         };
         if s.front_size.trim().is_empty() && s.rear_size.trim().is_empty() && let Some(size) = s.tires.split_whitespace().find(|w| is_tire_size(w)).map(str::to_string) {
             s.tires = s.tires.split_whitespace().filter(|w| *w != size).collect::<Vec<_>>().join(" ");
@@ -133,6 +139,16 @@ impl Setup {
         FIELDS.iter().all(|(_, f)| f(self).trim() == f(other).trim())
     }
 
+    /// The units its pressures were typed in: "psi", or "bar".
+    pub fn pressure_unit(&self) -> &'static str {
+        if self.metric { "bar" } else { "psi" }
+    }
+
+    /// The units its weights were typed in: "lb", or "kg".
+    pub fn weight_unit(&self) -> &'static str {
+        if self.metric { "kg" } else { "lb" }
+    }
+
     /// What carries over to the next session (everything but notes).
     pub fn carried(&self) -> Setup {
         Setup { notes: String::new(), ..self.clone() }
@@ -169,15 +185,16 @@ impl Setup {
             (n, z) if !n.is_empty() || !z.is_empty() => parts.push(format!("{n}{z}")),
             _ => {}
         }
+        let (psi, lb) = (self.pressure_unit(), self.weight_unit());
         match (t(&self.front_psi), t(&self.rear_psi)) {
-            (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} psi")),
-            (f, r) if !f.is_empty() || !r.is_empty() => parts.push(format!("{} / {} psi front/rear", or_dash(&f), or_dash(&r))),
+            (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} {psi}")),
+            (f, r) if !f.is_empty() || !r.is_empty() => parts.push(format!("{} / {} {psi} front/rear", or_dash(&f), or_dash(&r))),
             _ => {}
         }
         match (t(&self.weight_lb), t(&self.ballast_lb)) {
-            (w, b) if !w.is_empty() && !b.is_empty() => parts.push(format!("{w} lb ({b} lb ballast)")),
-            (w, _) if !w.is_empty() => parts.push(format!("{w} lb")),
-            (_, b) if !b.is_empty() => parts.push(format!("{b} lb ballast")),
+            (w, b) if !w.is_empty() && !b.is_empty() => parts.push(format!("{w} {lb} ({b} {lb} ballast)")),
+            (w, _) if !w.is_empty() => parts.push(format!("{w} {lb}")),
+            (_, b) if !b.is_empty() => parts.push(format!("{b} {lb} ballast")),
             _ => {}
         }
         if !self.jetting.trim().is_empty() {
@@ -526,5 +543,17 @@ mod tests {
         assert_eq!(tire_diameter_in("10x4.60-5"), Some(10.0));
         assert_eq!(tire_diameter_in("MG Yellow"), None);
         assert_eq!(number("~250 lb"), Some(250.0));
+    }
+
+    #[test]
+    fn a_sheet_keeps_the_units_it_was_typed_in() {
+        // Every sheet from before units were kept was typed in psi and lb.
+        let old: Setup = serde_json::from_str(r#"{ "front_psi": "10", "weight_lb": "250" }"#).unwrap();
+        assert_eq!((old.pressure_unit(), old.weight_unit()), ("psi", "lb"));
+        assert!(!serde_json::to_string(&old).unwrap().contains("metric"));
+        let metric = Setup { front_psi: "0.7".into(), metric: true, ..Default::default() };
+        let back: Setup = serde_json::from_str(&serde_json::to_string(&metric).unwrap()).unwrap();
+        assert_eq!((back.pressure_unit(), back.weight_unit()), ("bar", "kg"));
+        assert!(back.carried().metric);
     }
 }

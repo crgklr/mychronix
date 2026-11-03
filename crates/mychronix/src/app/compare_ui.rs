@@ -270,7 +270,7 @@ impl App {
                 .allow_scroll(false)
                 .auto_bounds([false, true])
                 .default_x_bounds(0.0, ref_len.max(0.001))
-                .x_axis_formatter(|mark, _| format!("{:.0} m", mark.value))
+                .x_axis_formatter(|mark, _| format!("{:.0} {}", crate::units::distance(mark.value), crate::units::distance_unit()))
                 .show(ui, |plot| {
                     if zero_line {
                         plot.hline(egui_plot::HLine::new("level", 0.0).color(DIM).width(1.0));

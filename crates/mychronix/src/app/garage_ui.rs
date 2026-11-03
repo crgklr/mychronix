@@ -435,8 +435,13 @@ impl App {
                         ui.end_row();
                         label(ui, "Weight");
                         ui.horizontal(|ui| {
-                            garage_manage_ui::look::text(ui, &mut edit.driver.weight_lb, "75", Some(110.0));
-                            ui.label(RichText::new("lb in race gear").font(regular(14.5)).color(DIM));
+                            // In the units it was typed in; none yet takes Settings' units.
+                            if edit.driver.weight_lb.trim().is_empty() {
+                                edit.driver.weight_kg = !crate::units::imperial();
+                            }
+                            let kg = edit.driver.weight_kg;
+                            garage_manage_ui::look::text(ui, &mut edit.driver.weight_lb, if kg { "35" } else { "75" }, Some(110.0));
+                            ui.label(RichText::new(if kg { "kg in race gear" } else { "lb in race gear" }).font(regular(14.5)).color(DIM));
                         });
                         ui.end_row();
                     });
@@ -1129,9 +1134,9 @@ fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Pro
             .filter(|x| !x.is_empty())
             .collect::<Vec<_>>()
             .join(" · ")),
-            ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} psi"), (f, r) => format!("{f} / {r} psi") }),
-            ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} lb with driver", s.weight_lb.trim()) }),
-            ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} lb", s.ballast_lb.trim()) }),
+            ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} {}", s.pressure_unit()), (f, r) => format!("{f} / {r} {}", s.pressure_unit()) }),
+            ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} {} with driver", s.weight_lb.trim(), s.weight_unit()) }),
+            ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} {}", s.ballast_lb.trim(), s.weight_unit()) }),
             ("Jetting", s.jetting.trim().to_string()),
         ]
         .into_iter()

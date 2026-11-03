@@ -49,7 +49,7 @@ impl App {
                 laps[1..].iter().filter_map(|c| Some((c.slot, crate::compare::time_gap(c.profile.as_ref()?, reference, 600)))).collect();
             if !others.is_empty() && ref_len > 0.0 {
                 ui.label(RichText::new("WHERE TIME WAS WON AND LOST").font(semibold(12.0)).color(DIM).extra_letter_spacing(0.8));
-                ui.label(RichText::new(format!("Each lap against the reference, in {STRETCHES} equal stretches of about {:.0} m.", ref_len / STRETCHES as f64)).font(regular(12.5)).color(SECONDARY));
+                ui.label(RichText::new(format!("Each lap against the reference, in {STRETCHES} equal stretches of about {:.0} {}.", crate::units::distance(ref_len / STRETCHES as f64), crate::units::distance_unit())).font(regular(12.5)).color(SECONDARY));
                 let deltas: Vec<Vec<f64>> = others
                     .iter()
                     .map(|(_, g)| (0..STRETCHES).map(|k| gap_at(g, ref_len * (k + 1) as f64 / STRETCHES as f64) - gap_at(g, ref_len * k as f64 / STRETCHES as f64)).collect())

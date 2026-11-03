@@ -263,16 +263,22 @@ pub(super) fn setup_fields(ui: &mut Ui, id: &str, s: &mut Setup, tires: &[String
         ui.end_row();
         label(ui, "Pressure");
         ui.horizontal(|ui| {
-            small(ui, &mut s.front_psi, "10", "front");
+            // In the units the sheet was typed in; a sheet with none yet takes Settings' units.
+            if [&s.front_psi, &s.rear_psi, &s.weight_lb, &s.ballast_lb].iter().all(|v| v.trim().is_empty()) {
+                s.metric = !crate::units::imperial();
+            }
+            let (psi, p_hint) = (s.pressure_unit(), if s.metric { "0.7" } else { "10" });
+            small(ui, &mut s.front_psi, p_hint, "front");
             ui.add_space(8.0);
-            small(ui, &mut s.rear_psi, "10", "rear psi");
+            small(ui, &mut s.rear_psi, p_hint, &format!("rear {psi}"));
         });
         ui.end_row();
         label(ui, "Weight");
         ui.horizontal(|ui| {
-            small(ui, &mut s.weight_lb, "250", "lb with driver");
+            let lb = s.weight_unit();
+            small(ui, &mut s.weight_lb, if s.metric { "115" } else { "250" }, &format!("{lb} with driver"));
             ui.add_space(8.0);
-            small(ui, &mut s.ballast_lb, "0", "lb ballast");
+            small(ui, &mut s.ballast_lb, "0", &format!("{lb} ballast"));
         });
         ui.end_row();
         label(ui, "Jetting");
