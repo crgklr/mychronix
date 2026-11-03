@@ -84,6 +84,10 @@ pub struct Kart {
     /// RPM at which the clutch engages, if measured; else the engine's typical one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub clutch_rpm: String,
+    /// A setup entered in the Garage for its next session: saved as the sheet
+    /// of the first session downloaded from its MyChron after that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_setup: Option<crate::setup::Setup>,
     /// MyChrons that were on it before, oldest first: their sessions up to
     /// when they came off stay this kart's (and its driver's).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

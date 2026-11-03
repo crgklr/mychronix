@@ -114,6 +114,17 @@ struct KartRow {
     newest: Option<usize>,
 }
 
+/// What a kart runs now: its newest session's setup (or its baseline when that
+/// was changed after it, or before its first session).
+fn kart_setup_now(lib: &Library, resolved: &[setup::Resolved], row: &KartRow) -> Setup {
+    match (row.newest, &row.kart) {
+        (Some(i), Some(k)) if k.past_baselines.last().is_some_and(|p| p.until.as_str() >= lib.sessions[i].start().as_str()) => k.baseline.clone(),
+        (Some(i), _) => resolved[i].setup.clone(),
+        (None, Some(k)) => k.baseline.clone(),
+        (None, None) => Setup::default(),
+    }
+}
+
 fn kart_rows(lib: &Library, profiles: &Profiles) -> Vec<KartRow> {
     // Its newest session, from whichever MyChron it had then.
     let newest = |k: &Kart| {
@@ -327,13 +338,17 @@ impl App {
             });
         }
 
-        if let Some(i) = act.edit_setup {
-            let path = lib.sessions[i].path.clone();
+        if let Some(row) = act.next_setup.and_then(|id| karts.iter().find(|r| r.kart.as_ref().is_some_and(|k| k.id == id))) {
+            // What it runs now, and what's set for its next session.
+            let now = kart_setup_now(&lib, &resolved, row);
+            let next = row.kart.as_ref().and_then(|k| k.next_setup.clone());
             self.setup_edit = Some(setup_ui::SetupEdit {
-                path,
-                setup: resolved[i].setup.clone(),
-                before: setup::before(&lib, &baselines, i),
-                has_own: resolved[i].source == setup::Source::Own,
+                path: PathBuf::new(),
+                has_own: next.is_some(),
+                setup: next.unwrap_or_else(|| now.clone()),
+                before: now,
+                title: String::new(),
+                kart_next: row.kart.as_ref().map(|k| k.id),
             });
         }
         if act.edit_driver.is_some() {
@@ -537,7 +552,9 @@ impl App {
         let (mut save, mut cancel, mut delete) = (false, false, false);
         let adding = edit.id.is_none();
         let ready = !name.is_empty() && !taken && edit.driver.is_some();
+        // The baseline is set when the kart is added; after that, setups go on sessions (Next setup).
         const STEPS: [&str; 3] = ["The kart", "Its MyChron", "Baseline setup"];
+        let steps = if adding { &STEPS[..] } else { &STEPS[..2] };
         let closed = garage_manage_ui::look::dialog(ctx, "kart_edit", 760.0, |ui| {
             use garage_manage_ui::look::{self, Kind, big_button};
             let (title, sub) = match (adding, edit.step) {
@@ -546,7 +563,7 @@ impl App {
                 _ => ("Baseline setup".to_string(), "What it runs before its first setup sheet. Later changes go on the session they were made for."),
             };
             look::header(ui, Icon::Flag, SECONDARY, None, &title, sub);
-            if let Some(k) = look::steps(ui, &STEPS, edit.step, !adding) {
+            if let Some(k) = look::steps(ui, steps, edit.step, !adding) {
                 edit.step = k;
             }
             look::body(ui, |ui| match edit.step {
@@ -671,7 +688,9 @@ impl App {
                 clutch_rpm: edit.clutch_rpm.trim().to_string(),
                 ..before
             };
-            kart.change_baseline(edit.baseline.carried(), newest_of_kart);
+            if adding {
+                kart.change_baseline(edit.baseline.carried(), newest_of_kart);
+            }
             match profiles.karts.iter_mut().find(|k| k.id == id) {
                 Some(k) => *k = kart,
                 None => profiles.karts.push(kart),
@@ -801,7 +820,8 @@ struct Actions {
     go: Option<Page>,
     open_event: Option<String>,
     open_lap: Option<PathBuf>,
-    edit_setup: Option<usize>,
+    /// The kart whose next session's setup to set.
+    next_setup: Option<u32>,
     edit_driver: Option<DriverEdit>,
     edit_kart: Option<KartEdit>,
     download_key: bool,
@@ -1088,22 +1108,16 @@ fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Pro
         ui.horizontal(|ui| {
             ui.label(RichText::new(&name).font(semibold(18.0)).color(TEXT));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if small_button(ui, Icon::Pencil, "Edit").on_hover_text("Name, engine, driver, MyChron and baseline setup").clicked() {
+                if small_button(ui, Icon::Pencil, "Edit").on_hover_text("Name, engine, driver and MyChron").clicked() {
                     act.edit_kart = Some(KartEdit::new(profiles, row.kart.as_ref(), &row.logger));
                 }
-                if let Some(newest) = row.newest && small_button(ui, Icon::Settings, "Setup").on_hover_text("Change the setup from the newest session on").clicked() {
-                    act.edit_setup = Some(newest);
+                if let Some(k) = &row.kart && small_button(ui, Icon::Settings, "Next setup").on_hover_text("The setup for its next session: saved with the first one downloaded after this").clicked() {
+                    act.next_setup = Some(k.id);
                 }
             });
         });
         ui.add_space(6.0);
-        let s = match (row.newest, &row.kart) {
-            // The baseline was changed after the newest session: that's what it runs now.
-            (Some(i), Some(k)) if k.past_baselines.last().is_some_and(|p| p.until.as_str() >= lib.sessions[i].start().as_str()) => k.baseline.clone(),
-            (Some(i), _) => resolved[i].setup.clone(),
-            (None, Some(k)) => k.baseline.clone(),
-            (None, None) => Setup::default(),
-        };
+        let s = kart_setup_now(lib, resolved, row);
         let rows: Vec<(&str, String)> = [
             ("Gearing", if s.drive_teeth.trim().is_empty() && s.driven_teeth.trim().is_empty() { String::new() } else { format!("{} / {}", s.drive_teeth.trim(), s.driven_teeth.trim()) }),
             ("Tires", [s.tires.trim().to_string(), match (s.front_size.trim(), s.rear_size.trim()) {
@@ -1143,6 +1157,12 @@ fn kart_card(ui: &mut Ui, n: usize, row: &KartRow, lib: &Library, profiles: &Pro
         ui.add_space(10.0);
         let when = if row.newest.is_some() { setup_last_changed(lib, resolved, &row.logger) } else { "Baseline, before its first session".to_string() };
         ui.label(RichText::new(when).size(12.5).color(DIM));
+        // A setup waiting for its next session.
+        if let Some(next) = row.kart.as_ref().and_then(|k| k.next_setup.as_ref()) {
+            let changes = next.changes_from(&s);
+            let what = if changes.is_empty() { "notes".to_string() } else { changes.join(", ") };
+            ui.label(RichText::new(format!("Next session: {what}")).size(12.5).color(theme::FAVORITE));
+        }
     });
 }
 

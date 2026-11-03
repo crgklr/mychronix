@@ -11,6 +11,20 @@ pub(super) struct SetupEdit {
     /// What the session would have without its own sheet.
     pub before: Setup,
     pub has_own: bool,
+    /// Which session it's for, as the window's title says it ("Session 49, Oct 31 at 8:55 AM").
+    pub title: String,
+    /// The setup for this kart's next session instead of a session's (from the Garage).
+    pub kart_next: Option<u32>,
+}
+
+/// "Session 49, Oct 31, 2026 at 8:55 AM": which session a setup is for.
+pub(super) fn session_title(s: &crate::tracks::LocalSession) -> String {
+    let n = s.summary.number.map(|n| format!("Session {n}")).unwrap_or_else(|| "this session".into());
+    match (s.summary.date, s.summary.start_time.as_deref()) {
+        (Some(d), Some(t)) => format!("{n}, {} at {}", crate::events::us_short(d), crate::events::clock_time(t)),
+        (Some(d), None) => format!("{n}, {}", crate::events::us_short(d)),
+        _ => n,
+    }
 }
 
 impl App {
@@ -67,6 +81,8 @@ impl App {
                 setup: r.setup.clone(),
                 before: setup::before(lib, baselines, i),
                 has_own: r.source == Source::Own,
+                title: session_title(&lib.sessions[i]),
+                kart_next: None,
             });
         }
     }
@@ -114,19 +130,24 @@ impl App {
         let (mut save, mut cancel, mut revert) = (false, false, false);
         let closed = garage_manage_ui::look::dialog(ctx, "setup_edit", 760.0, |ui| {
             use garage_manage_ui::look;
-            look::header(ui, Icon::Settings, SECONDARY, None, "Setup", "Sessions after this one use this setup until you change it again.");
+            let (title, sub) = match edit.kart_next {
+                Some(_) => ("Setup for the next session".to_string(), "Saved with the first session downloaded from its MyChron after this. Later sessions use it until it's changed."),
+                None => (format!("Setup for {}", edit.title), "Sessions after this one use it until it's changed."),
+            };
+            look::header(ui, Icon::Settings, SECONDARY, None, &title, sub);
             look::body(ui, |ui| {
                 setup_fields(ui, "setup_edit", &mut edit.setup, &tires, 480.0, true);
                 ui.add_space(4.0);
                 let changes = edit.setup.changes_from(&edit.before);
                 if changes.is_empty() {
-                    look::note(ui, "Same as the session before.", DIM);
+                    look::note(ui, if edit.kart_next.is_some() { "Same as now." } else { "Same as the session before." }, DIM);
                 } else {
-                    look::note(ui, &format!("Changes: {}", changes.join(", ")), theme::FAVORITE);
+                    look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
                 }
             });
             look::footer_row(ui, |ui| {
-                if edit.has_own && look::big_button(ui, "Use the previous setup", None, look::Kind::Quiet, true) {
+                let undo = if edit.kart_next.is_some() { "Keep the current setup" } else { "Use the previous setup" };
+                if edit.has_own && look::big_button(ui, undo, None, look::Kind::Quiet, true) {
                     revert = true;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -140,6 +161,22 @@ impl App {
             });
         });
         let open = !closed;
+        if let Some(id) = edit.kart_next {
+            // Kept on the kart until its next session is downloaded.
+            if revert || save {
+                let next = (save && !revert && !(edit.setup.same_setup(&edit.before) && edit.setup.notes.trim().is_empty())).then(|| edit.setup.clone());
+                let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+                if let Some(k) = profiles.karts.iter_mut().find(|k| k.id == id) {
+                    k.next_setup = next;
+                }
+                if let Err(e) = profiles.save() {
+                    self.error = Some(format!("Couldn't save the setup: {e}"));
+                }
+            } else if open && !cancel {
+                self.setup_edit = Some(edit);
+            }
+            return;
+        }
         let result = if revert || (save && edit.setup.same_setup(&edit.before) && edit.setup.notes.trim().is_empty()) {
             // Nothing of its own to keep: inherit again.
             Some(Setup::remove(&edit.path).map(|_| None))

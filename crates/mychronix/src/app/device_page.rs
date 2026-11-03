@@ -163,6 +163,15 @@ impl App {
                             self.error = Some("That session already has a setup, so the one entered here wasn't saved. Open the session and use Setup to change it.".into());
                         } else if let Err(e) = setup.save(&path) {
                             self.error = Some(format!("Couldn't save the setup: {e}"));
+                        } else if let Some(id) = self.device.logger.as_ref().and_then(|b| b.logger_id) {
+                            // The kart's next setup is now that session's.
+                            let profiles = self.profiles.get_or_insert_with(crate::profiles::Profiles::load);
+                            if let Some(k) = profiles.karts.iter_mut().find(|k| k.logger == id.to_string() && k.next_setup.is_some()) {
+                                k.next_setup = None;
+                                if let Err(e) = profiles.save() {
+                                    self.error = Some(format!("Couldn't save: {e}"));
+                                }
+                            }
                         }
                     }
                     self.device.busy = None;
@@ -303,7 +312,7 @@ impl App {
                     ..Default::default()
                 },
                 detected: if multi { vec!["Club North".into(), "Club Circuit".into()] } else { vec!["Club Circuit".into()] },
-                setup: self.latest_setup(&id),
+                setup: self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == id).and_then(|k| k.next_setup.clone()).unwrap_or_else(|| self.latest_setup(&id)),
                 setup_before: self.latest_setup(&id),
                 setup_open: false,
                 replace: true,
@@ -552,6 +561,7 @@ impl App {
         };
         let logger_id = self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default();
         let setup_now = self.latest_setup(&logger_id);
+        let next_setup = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).karts.iter().find(|k| k.logger == logger_id).and_then(|k| k.next_setup.clone());
         let summary_of = |name: &str| self.device.summaries.iter().find(|s| s.file.as_deref() == Some(name)).cloned();
         card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -578,7 +588,8 @@ impl App {
                                 ..Default::default()
                             },
                             detected,
-                            setup: self.device.unsaved_setup.clone().unwrap_or_else(|| setup_now.clone()),
+                            // A setup typed for a failed download, else the kart's next one (Garage), else what it runs.
+                            setup: self.device.unsaved_setup.clone().or(next_setup).unwrap_or_else(|| setup_now.clone()),
                             setup_before: setup_now.clone(),
                             setup_open: false,
                             replace: true,
