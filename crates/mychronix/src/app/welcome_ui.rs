@@ -3,7 +3,7 @@
 //! import's progress and result.
 
 use super::*;
-use garage_manage_ui::look::{self, Kind};
+use look::{self, Kind};
 
 /// Session files a file picker offers.
 const SESSION_FILES: [&str; 10] = ["xrk", "xrz", "drk", "imd", "mc4", "XRK", "XRZ", "DRK", "IMD", "MC4"];

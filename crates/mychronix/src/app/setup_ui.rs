@@ -128,8 +128,8 @@ impl App {
         let Some(mut edit) = self.setup_edit.take() else { return };
         let tires = self.tire_suggestions();
         let (mut save, mut cancel, mut revert) = (false, false, false);
-        let closed = garage_manage_ui::look::dialog(ctx, "setup_edit", 760.0, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "setup_edit", 760.0, |ui| {
+            use look;
             let (title, sub) = match edit.kart_next {
                 Some(_) => ("Setup for the next session".to_string(), "Saved with the first session downloaded from its MyChron after this. Later sessions use it until it's changed."),
                 None => (format!("Setup for {}", edit.title), "Sessions after this one use it until it's changed."),

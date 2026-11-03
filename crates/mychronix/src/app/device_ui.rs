@@ -3,7 +3,7 @@
 //! and see it found.
 
 use super::*;
-use garage_manage_ui::look::{self, Kind};
+use look::{self, Kind};
 
 /// How a MyChron downloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -887,8 +887,8 @@ impl App {
         let Some((path, mut name, mut adding)) = self.driver_pick.take() else { return };
         let drivers: Vec<String> = self.profiles.get_or_insert_with(crate::profiles::Profiles::load).drivers.iter().map(|d| d.name.clone()).collect();
         let (mut save, mut cancel) = (false, false);
-        let closed = garage_manage_ui::look::dialog(ctx, "driver_pick", 600.0, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "driver_pick", 600.0, |ui| {
+            use look;
             look::header(ui, Icon::User, SECONDARY, None, "Who drove this session?", "Its laps count for them: their bests, race days and seat time.");
             look::body(ui, |ui| {
                 if adding || drivers.is_empty() {

@@ -122,8 +122,8 @@ impl App {
             _ => vec![pick.path.clone()],
         };
         let (mut save, mut cancel) = (false, false);
-        let closed = garage_manage_ui::look::dialog(ctx, "track_pick", garage_manage_ui::look::WIDTH, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "track_pick", look::WIDTH, |ui| {
+            use look;
             look::header(ui, Icon::MapPin, SECONDARY, None, "Session track", "Which track this session was at. Laps, best times and track pages use it.");
             look::body(ui, |ui| {
                 look::label(ui, "Track");
@@ -253,8 +253,8 @@ impl App {
         } else {
             format!("You named {them} \u{201c}{}\u{201d}{when}. Pick the track {} at, or keep {} as {}.", offer.typed, if n == 1 { "it was" } else { "they were" }, if n == 1 { "it" } else { "them" }, if n == 1 { "it is" } else { "they are" })
         };
-        let closed = garage_manage_ui::look::dialog(ctx, "track_offer", garage_manage_ui::look::WIDTH, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "track_offer", look::WIDTH, |ui| {
+            use look;
             look::header(ui, Icon::MapPin, SECONDARY, None, &title, &format!("{arrived} {ask}"));
             look::body(ui, |ui| {
                 for (k, &i) in tracks.iter().enumerate() {

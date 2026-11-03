@@ -447,8 +447,8 @@ impl App {
         } else {
             None
         };
-        let closed = garage_manage_ui::look::dialog(ctx, "event_edit", 720.0, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "event_edit", 720.0, |ui| {
+            use look;
             look::header(ui, Icon::Calendar, SECONDARY, None, title, "Sessions downloaded from this track between these dates join this event automatically.");
             look::body(ui, |ui| {
                 egui::Grid::new("event_fields").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {

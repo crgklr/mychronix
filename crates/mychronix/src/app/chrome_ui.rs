@@ -92,8 +92,8 @@ impl App {
         }
         if self.update_notes {
             let mut close = false;
-            let closed = garage_manage_ui::look::dialog(ui.ctx(), "whats_new", garage_manage_ui::look::WIDTH, |ui| {
-                use garage_manage_ui::look;
+            let closed = look::dialog(ui.ctx(), "whats_new", look::WIDTH, |ui| {
+                use look;
                 look::header(ui, Icon::Download, theme::ACCENT, None, &format!("What's new in {}", r.version), "A newer Mychronix is ready to download.");
                 egui::ScrollArea::vertical().max_height(420.0).id_salt("whats_new_body").show(ui, |ui| {
                     look::body(ui, |ui| {

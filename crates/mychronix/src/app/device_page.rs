@@ -401,7 +401,7 @@ impl App {
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let label = if asking { "Waiting for your password…" } else { "Allow USB access" };
-                    if garage_manage_ui::look::big_button(ui, label, Some(Icon::Check), garage_manage_ui::look::Kind::Primary, !asking) {
+                    if look::big_button(ui, label, Some(Icon::Check), look::Kind::Primary, !asking) {
                         let (tx, rx) = std::sync::mpsc::channel();
                         let ctx = ui.ctx().clone();
                         crate::jobs::spawn("usb-access", move || {
@@ -690,8 +690,8 @@ impl App {
         let drivers: Vec<String> = profiles.drivers.iter().map(|d| d.name.clone()).collect();
         let karts: Vec<String> = profiles.garage_karts().map(|k| k.name.clone()).collect();
         let current = profiles.for_logger(&self.device.logger.as_ref().and_then(|b| b.logger_id).map(|i| i.to_string()).unwrap_or_default());
-                let closed = garage_manage_ui::look::dialog(ctx, "download", 760.0, |ui| {
-            use garage_manage_ui::look;
+                let closed = look::dialog(ctx, "download", 760.0, |ui| {
+            use look;
             let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
             look::header(ui, Icon::Download, SECONDARY, None, &title, "Who drove, in which kart, and where. These are remembered for next time.");
             // Two steps, either one a click away: the details, then the setup.

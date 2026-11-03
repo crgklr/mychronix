@@ -405,16 +405,16 @@ impl App {
         let today = events::today();
         let (mut save, mut cancel, mut delete) = (false, false, false);
         let mut open_kart: Option<KartEdit> = None;
-        let label = garage_manage_ui::look::label;
+        let label = look::label;
         let field_w = 460.0;
-        let closed = garage_manage_ui::look::dialog(ctx, "driver_edit", 720.0, |ui| {
+        let closed = look::dialog(ctx, "driver_edit", 720.0, |ui| {
             let (title, sub) = if existing { ("Driver", "Their details, and the karts they race.") } else { ("Add driver", "Who's racing? Add their kart next.") };
-            garage_manage_ui::look::header(ui, Icon::User, SECONDARY, None, title, sub);
+            look::header(ui, Icon::User, SECONDARY, None, title, sub);
             {
-                garage_manage_ui::look::body(ui, |ui| {
+                look::body(ui, |ui| {
                     egui::Grid::new("driver_edit").num_columns(2).spacing([20.0, 16.0]).min_col_width(90.0).show(ui, |ui| {
                         label(ui, "Name");
-                        let field = garage_manage_ui::look::text(ui, &mut edit.driver.name, "e.g. Alex", Some(field_w));
+                        let field = look::text(ui, &mut edit.driver.name, "e.g. Alex", Some(field_w));
                         if !existing && edit.driver.name.is_empty() && !field.has_focus() && ui.memory(|m| m.focused().is_none()) {
                             field.request_focus();
                         }
@@ -424,7 +424,7 @@ impl App {
                         ui.end_row();
                         label(ui, "Birthday");
                         ui.horizontal(|ui| {
-                            garage_manage_ui::look::text(ui, &mut edit.driver.born, "3/14/2017", Some(180.0));
+                            look::text(ui, &mut edit.driver.born, "3/14/2017", Some(180.0));
                             let note = match (edit.driver.born.trim().is_empty(), edit.driver.age(today)) {
                                 (true, _) => String::new(),
                                 (false, Some(a)) => format!("age {a}"),
@@ -440,7 +440,7 @@ impl App {
                                 edit.driver.weight_kg = !crate::units::imperial();
                             }
                             let kg = edit.driver.weight_kg;
-                            garage_manage_ui::look::text(ui, &mut edit.driver.weight_lb, if kg { "35" } else { "75" }, Some(110.0));
+                            look::text(ui, &mut edit.driver.weight_lb, if kg { "35" } else { "75" }, Some(110.0));
                             ui.label(RichText::new(if kg { "kg in race gear" } else { "lb in race gear" }).font(regular(14.5)).color(DIM));
                         });
                         ui.end_row();
@@ -485,8 +485,8 @@ impl App {
                     }
                 });
             }
-            garage_manage_ui::look::footer_row(ui, |ui| {
-                use garage_manage_ui::look::{Kind, big_button};
+            look::footer_row(ui, |ui| {
+                use look::{Kind, big_button};
                 if existing && big_button(ui, "Delete driver…", Some(Icon::Trash), Kind::Quiet, true) {
                     delete = true;
                 }
@@ -560,8 +560,8 @@ impl App {
         // The baseline is set when the kart is added; after that, setups go on sessions (Next setup).
         const STEPS: [&str; 3] = ["The kart", "Its MyChron", "Baseline setup"];
         let steps = if adding { &STEPS[..] } else { &STEPS[..2] };
-        let closed = garage_manage_ui::look::dialog(ctx, "kart_edit", 760.0, |ui| {
-            use garage_manage_ui::look::{self, Kind, big_button};
+        let closed = look::dialog(ctx, "kart_edit", 760.0, |ui| {
+            use look::{self, Kind, big_button};
             let (title, sub) = match (adding, edit.step) {
                 (_, 0) => (if adding { "Add a kart".to_string() } else { name.clone() }, "Its name, engine and driver."),
                 (_, 1) => ("Its MyChron".to_string(), "The MyChron mounted on it. Its sessions belong to this kart."),

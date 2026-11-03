@@ -220,8 +220,8 @@ impl App {
         let sessions = checked.len();
         let mut done = false;
         let mut ignore: Option<(String, String)> = None;
-        let closed = garage_manage_ui::look::dialog(ctx, "sensor_check", garage_manage_ui::look::WIDTH, |ui| {
-            use garage_manage_ui::look;
+        let closed = look::dialog(ctx, "sensor_check", look::WIDTH, |ui| {
+            use look;
             let (title, sub) = if sessions == 1 {
                 ("A sensor stopped recording", "A sensor that has worked before on this MyChron didn't record properly in this session.")
             } else {

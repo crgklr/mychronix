@@ -45,6 +45,7 @@ mod device_page;
 mod compare_ui;
 mod window_ui;
 mod notices;
+mod look;
 
 pub(crate) use sessions_filter_ui::{session_driver, session_track};
 pub(crate) use window_ui::OWN_CONTROLS as OWN_WINDOW_CONTROLS;
