@@ -103,6 +103,42 @@ pub struct DataKey {
     data_in: nusb::Endpoint<Bulk, In>,
 }
 
+/// How many runs the key's directory lists: 16-byte entries, up to the first
+/// empty one (model 0 or 0xFFFF).
+fn run_count(directory: &[u8]) -> usize {
+    directory
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .take_while(|e| u16_at(e.as_slice(), 0).is_some_and(|m| m != 0xFFFF && m != 0))
+        .count()
+}
+
+/// Run `index` from its directory `entry` (model, serial) and its 256-byte
+/// `header` (number, best lap, where its laps and samples are).
+fn run_info(index: u16, entry: &[u8], header: Vec<u8>) -> Result<RunInfo> {
+    let field =
+        |o| u32_at(&header, o).ok_or_else(|| KeyError::Unexpected("short run header".into()));
+    let (laps_addr, data_addr, data_len) = (field(136)?, field(140)?, field(150)?);
+    if data_addr < laps_addr || data_len > 32 << 20 {
+        return Err(KeyError::Unexpected(format!(
+            "run {index}'s header doesn't add up"
+        )));
+    }
+    let best = u32_at(&header, 8).filter(|&b| b > 0 && b != 0x7FFF_FFFF);
+    Ok(RunInfo {
+        index,
+        number: u16_at(&header, 0).unwrap_or(index),
+        serial: u32_at(entry, 2).unwrap_or(0),
+        model: u16_at(entry, 0).unwrap_or(0),
+        laps_addr,
+        data_addr,
+        data_len,
+        best_lap_cs: best,
+        header,
+    })
+}
+
 /// Whether a data key is plugged in (cheap; doesn't open it).
 pub fn is_present() -> bool {
     nusb::list_devices()
@@ -219,36 +255,14 @@ impl DataKey {
     /// The runs on the key, oldest first.
     pub fn runs(&mut self) -> Result<Vec<RunInfo>> {
         let dir = self.command(0x11, 0, 4096)?;
-        let count = dir
-            .as_chunks::<16>()
-            .0
-            .iter()
-            .take_while(|e| u16_at(e.as_slice(), 0).is_some_and(|m| m != 0xFFFF && m != 0))
-            .count();
-        let mut runs = Vec::with_capacity(count);
-        for index in 0..count as u16 {
-            let h = self.command(0x12, index as u32, 256)?;
-            let field =
-                |o| u32_at(&h, o).ok_or_else(|| KeyError::Unexpected("short run header".into()));
-            let (laps_addr, data_addr, data_len) = (field(136)?, field(140)?, field(150)?);
-            if data_addr < laps_addr || data_len > 32 << 20 {
-                return Err(KeyError::Unexpected(format!(
-                    "run {index}'s header doesn't add up"
-                )));
-            }
-            let best = u32_at(&h, 8).filter(|&b| b > 0 && b != 0x7FFF_FFFF);
-            let entry = &dir[index as usize * 16..index as usize * 16 + 16];
-            runs.push(RunInfo {
+        let mut runs = Vec::new();
+        for index in 0..run_count(&dir) as u16 {
+            let header = self.command(0x12, index as u32, 256)?;
+            runs.push(run_info(
                 index,
-                number: u16_at(&h, 0).unwrap_or(index),
-                serial: u32_at(entry, 2).unwrap_or(0),
-                model: u16_at(entry, 0).unwrap_or(0),
-                laps_addr,
-                data_addr,
-                data_len,
-                best_lap_cs: best,
-                header: h,
-            });
+                &dir[index as usize * 16..index as usize * 16 + 16],
+                header,
+            )?);
         }
         Ok(runs)
     }
@@ -291,5 +305,76 @@ impl Run {
             f.extend(part.iter());
         }
         f
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run header: number 25, best lap 31.24 s, 12 laps of records, the
+    /// start time 09/19/2026 07:31:51 as the logger packs it (BCD).
+    fn header() -> Vec<u8> {
+        let mut h = vec![0u8; 256];
+        h[0..2].copy_from_slice(&25u16.to_le_bytes());
+        h[8..12].copy_from_slice(&3124u32.to_le_bytes());
+        h[136..140].copy_from_slice(&0x2_0000u32.to_le_bytes());
+        h[140..144].copy_from_slice(&(0x2_0000u32 + 12 * 64).to_le_bytes());
+        h[150..154].copy_from_slice(&5000u32.to_le_bytes());
+        h[0x9A..0xA1].copy_from_slice(&[0x51, 0x31, 0x07, 0x19, 0x05, 0x09, 0x26]);
+        h
+    }
+
+    fn entry(model: u16, serial: u32) -> Vec<u8> {
+        let mut e = vec![0u8; 16];
+        e[0..2].copy_from_slice(&model.to_le_bytes());
+        e[2..6].copy_from_slice(&serial.to_le_bytes());
+        e
+    }
+
+    #[test]
+    fn the_directory_ends_at_the_first_empty_entry() {
+        let mut dir = [
+            entry(106, 1),
+            entry(106, 1),
+            entry(0xFFFF, 0),
+            entry(106, 9),
+        ]
+        .concat();
+        assert_eq!(run_count(&dir), 2);
+        dir[0..2].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(run_count(&dir), 0);
+    }
+
+    #[test]
+    fn a_run_header_reads_back() {
+        let r = run_info(3, &entry(106, 4242), header()).unwrap();
+        assert_eq!((r.index, r.number, r.serial, r.model), (3, 25, 4242, 106));
+        assert_eq!(
+            (r.laps(), r.best_lap_cs, r.data_len),
+            (12, Some(3124), 5000)
+        );
+        assert_eq!(
+            r.start(),
+            Some(("09/19/2026".to_string(), "07:31:51".to_string()))
+        );
+        assert_eq!(r.file_name(), "20260919-073151_025.mc4");
+        // Saved as one file: the header, the lap records and the samples, each with its length.
+        let run = Run {
+            info: r,
+            lap_records: vec![1; 12 * 64],
+            data: vec![2; 5000],
+        };
+        let file = run.to_file();
+        assert_eq!(&file[..4], b"MC4R");
+        assert_eq!(file.len(), 8 + (4 + 256) + (4 + 768) + (4 + 5000));
+    }
+
+    #[test]
+    fn a_header_that_doesnt_add_up_is_refused() {
+        let mut h = header();
+        h[140..144].copy_from_slice(&0x1_0000u32.to_le_bytes()); // samples before the laps
+        assert!(run_info(0, &entry(106, 1), h).is_err());
+        assert!(run_info(0, &entry(106, 1), vec![0; 100]).is_err()); // too short
     }
 }
