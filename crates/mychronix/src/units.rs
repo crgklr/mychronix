@@ -82,24 +82,80 @@ pub fn temp_unit() -> &'static str {
     if imperial() { "°F" } else { "°C" }
 }
 
-/// Converts a channel's samples and units for display (speeds and temperatures).
-pub fn convert_channel(c: &mut Channel) {
-    if !imperial() {
-        return;
+/// How a channel's samples are shown. Sessions keep what the MyChron
+/// recorded (km/h, °C, lap timing in ms) for every calculation; speeds and
+/// temperatures follow Settings only when a number is drawn or printed, and
+/// milliseconds show as seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shown<'a> {
+    scale: f64,
+    offset: f64,
+    unit: &'a str,
+}
+
+impl<'a> Shown<'a> {
+    pub fn of(c: &'a Channel) -> Self {
+        Self::in_units(c, imperial())
     }
-    match c.units.trim() {
-        "km/h" | "kmh" | "kph" => {
-            for v in &mut c.values {
-                *v *= MPH_PER_KMH;
-            }
-            c.units = "mph".into();
+
+    fn in_units(c: &'a Channel, imperial: bool) -> Self {
+        let (scale, offset, unit) = match c.units.trim() {
+            "km/h" | "kmh" | "kph" if imperial => (MPH_PER_KMH, 0.0, "mph"),
+            "C" | "°C" | "degC" if imperial => (9.0 / 5.0, 32.0, "°F"),
+            "C" | "°C" | "degC" => (1.0, 0.0, "°C"),
+            "F" => (1.0, 0.0, "°F"),
+            "deg" => (1.0, 0.0, "°"),
+            "ms" => (0.001, 0.0, "s"),
+            other => (1.0, 0.0, other),
+        };
+        Self {
+            scale,
+            offset,
+            unit,
         }
-        "C" | "°C" | "degC" => {
-            for v in &mut c.values {
-                *v = *v * 9.0 / 5.0 + 32.0;
-            }
-            c.units = "F".into();
+    }
+
+    pub fn value(&self, v: f64) -> f64 {
+        v * self.scale + self.offset
+    }
+
+    pub fn unit(&self) -> &'a str {
+        self.unit
+    }
+
+    /// Decimals to show: the channel's own, or milliseconds' as seconds.
+    pub fn decimals(&self, c: &Channel) -> u8 {
+        if self.scale == 0.001 { 3 } else { c.decimals }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(units: &str) -> Channel {
+        Channel {
+            name: String::new(),
+            group: None,
+            units: units.into(),
+            decimals: 1,
+            interpolate: true,
+            times_ms: vec![],
+            values: vec![],
         }
-        _ => {}
+    }
+
+    #[test]
+    fn recorded_units_are_converted_only_for_showing() {
+        let (kmh, c, ms, g) = (channel("km/h"), channel("C"), channel("ms"), channel("g"));
+        let mph = Shown::in_units(&kmh, true);
+        assert_eq!(mph.unit(), "mph");
+        assert!((mph.value(100.0) - 62.1371).abs() < 1e-3);
+        assert_eq!(Shown::in_units(&kmh, false).value(100.0), 100.0);
+        assert_eq!(Shown::in_units(&c, true).value(100.0), 212.0);
+        assert_eq!(Shown::in_units(&c, false).unit(), "°C");
+        let s = Shown::in_units(&ms, false);
+        assert_eq!((s.value(1500.0), s.unit(), s.decimals(&ms)), (1.5, "s", 3));
+        assert_eq!(Shown::in_units(&g, true).value(-0.8), -0.8);
     }
 }

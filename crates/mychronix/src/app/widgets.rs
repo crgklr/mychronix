@@ -285,7 +285,7 @@ pub(super) fn track_speed_color(t: f32) -> Color32 {
 /// else on the general ramp.
 pub(super) fn channel_ramp(c: &Channel) -> fn(f32) -> Color32 {
     let name = c.name.to_lowercase();
-    let units = pretty_units(&c.units).to_lowercase();
+    let units = Shown::of(c).unit().to_lowercase();
     if name.contains("rpm") || units == "rpm" {
         rpm_color
     } else if units == "°c" || units == "°f" {

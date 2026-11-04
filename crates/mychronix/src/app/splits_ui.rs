@@ -811,7 +811,12 @@ fn split_detail(
                 let lo = ch.times_ms.partition_point(|&x| x < lap.start_ms);
                 let hi = ch.times_ms.partition_point(|&x| x <= lap.end_ms);
                 (lo..hi)
-                    .map(|i| [profile.dist_at(ch.times_ms[i] as f64), ch.values[i]])
+                    .map(|i| {
+                        [
+                            profile.dist_at(ch.times_ms[i] as f64),
+                            Shown::of(ch).value(ch.values[i]),
+                        ]
+                    })
                     .collect()
             })
             .unwrap_or_default();

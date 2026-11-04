@@ -269,10 +269,13 @@ impl App {
                                 .iter()
                                 .filter_map(|c| {
                                     same_channel(&c.session, name).map(|ch| {
-                                        (
-                                            c.slot,
-                                            crate::compare::channel_on_distance(c, ch, ref_len),
-                                        )
+                                        let shown = Shown::of(ch);
+                                        let mut line =
+                                            crate::compare::channel_on_distance(c, ch, ref_len);
+                                        for p in &mut line {
+                                            p[1] = shown.value(p[1]);
+                                        }
+                                        (c.slot, line)
                                     })
                                 })
                                 .collect();
@@ -280,7 +283,7 @@ impl App {
                                 .channels
                                 .iter()
                                 .find(|c| &c.name == name)
-                                .map(|c| pretty_units(&c.units).to_string())
+                                .map(|c| Shown::of(c).unit().to_string())
                                 .unwrap_or_default();
                             if let Some(h) = self.compare_graph(
                                 ui,

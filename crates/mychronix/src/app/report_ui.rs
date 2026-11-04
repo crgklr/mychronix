@@ -124,7 +124,7 @@ impl App {
                     "per lap".to_string()
                 } else {
                     report::channel(session, &c.channel)
-                        .map(|ch| pretty_units(&ch.units).to_string())
+                        .map(|ch| Shown::of(ch).unit().to_string())
                         .unwrap_or_default()
                 }
             }))

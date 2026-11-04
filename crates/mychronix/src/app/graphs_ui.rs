@@ -114,13 +114,13 @@ impl App {
                             let name_color = if slot.is_some() { TEXT } else { SECONDARY };
                             ui.label(RichText::new(&c.name).color(name_color));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let units = pretty_units(&c.units);
+                                let units = Shown::of(c).unit();
                                 if !units.is_empty() {
                                     ui.label(RichText::new(units).size(12.0).color(DIM));
                                 }
                                 if let Some(v) = cursor_ms.and_then(|t| sample_at(c, t)) {
                                     ui.label(
-                                        RichText::new(format_value(v, c.decimals))
+                                        RichText::new(format_value(v, Shown::of(c).decimals(c)))
                                             .font(medium(13.5))
                                             .color(TEXT),
                                     );
@@ -369,7 +369,7 @@ impl App {
                             Stroke::new(2.5, color),
                         );
                         ui.label(RichText::new(&c.name).font(medium(14.5)).color(TEXT));
-                        let units = pretty_units(&c.units);
+                        let units = Shown::of(c).unit();
                         if !units.is_empty() {
                             ui.label(RichText::new(units).size(13.0).color(DIM));
                         }
@@ -388,7 +388,7 @@ impl App {
                                 if !units.is_empty() {
                                     ui.label(RichText::new(units).font(medium(16.0)).color(SECONDARY));
                                 }
-                                ui.label(RichText::new(format_value(v, c.decimals)).font(semibold(26.0)).color(TEXT));
+                                ui.label(RichText::new(format_value(v, Shown::of(c).decimals(c))).font(semibold(26.0)).color(TEXT));
                             }
                         });
                     });
@@ -717,8 +717,8 @@ impl App {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                     }
                 }
-                let units = channel.map(|c| pretty_units(&c.units)).unwrap_or("");
-                let dec = channel.map(|c| c.decimals).unwrap_or(0);
+                let units = channel.map(|c| Shown::of(c).unit()).unwrap_or("");
+                let dec = channel.map(|c| Shown::of(c).decimals(c)).unwrap_or(0);
                 if let Some(t) = cursor_ms {
                     if let Some(k) = gps.index_at(t).filter(|&i| i >= lo && i < hi).map(|i| i - lo) {
                         painter.circle_filled(pts[k], 7.0, SURFACE);

@@ -121,12 +121,13 @@ impl App {
         let best = session.best_lap(MIN_LAP_MS).copied();
         let best_window = best.map(|b| vec![(b.start_ms, b.end_ms)]);
         // Bins over the range of this lap's (and the best lap's) values.
+        let shown = Shown::of(c);
         let mut lo = f64::MAX;
         let mut hi = f64::MIN;
         for &(s, e) in windows.iter().chain(best_window.iter().flatten()) {
             let a = c.times_ms.partition_point(|&t| t < s);
             let b = c.times_ms.partition_point(|&t| t <= e);
-            for &v in &c.values[a..b] {
+            for v in c.values[a..b].iter().map(|&v| shown.value(v)) {
                 if v.is_finite() {
                     lo = lo.min(v);
                     hi = hi.max(v);
@@ -159,7 +160,7 @@ impl App {
                     .map(|w| to_bars(charts::histogram(c, w, start, bin, bins)))
             })
             .flatten();
-        let units = pretty_units(&c.units).to_string();
+        let units = shown.unit().to_string();
         // The most common band and the time near the top of the range.
         let top = main
             .iter()
@@ -331,8 +332,8 @@ impl App {
             .iter()
             .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[2]), b.max(p[2])));
         let (xu, yu) = (
-            pretty_units(&x.units).to_string(),
-            pretty_units(&y.units).to_string(),
+            Shown::of(x).unit().to_string(),
+            Shown::of(y).unit().to_string(),
         );
         graph_card(ui, (ui.available_height() - 4.0).max(300.0), |ui| {
             ui.horizontal(|ui| {
@@ -372,7 +373,7 @@ impl App {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let (Some(c), true) = (color, cmax > cmin) {
-                        let unit = pretty_units(&c.units);
+                        let unit = Shown::of(c).unit();
                         ui.label(
                             RichText::new(format!("{cmax:.0} {unit}"))
                                 .size(12.0)

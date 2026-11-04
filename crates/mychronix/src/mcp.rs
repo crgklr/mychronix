@@ -596,10 +596,9 @@ fn get_channel(
     )?;
     let session = open(lib, profiles, i)?;
     let name = args.get("channel").and_then(Value::as_str).unwrap_or("");
-    let mut channel = crate::report::channel(&session, name)
-        .cloned()
+    let channel = crate::report::channel(&session, name)
         .ok_or_else(|| format!("No channel {name}; get_session lists this session's channels"))?;
-    crate::units::convert_channel(&mut channel);
+    let shown = crate::units::Shown::of(channel);
     let lap = pick_lap(&session, args.get("lap").and_then(Value::as_i64))?;
     let (lo, hi) = (
         channel.times_ms.partition_point(|&t| t < lap.start_ms),
@@ -614,7 +613,7 @@ fn get_channel(
         .step_by(step)
         .map(|k| {
             let t = channel.times_ms[k];
-            let v = round(channel.values[k], 2);
+            let v = round(shown.value(channel.values[k]), 2);
             match &profile {
                 Some(p) => json!([distance(p.dist_at(t as f64)), v]),
                 None => json!([round((t - lap.start_ms) as f64 / 1000.0, 2), v]),
@@ -625,7 +624,7 @@ fn get_channel(
         "session": session_id(lib, i),
         "lap": lap.number,
         "channel": channel.name,
-        "units": channel.units,
+        "units": shown.unit(),
         "calculated_from_rpm": crate::setup::is_calculated(&channel.name),
         "points_are": if profile.is_some() { format!("[distance from the start of the lap ({}), value]", crate::units::distance_unit()) } else { "[seconds into the lap, value]".to_string() },
         "points": points,

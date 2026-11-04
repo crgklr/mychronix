@@ -50,42 +50,12 @@ pub(super) fn format_value(v: f64, decimals: u8) -> String {
     format!("{v:.prec$}", prec = decimals.min(4) as usize)
 }
 
-/// Units as the logger stores them, made presentable.
-pub(super) fn pretty_units(units: &str) -> &str {
-    match units {
-        "C" => "°C",
-        "F" => "°F",
-        "deg" => "°",
-        other => other,
-    }
-}
-
 /// Laps that don't count: not racing laps (see `aim_xrk::laps::racing`).
 pub(crate) fn slow_laps(session: &Session) -> Vec<bool> {
     aim_xrk::laps::racing(session)
         .into_iter()
         .map(|r| !r)
         .collect()
-}
-
-/// Lap-timing channels are stored in milliseconds; show them in seconds.
-/// Speeds and temperatures are converted to the display units too.
-pub(super) fn seconds_not_ms(session: &mut Session) {
-    // Speeds and temperatures in the chosen units (mph and °F, or metric).
-    for c in session.channels.iter_mut() {
-        crate::units::convert_channel(c);
-    }
-    for c in session
-        .channels
-        .iter_mut()
-        .filter(|c| c.units.trim() == "ms")
-    {
-        for v in &mut c.values {
-            *v /= 1000.0;
-        }
-        c.units = "s".into();
-        c.decimals = 3;
-    }
 }
 
 /// A channel that never changes (e.g. lap comparisons the MyChron isn't set to calculate).
@@ -174,18 +144,25 @@ pub(super) fn default_channels(session: &Session) -> Vec<usize> {
 }
 
 /// The sample at or just before `t_ms` (no interpolation; see
-/// `charts::value_at` for that).
+/// `charts::value_at` for that), in the units shown.
 pub(super) fn sample_at(c: &Channel, t_ms: i64) -> Option<f64> {
     let i = c.times_ms.partition_point(|&t| t <= t_ms);
-    i.checked_sub(1).map(|i| c.values[i])
+    i.checked_sub(1).map(|i| Shown::of(c).value(c.values[i]))
 }
 
 /// Samples within [start_ms, end_ms] as (seconds from start, value), reduced to
-/// at most ~`max` points by keeping each bucket's min and max so peaks survive.
+/// at most ~`max` points by keeping each bucket's min and max so peaks
+/// survive. Values in the units shown.
 pub(super) fn decimate(c: &Channel, start_ms: i64, end_ms: i64, max: usize) -> Vec<[f64; 2]> {
     let lo = c.times_ms.partition_point(|&t| t < start_ms);
     let hi = c.times_ms.partition_point(|&t| t <= end_ms);
-    let point = |i: usize| [(c.times_ms[i] - start_ms) as f64 / 1000.0, c.values[i]];
+    let shown = Shown::of(c);
+    let point = |i: usize| {
+        [
+            (c.times_ms[i] - start_ms) as f64 / 1000.0,
+            shown.value(c.values[i]),
+        ]
+    };
     let n = hi.saturating_sub(lo);
     if n <= max {
         return (lo..hi).map(point).collect();

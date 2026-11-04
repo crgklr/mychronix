@@ -57,6 +57,7 @@ use crate::theme::{
     SURFACE_ACTIVE, SURFACE_HOVER, TEXT, WINDOW, medium, regular, semibold,
 };
 use crate::tracks::{self, Kind, Library};
+use crate::units::Shown;
 
 /// Points drawn per channel; longer series are min/max-decimated to this many buckets.
 const MAX_POINTS: usize = 4000;
@@ -382,7 +383,6 @@ impl App {
                 .get_or_insert_with(crate::setup::Baselines::load);
             crate::setup::add_speed_from_rpm(session, &lib, baselines, i, kart.as_ref());
         }
-        seconds_not_ms(session);
         let blank = |v: &Option<String>| v.as_deref().unwrap_or("").is_empty();
         let nonempty = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
         let meta = crate::device::SessionMeta::load(path);

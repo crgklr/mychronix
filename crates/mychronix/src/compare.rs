@@ -70,10 +70,12 @@ impl DistanceProfile {
         let c = session.channel(name)?;
         let lo = c.times_ms.partition_point(|&t| t < lap.start_ms);
         let hi = c.times_ms.partition_point(|&t| t <= lap.end_ms);
-        // The app shows speeds in the user's units; integrate in km/h.
-        let to_kmh = if c.units == "mph" { 1.609_344 } else { 1.0 };
-        let kmh: Vec<f64> = c.values[lo..hi].iter().map(|v| v * to_kmh).collect();
-        Self::integrate(&c.times_ms[lo..hi], &kmh, lap.start_ms, lap.end_ms)
+        Self::integrate(
+            &c.times_ms[lo..hi],
+            &c.values[lo..hi],
+            lap.start_ms,
+            lap.end_ms,
+        )
     }
 
     /// Trapezoid integration of speed (km/h) sampled at `times_ms`, from

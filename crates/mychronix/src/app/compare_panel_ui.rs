@@ -100,9 +100,9 @@ impl App {
             // Peaks in each lap.
             let peak = |c: &crate::compare::CompareLap, name: &str| -> Option<(f64, f64, String)> {
                 let ch = same_channel(&c.session, name)?;
-                let v: Vec<f64> = ch.times_ms.iter().zip(&ch.values).filter(|(t, _)| (c.lap.start_ms..=c.lap.end_ms).contains(t)).map(|(_, v)| *v).collect();
+                let v: Vec<f64> = ch.times_ms.iter().zip(&ch.values).filter(|(t, _)| (c.lap.start_ms..=c.lap.end_ms).contains(t)).map(|(_, &v)| Shown::of(ch).value(v)).collect();
                 let (lo, hi) = v.iter().fold((f64::MAX, f64::MIN), |a, &x| (a.0.min(x), a.1.max(x)));
-                (!v.is_empty()).then(|| (lo, hi, pretty_units(&ch.units).to_string()))
+                (!v.is_empty()).then(|| (lo, hi, Shown::of(ch).unit().to_string()))
             };
             ui.label(RichText::new("PEAKS").font(semibold(12.0)).color(DIM).extra_letter_spacing(0.8));
             egui::Grid::new("compare_peaks").num_columns(4).spacing([14.0, 6.0]).show(ui, |ui| {

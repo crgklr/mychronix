@@ -274,7 +274,7 @@ pub fn decimals(session: &Session, columns: &[Column]) -> Vec<usize> {
                 0
             } else {
                 channel(session, &c.channel)
-                    .map(|ch| ch.decimals.min(2) as usize)
+                    .map(|ch| crate::units::Shown::of(ch).decimals(ch).min(2) as usize)
                     .unwrap_or(1)
             }
         }))
@@ -379,15 +379,16 @@ fn sample_at(channel: &Channel, t_ms: i64) -> Option<f64> {
     channel.values.get(i.checked_sub(1)?).copied()
 }
 
-/// `stat` of `channel` over [start_ms, end_ms].
+/// `stat` of `channel` over [start_ms, end_ms], in the units shown.
 pub fn value(channel: &Channel, start_ms: i64, end_ms: i64, stat: Stat) -> Option<f64> {
     let lo = channel.times_ms.partition_point(|&t| t < start_ms);
     let hi = channel.times_ms.partition_point(|&t| t <= end_ms);
+    let shown = crate::units::Shown::of(channel);
     let values = channel
         .values
         .get(lo..hi)?
         .iter()
-        .copied()
+        .map(|&v| shown.value(v))
         .filter(|v| v.is_finite());
     match stat {
         Stat::Max => values.reduce(f64::max),

@@ -3,6 +3,8 @@
 
 use aim_xrk::Channel;
 
+use crate::units::Shown;
+
 /// A tidy bin width giving about `target` bins over `span`: 1, 2, 2.5 or 5 × 10ⁿ.
 pub fn nice_bin(span: f64, target: f64) -> f64 {
     if span <= 0.0 || !span.is_finite() {
@@ -19,8 +21,9 @@ pub fn nice_bin(span: f64, target: f64) -> f64 {
 
 /// Seconds spent in each bin of width `bin` starting at `lo`, over the time
 /// windows given (ms). Each sample counts for the time until the next one
-/// (capped at 1 s, so gaps in logging don't count).
+/// (capped at 1 s, so gaps in logging don't count). Bins are in the units shown.
 pub fn histogram(c: &Channel, windows: &[(i64, i64)], lo: f64, bin: f64, bins: usize) -> Vec<f64> {
+    let shown = Shown::of(c);
     let mut out = vec![0.0; bins];
     for &(start, end) in windows {
         let a = c.times_ms.partition_point(|&t| t < start);
@@ -32,8 +35,9 @@ pub fn histogram(c: &Channel, windows: &[(i64, i64)], lo: f64, bin: f64, bins: u
                 end
             };
             let dt = ((next - c.times_ms[i]) as f64 / 1000.0).clamp(0.0, 1.0);
-            let k = ((c.values[i] - lo) / bin).floor();
-            if k >= 0.0 && (k as usize) < bins && c.values[i].is_finite() {
+            let v = shown.value(c.values[i]);
+            let k = ((v - lo) / bin).floor();
+            if k >= 0.0 && (k as usize) < bins && v.is_finite() {
                 out[k as usize] += dt;
             }
         }
@@ -61,7 +65,7 @@ pub fn value_at(c: &Channel, t_ms: f64) -> Option<f64> {
 }
 
 /// Points (x, y, color value) at x's sample times within the windows, at
-/// most `max` of them (evenly thinned).
+/// most `max` of them (evenly thinned), in the units shown.
 pub fn scatter(
     x: &Channel,
     y: &Channel,
@@ -83,9 +87,11 @@ pub fn scatter(
         .iter()
         .step_by(step)
         .filter_map(|&t| {
-            let xv = value_at(x, t as f64)?;
-            let yv = value_at(y, t as f64)?;
-            let cv = color.and_then(|c| value_at(c, t as f64)).unwrap_or(0.0);
+            let xv = Shown::of(x).value(value_at(x, t as f64)?);
+            let yv = Shown::of(y).value(value_at(y, t as f64)?);
+            let cv = color
+                .and_then(|c| Some(Shown::of(c).value(value_at(c, t as f64)?)))
+                .unwrap_or(0.0);
             (xv.is_finite() && yv.is_finite()).then_some([xv, yv, cv])
         })
         .collect()
