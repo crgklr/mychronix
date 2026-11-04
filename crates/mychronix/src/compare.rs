@@ -119,35 +119,35 @@ impl DistanceProfile {
 
     /// Distance at logger time `t_ms`.
     pub fn dist_at(&self, t_ms: f64) -> f64 {
-        interpolate(
-            &self.times_ms.iter().map(|&t| t as f64).collect::<Vec<_>>(),
-            &self.dist_m,
-            t_ms,
-        )
+        interpolate(&self.times_ms, |&t| t as f64, &self.dist_m, |&d| d, t_ms)
     }
 
     /// Logger time when the kart had covered `d` meters.
     pub fn time_at(&self, d: f64) -> f64 {
-        interpolate(
-            &self.dist_m,
-            &self.times_ms.iter().map(|&t| t as f64).collect::<Vec<_>>(),
-            d,
-        )
+        interpolate(&self.dist_m, |&d| d, &self.times_ms, |&t| t as f64, d)
     }
 }
 
-/// Linear interpolation of `ys` over increasing `xs`, clamped at the ends.
-fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
-    let i = xs.partition_point(|&v| v < x);
+/// Linear interpolation of `ys` over increasing `xs` (each read as f64 by
+/// `x_of` and `y_of`), clamped at the ends.
+fn interpolate<X, Y>(
+    xs: &[X],
+    x_of: impl Fn(&X) -> f64,
+    ys: &[Y],
+    y_of: impl Fn(&Y) -> f64,
+    x: f64,
+) -> f64 {
+    let i = xs.partition_point(|v| x_of(v) < x);
     if i == 0 {
-        return ys[0];
+        return y_of(&ys[0]);
     }
     if i >= xs.len() {
-        return ys[ys.len() - 1];
+        return y_of(&ys[ys.len() - 1]);
     }
-    let (x0, x1) = (xs[i - 1], xs[i]);
+    let (x0, x1) = (x_of(&xs[i - 1]), x_of(&xs[i]));
     let f = if x1 > x0 { (x - x0) / (x1 - x0) } else { 0.0 };
-    ys[i - 1] + f * (ys[i] - ys[i - 1])
+    let (y0, y1) = (y_of(&ys[i - 1]), y_of(&ys[i]));
+    y0 + f * (y1 - y0)
 }
 
 /// A lap's samples of `channel` as (distance on the reference lap's scale, value).
