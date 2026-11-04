@@ -169,13 +169,10 @@ impl CornerModel {
                 to: starts.get(k + 1).copied().unwrap_or(length_m),
             })
             .collect();
-        let imu = session.channel("Forward g");
-        let forward = imu.or_else(|| session.channel("GPS LonAcc"))?;
-        let cornering = session.channel("GPS LatAcc")?;
-        let steering = session
-            .channels
-            .iter()
-            .find(|c| c.name.to_lowercase().contains("steer") && c.values.len() > 1);
+        use crate::channels::{Role, find};
+        let forward = find(session, Role::ForwardG)?;
+        let cornering = find(session, Role::CorneringG)?;
+        let steering = crate::channels::steering(session);
         let (lat0, lon0) = (*gps.latitude.first()?, *gps.longitude.first()?);
         let gps_t: Vec<f64> = gps.times_ms.iter().map(|&t| t as f64).collect();
         let n = (length_m / STEP_M) as usize;
@@ -228,7 +225,8 @@ impl CornerModel {
             trace_counts.push(counts.get(i).copied().unwrap_or(false));
         }
         let best_trace = traces.iter().position(|t| session.laps[t.lap] == *best)?;
-        let has_trail = imu.is_some();
+        // Trail braking needs the IMU's forward g (the role's first name), not the GPS's.
+        let has_trail = forward.name == Role::ForwardG.names()[0];
         let stats: Vec<Vec<Stats>> = traces
             .iter()
             .map(|tr| {

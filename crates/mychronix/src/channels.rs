@@ -14,6 +14,11 @@ pub enum Role {
     ExhaustTemp,
     Battery,
     LoggerTemp,
+    /// Speeding up and slowing down, g: the MyChron 6's IMU (see
+    /// `aim_xrk::imu`), else the GPS's.
+    ForwardG,
+    /// Cornering g, from the GPS (the IMU's falls short as the chassis rolls).
+    CorneringG,
 }
 
 impl Role {
@@ -25,6 +30,8 @@ impl Role {
             Role::ExhaustTemp => &["Exhaust Temp", "EGT"],
             Role::Battery => &["Internal Batt", "Battery"],
             Role::LoggerTemp => &["Logger Temperature", "Datalogger_Temp"],
+            Role::ForwardG => &["Forward g", "GPS LonAcc"],
+            Role::CorneringG => &["GPS LatAcc"],
         }
     }
 
@@ -36,6 +43,8 @@ impl Role {
             Role::ExhaustTemp,
             Role::Battery,
             Role::LoggerTemp,
+            Role::ForwardG,
+            Role::CorneringG,
         ]
         .into_iter()
         .find(|r| r.names().iter().any(|n| n.eq_ignore_ascii_case(name)))
@@ -58,6 +67,15 @@ pub fn find(session: &Session, role: Role) -> Option<&Channel> {
             .iter()
             .find(|c| c.name.eq_ignore_ascii_case(n) && c.values.len() > 1)
     })
+}
+
+/// The steering angle, when the session recorded one: a sensor named for it
+/// ("Steering", "Steer Angle"…), or the MyChron 6's own from its gyro.
+pub fn steering(session: &Session) -> Option<&Channel> {
+    session
+        .channels
+        .iter()
+        .find(|c| c.name.to_lowercase().contains("steer") && c.values.len() > 1)
 }
 
 #[cfg(test)]
