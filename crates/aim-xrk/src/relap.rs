@@ -9,6 +9,7 @@
 //! given (the tracks near where the session was recorded), and keeps the one
 //! the kart really crosses lap after lap. The file is never changed.
 
+use crate::geo::to_local as local;
 use crate::{GpsTrack, Lap, Session};
 
 /// How close the kart must pass to a start/finish point to cross it, as the
@@ -32,14 +33,6 @@ pub enum Retimed {
 /// How far the logger's start/finish may be from a track's for the logger's
 /// laps to count as timed at that track's line (GPS wanders a few meters).
 pub const SAME_LINE_M: f64 = 20.0;
-
-/// Meters east and north of `(lat0, lon0)`.
-fn local(lat0: f64, lon0: f64, lat: f64, lon: f64) -> (f64, f64) {
-    (
-        (lon - lon0) * 111_320.0 * lat0.to_radians().cos(),
-        (lat - lat0) * 110_540.0,
-    )
-}
 
 /// A pass across the line through a start/finish point.
 #[derive(Debug, Clone, Copy)]

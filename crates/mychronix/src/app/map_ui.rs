@@ -67,10 +67,8 @@ impl Default for MapState {
 
 /// Meters east and north of (lat0, lon0) back to a position (the inverse of the corner model's projection).
 fn to_lat_lon(lat0: f64, lon0: f64, (x, y): (f64, f64)) -> aim_track::LatLon {
-    aim_track::LatLon {
-        lat: lat0 + y / 110_540.0,
-        lon: lon0 + x / (111_320.0 * lat0.to_radians().cos()),
-    }
+    let (lat, lon) = aim_xrk::geo::from_local(lat0, lon0, (x, y));
+    aim_track::LatLon { lat, lon }
 }
 
 /// Center and zoom that fit `points` into `size` pixels. A kart track's corner
@@ -91,8 +89,8 @@ fn fit(points: &[aim_track::LatLon], size: Vec2) -> Option<(aim_track::LatLon, f
         lat: (lat0 + lat1) / 2.0,
         lon: (lon0 + lon1) / 2.0,
     };
-    let width_m = ((lon1 - lon0) * 111_320.0 * c.lat.to_radians().cos()).max(15.0);
-    let height_m = ((lat1 - lat0) * 110_540.0).max(15.0);
+    let width_m = ((lon1 - lon0) * aim_xrk::geo::m_per_deg_lon(c.lat)).max(15.0);
+    let height_m = ((lat1 - lat0) * aim_xrk::geo::M_PER_DEG_LAT).max(15.0);
     // Meters per pixel at zoom z (256-pixel tiles): 156543.03 × cos(lat) / 2^z.
     let mpp = (width_m / (size.x as f64 * 0.85)).max(height_m / (size.y as f64 * 0.85));
     let zoom = (156_543.03 * c.lat.to_radians().cos() / mpp)
@@ -363,8 +361,7 @@ impl App {
             let mpp = 156_543.03 * c.lat.to_radians().cos() / 2f64.powf(zoom);
             let east = (panel_w as f64 + 20.0) / 2.0 * mpp;
             let south = if whole { 30.0 } else { 140.0 } * mpp;
-            let lon = c.lon + east / (111_320.0 * c.lat.to_radians().cos());
-            let lat = c.lat - south / 110_540.0;
+            let (lat, lon) = aim_xrk::geo::from_local(c.lat, c.lon, (east, -south));
             self.map_view_move_to((lat, lon, zoom), ui.ctx());
         }
 

@@ -714,8 +714,7 @@ fn split_detail(
         };
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), map_h), Sense::hover());
         let r0 = c.reference[0];
-        let kx = 111_320.0 * r0.lat.to_radians().cos();
-        let xy = |p: &LatLon| ((p.lon - r0.lon) * kx, (p.lat - r0.lat) * 110_540.0);
+        let xy = |p: &LatLon| aim_xrk::geo::to_local(r0.lat, r0.lon, p.lat, p.lon);
         let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         for p in &c.reference {
             let (x, y) = xy(p);

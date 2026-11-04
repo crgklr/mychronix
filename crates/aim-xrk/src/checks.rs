@@ -198,11 +198,8 @@ fn travelled(session: &Session) -> bool {
         return false;
     };
     let n = g.len() - 1;
-    let k = 111_320.0 * g.latitude[0].to_radians().cos();
-    let (dx, dy) = (
-        (g.longitude[n] - g.longitude[0]) * k,
-        (g.latitude[n] - g.latitude[0]) * 110_540.0,
-    );
+    let (dx, dy) =
+        crate::geo::to_local(g.latitude[0], g.longitude[0], g.latitude[n], g.longitude[n]);
     (dx * dx + dy * dy).sqrt() > 300.0
 }
 

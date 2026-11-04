@@ -119,13 +119,7 @@ fn refine(times_ms: &[i64], points: &[LatLon], i: usize, target: &LatLon) -> f64
     };
     let (a, b) = if j < i { (j, i) } else { (i, j) };
     // Flat local coordinates in meters around `a`.
-    let kx = 111_320.0 * points[a].lat.to_radians().cos();
-    let to_xy = |p: &LatLon| {
-        (
-            (p.lon - points[a].lon) * kx,
-            (p.lat - points[a].lat) * 110_540.0,
-        )
-    };
+    let to_xy = |p: &LatLon| aim_xrk::geo::to_local(points[a].lat, points[a].lon, p.lat, p.lon);
     let (bx, by) = to_xy(&points[b]);
     let (tx, ty) = to_xy(target);
     let len2 = bx * bx + by * by;

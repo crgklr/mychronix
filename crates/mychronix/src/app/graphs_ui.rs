@@ -653,10 +653,8 @@ impl App {
 
                 // Local flat projection: meters east/north of the window's first point.
                 let (lat0, lon0) = (gps.latitude[lo], gps.longitude[lo]);
-                let kx = 111_320.0 * lat0.to_radians().cos();
-                let ky = 110_540.0;
                 let xy: Vec<(f64, f64)> = (lo..hi)
-                    .map(|i| ((gps.longitude[i] - lon0) * kx, (gps.latitude[i] - lat0) * ky))
+                    .map(|i| aim_xrk::geo::to_local(lat0, lon0, gps.latitude[i], gps.longitude[i]))
                     .collect();
                 let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
                 for &(x, y) in &xy {

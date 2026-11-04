@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub mod checks;
 pub mod drk;
+pub mod geo;
 pub mod imu;
 pub mod laps;
 pub mod mc4;

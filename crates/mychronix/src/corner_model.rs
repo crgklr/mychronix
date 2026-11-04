@@ -7,6 +7,7 @@
 //! Every lap is sampled every 2 m along the track, on the best lap's scale of
 //! distance, so laps line up corner for corner. Built once per session.
 
+use aim_xrk::geo::to_local as local_xy;
 use aim_xrk::{Lap, Session};
 
 use crate::braking;
@@ -109,14 +110,6 @@ pub struct CornerModel {
     pub best: usize,
     /// Trail braking can be told apart (the session has the IMU's forward g).
     pub has_trail: bool,
-}
-
-/// Meters east and north of a reference point.
-fn local_xy(lat0: f64, lon0: f64, lat: f64, lon: f64) -> (f64, f64) {
-    (
-        (lon - lon0) * 111_320.0 * lat0.to_radians().cos(),
-        (lat - lat0) * 110_540.0,
-    )
 }
 
 /// Linear interpolation of `ys` at `x` over increasing `xs`, clamped at the ends.
