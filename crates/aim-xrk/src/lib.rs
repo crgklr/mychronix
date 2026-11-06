@@ -17,6 +17,7 @@ pub mod relap;
 pub mod rs2gps;
 mod sensor_table;
 pub mod sensors;
+pub mod splits;
 pub mod summary;
 
 pub use libxrk;
@@ -71,6 +72,23 @@ impl GpsTrack {
         self.times_ms.partition_point(|&t| t <= t_ms).checked_sub(1)
     }
 
+    /// Where the kart was at `t_ms`, between the points either side
+    /// (latitude, longitude in degrees); None outside the track's times.
+    pub fn position_at(&self, t_ms: f64) -> Option<(f64, f64)> {
+        let i = self.times_ms.partition_point(|&t| (t as f64) < t_ms);
+        if i == 0 || i >= self.len() {
+            return None;
+        }
+        let (t0, t1) = (self.times_ms[i - 1] as f64, self.times_ms[i] as f64);
+        let f = if t1 > t0 {
+            (t_ms - t0) / (t1 - t0)
+        } else {
+            0.0
+        };
+        let lerp = |v: &[f64]| v[i - 1] + f * (v[i] - v[i - 1]);
+        Some((lerp(&self.latitude), lerp(&self.longitude)))
+    }
+
     fn from_libxrk(g: &libxrk::GpsDecodeResult) -> Option<Self> {
         let mut track = GpsTrack::default();
         for i in 0..g.timecodes.len() {
@@ -117,6 +135,9 @@ pub struct SessionInfo {
     /// The laps were timed from GPS, and why (see [`relap`]); set by
     /// whoever re-timed them.
     pub laps_from_gps: Option<relap::Retimed>,
+    /// The logger's own split times, for the laps it has them for (see
+    /// [`splits`]); read them with [`Session::logger_splits`].
+    pub logger_splits: Vec<splits::LapSplits>,
 }
 
 /// A recorded channel. `times_ms` and `values` have the same length.
@@ -221,6 +242,20 @@ impl Session {
             .min_by_key(|l| l.duration_ms())
             .or_else(|| self.best_lap(min_ms))
     }
+
+    /// The logger's split times for `lap`, from its start to each split line
+    /// (ms); None when the logger didn't time this lap's splits, or the laps
+    /// were re-timed from GPS (the splits belong to the logger's own laps).
+    pub fn logger_splits(&self, lap: &Lap) -> Option<&[i64]> {
+        if self.info.laps_from_gps.is_some() {
+            return None;
+        }
+        self.info
+            .logger_splits
+            .iter()
+            .find(|s| (s.lap_start_ms - lap.start_ms).abs() <= splits::SAME_START_MS)
+            .map(|s| s.cumulative_ms.as_slice())
+    }
 }
 
 /// Whether a stretch the logger didn't record (`gaps`, from `checks::recording_gaps`) falls in `lap`.
@@ -245,7 +280,15 @@ impl From<libxrk::XrkFile> for Session {
             logger_model_id: m.logger_model_id,
             imu_mount: None,
             laps_from_gps: None,
+            logger_splits: Vec::new(),
         };
+        let lap_records: Vec<&[u8]> = file
+            .raw
+            .header_messages
+            .get(&libxrk::messages::tokens::lap())
+            .map(|m| m.iter().map(|h| h.payload.as_slice()).collect())
+            .unwrap_or_default();
+        let logger_splits = splits::from_lap_records(lap_records, file.raw.time_offset);
         let channels: Vec<Channel> = file
             .channels
             .into_iter()
@@ -326,7 +369,7 @@ impl From<libxrk::XrkFile> for Session {
                 }
             }
         }
-        let laps = file
+        let laps: Vec<Lap> = file
             .laps
             .into_iter()
             // libxrk counts from 0; the logger and RaceStudio count the out-lap as lap 1.
@@ -336,6 +379,7 @@ impl From<libxrk::XrkFile> for Session {
                 end_ms: l.end_time,
             })
             .collect();
+        info.logger_splits = splits::matched(logger_splits, &laps);
         Session {
             info,
             channels,

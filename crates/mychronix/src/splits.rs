@@ -2,7 +2,7 @@
 //! track, and the time each lap takes between them.
 //!
 //! The logger records split crossings only when the track it's using has
-//! splits defined; ours don't, so Mychronix places its own.
+//! splits defined (see `aim_xrk::splits`); otherwise Mychronix places its own.
 
 use aim_track::LatLon;
 
@@ -18,28 +18,10 @@ impl Sectors {
     /// Divides `path` into `count` sectors of equal length, starting at the
     /// point nearest `start_finish` (or the path's first point).
     pub fn even(path: &[LatLon], start_finish: Option<LatLon>, count: usize) -> Option<Self> {
-        if path.len() < 4 || count < 2 {
+        if count < 2 {
             return None;
         }
-        let start = start_finish
-            .and_then(|sf| {
-                (0..path.len())
-                    .min_by(|&a, &b| path[a].distance_m(&sf).total_cmp(&path[b].distance_m(&sf)))
-            })
-            .unwrap_or(0);
-        let mut rotated: Vec<LatLon> = path[start..]
-            .iter()
-            .chain(&path[..start])
-            .copied()
-            .collect();
-        // Close the loop so the last sector ends back at the line.
-        if rotated[0].distance_m(&rotated[rotated.len() - 1]) > 1.0 {
-            rotated.push(rotated[0]);
-        }
-        let mut cumulative = vec![0.0];
-        for w in rotated.windows(2) {
-            cumulative.push(cumulative.last().unwrap() + w[0].distance_m(&w[1]));
-        }
+        let (rotated, cumulative) = around(path, start_finish)?;
         let total = *cumulative.last().unwrap();
         let boundaries = (1..count)
             .map(|k| {
@@ -54,6 +36,32 @@ impl Sectors {
         })
     }
 
+    /// Divides `path` at the points nearest `lines` (split lines in order
+    /// around the lap, such as where the logger timed its splits), starting
+    /// at the point nearest `start_finish`. None when the lines don't fall
+    /// in order along the path.
+    pub fn at(path: &[LatLon], start_finish: Option<LatLon>, lines: &[LatLon]) -> Option<Self> {
+        let (rotated, _) = around(path, start_finish)?;
+        let mut boundaries = Vec::with_capacity(lines.len());
+        let mut from = 1;
+        for line in lines {
+            let i = (from..rotated.len() - 1).min_by(|&a, &b| {
+                rotated[a]
+                    .distance_m(line)
+                    .total_cmp(&rotated[b].distance_m(line))
+            })?;
+            if rotated[i].distance_m(line) > 30.0 {
+                return None;
+            }
+            boundaries.push(i);
+            from = i + 1;
+        }
+        (!boundaries.is_empty()).then_some(Self {
+            path: rotated,
+            boundaries,
+        })
+    }
+
     pub fn count(&self) -> usize {
         self.boundaries.len() + 1
     }
@@ -62,6 +70,34 @@ impl Sectors {
     pub fn split_points(&self) -> Vec<LatLon> {
         self.boundaries.iter().map(|&i| self.path[i]).collect()
     }
+}
+
+/// `path` rotated to start at the point nearest `start_finish` and closed
+/// back to it, with the distance along it at each point (m).
+fn around(path: &[LatLon], start_finish: Option<LatLon>) -> Option<(Vec<LatLon>, Vec<f64>)> {
+    if path.len() < 4 {
+        return None;
+    }
+    let start = start_finish
+        .and_then(|sf| {
+            (0..path.len())
+                .min_by(|&a, &b| path[a].distance_m(&sf).total_cmp(&path[b].distance_m(&sf)))
+        })
+        .unwrap_or(0);
+    let mut rotated: Vec<LatLon> = path[start..]
+        .iter()
+        .chain(&path[..start])
+        .copied()
+        .collect();
+    // Close the loop so the last sector ends back at the line.
+    if rotated[0].distance_m(&rotated[rotated.len() - 1]) > 1.0 {
+        rotated.push(rotated[0]);
+    }
+    let mut cumulative = vec![0.0];
+    for w in rotated.windows(2) {
+        cumulative.push(cumulative.last().unwrap() + w[0].distance_m(&w[1]));
+    }
+    Some((rotated, cumulative))
 }
 
 /// Sector times in ms for one lap, from GPS samples (`times_ms`, `points`)
@@ -158,6 +194,21 @@ mod tests {
         assert!(
             (s.boundaries[0] as i64 - 40).abs() <= 1 && (s.boundaries[1] as i64 - 80).abs() <= 1
         );
+    }
+
+    #[test]
+    fn sectors_at_given_lines_in_order() {
+        let path = circle(120);
+        let s = Sectors::at(&path, Some(path[30]), &[path[50], path[100]]).unwrap();
+        assert_eq!(s.count(), 3);
+        assert_eq!(s.boundaries, vec![20, 70]);
+        // Out of order, or nowhere near the line: no sectors.
+        assert!(Sectors::at(&path, Some(path[30]), &[path[100], path[50]]).is_none());
+        let far = LatLon {
+            lat: 46.0,
+            lon: 9.0,
+        };
+        assert!(Sectors::at(&path, Some(path[30]), &[far]).is_none());
     }
 
     #[test]

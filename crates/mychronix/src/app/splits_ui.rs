@@ -8,7 +8,9 @@ use aim_track::LatLon;
 /// Splits tab state for the open session.
 #[derive(Default)]
 pub(super) struct SplitsState {
-    pub count: usize,
+    /// The splits picked; None until the session opens (then the logger's
+    /// own when it has them).
+    pub source: Option<Source>,
     pub values: Values,
     pub cumulative: bool,
     pub color: bool,
@@ -18,9 +20,19 @@ pub(super) struct SplitsState {
     computed: Option<Computed>,
 }
 
-/// Split times worked out for one session and split count.
+/// Where the split lines come from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Source {
+    /// The logger's own, where the track's split lines are set up on it.
+    Logger,
+    /// This many equal lengths of the best lap, timed from GPS.
+    Even(usize),
+}
+
+/// Split times worked out for one session and split source.
 struct Computed {
     path: PathBuf,
+    source: Source,
     count: usize,
     /// The best lap's line, which the splits sit on.
     reference: Vec<LatLon>,
@@ -31,9 +43,39 @@ struct Computed {
     rows: Vec<Row>,
     /// Per row: logger times at the start, each split line and the finish.
     crossings: Vec<Option<Vec<f64>>>,
+    /// Per row: worked out from GPS though the splits are the logger's (it
+    /// didn't time that lap's).
+    estimated: Vec<bool>,
 }
 
-fn compute(path: &std::path::Path, session: &Session, count: usize) -> Option<Computed> {
+/// The logger's split lines on the map: where the kart was when it timed
+/// them, on the best lap it timed them on.
+fn logger_lines(session: &Session) -> Option<Vec<LatLon>> {
+    let gps = session.gps.as_ref()?;
+    let lap = session
+        .complete_laps()
+        .iter()
+        .filter(|l| session.logger_splits(l).is_some())
+        .min_by_key(|l| l.duration_ms())?;
+    session
+        .logger_splits(lap)?
+        .iter()
+        .map(|&c| {
+            let (lat, lon) = gps.position_at((lap.start_ms + c) as f64)?;
+            Some(LatLon { lat, lon })
+        })
+        .collect()
+}
+
+/// Whether the session has the logger's own splits to show.
+pub(super) fn has_logger_splits(session: &Session) -> bool {
+    session
+        .complete_laps()
+        .iter()
+        .any(|l| session.logger_splits(l).is_some())
+}
+
+fn compute(path: &std::path::Path, session: &Session, source: Source) -> Option<Computed> {
     let gps = session.gps.as_ref()?;
     let best = session.best_lap(MIN_LAP_MS)?;
     let lo = gps.times_ms.partition_point(|&t| t < best.start_ms);
@@ -44,7 +86,16 @@ fn compute(path: &std::path::Path, session: &Session, count: usize) -> Option<Co
             lon: gps.longitude[i],
         })
         .collect();
-    let sectors = splits::Sectors::even(&reference, reference.first().copied(), count)?;
+    let sectors = match source {
+        Source::Logger => splits::Sectors::at(
+            &reference,
+            reference.first().copied(),
+            &logger_lines(session)?,
+        )?,
+        Source::Even(count) => {
+            splits::Sectors::even(&reference, reference.first().copied(), count)?
+        }
+    };
     let points: Vec<LatLon> = gps
         .latitude
         .iter()
@@ -62,14 +113,29 @@ fn compute(path: &std::path::Path, session: &Session, count: usize) -> Option<Co
     let lengths = edges.windows(2).map(|w| cum[w[1]] - cum[w[0]]).collect();
     let mut rows = Vec::new();
     let mut crossings = Vec::new();
+    let mut estimated = Vec::new();
     for lap in &session.laps {
-        let times = splits::sector_times(
-            &gps.times_ms,
-            &points,
-            lap.start_ms,
-            lap.end_ms,
-            &split_points,
-        );
+        let logged = match source {
+            Source::Logger => session.logger_splits(lap),
+            Source::Even(_) => None,
+        }
+        .filter(|c| c.len() + 1 == sectors.count());
+        estimated.push(source == Source::Logger && logged.is_none());
+        let times = match logged {
+            Some(c) => {
+                let mut t = vec![c[0]];
+                t.extend(c.windows(2).map(|w| w[1] - w[0]));
+                t.push(lap.duration_ms() - c[c.len() - 1]);
+                Some(t)
+            }
+            None => splits::sector_times(
+                &gps.times_ms,
+                &points,
+                lap.start_ms,
+                lap.end_ms,
+                &split_points,
+            ),
+        };
         crossings.push(times.as_ref().map(|t| {
             let mut c = vec![lap.start_ms as f64];
             for d in t {
@@ -85,12 +151,14 @@ fn compute(path: &std::path::Path, session: &Session, count: usize) -> Option<Co
     }
     Some(Computed {
         path: path.to_path_buf(),
-        count,
+        source,
+        count: sectors.count(),
         reference: sectors.path.clone(),
         boundaries: sectors.boundaries.clone(),
         lengths,
         rows,
         crossings,
+        estimated,
     })
 }
 
@@ -119,15 +187,22 @@ impl App {
             return;
         };
         let st = &mut self.splits;
-        if st.count < 2 {
-            st.count = 4;
-        }
+        let logger = has_logger_splits(session);
+        let new_session = st.computed.as_ref().is_none_or(|c| c.path != path);
+        // A new session opens on the logger's splits when it has them; the
+        // count picked last time otherwise.
+        let source = match st.source {
+            Some(Source::Even(n)) if !(new_session && logger) => Source::Even(n),
+            _ if logger => Source::Logger,
+            _ => Source::Even(4),
+        };
+        st.source = Some(source);
         let fresh = st
             .computed
             .as_ref()
-            .is_none_or(|c| c.path != path || c.count != st.count);
+            .is_none_or(|c| c.path != path || c.source != source);
         if fresh {
-            if st.computed.as_ref().is_none_or(|c| c.path != path) {
+            if new_session {
                 // A new session: out, in and slow laps start unticked; nothing selected.
                 let slow = slow_laps(session);
                 st.excluded = session
@@ -139,16 +214,29 @@ impl App {
                     .collect();
                 st.selected = None;
             }
-            st.computed = compute(&path, session, st.count);
+            st.computed = compute(&path, session, source);
         }
 
         // Toolbar.
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             ui.label(RichText::new("Splits").size(12.5).color(DIM));
+            if logger
+                && chip(ui, "MyChron", source == Source::Logger)
+                    .on_hover_text(
+                        "The split times the MyChron recorded at the track's split lines",
+                    )
+                    .clicked()
+            {
+                st.source = Some(Source::Logger);
+                st.selected = None;
+            }
             for n in 2..=8 {
-                if chip(ui, &n.to_string(), st.count == n).clicked() {
-                    st.count = n;
+                if chip(ui, &n.to_string(), source == Source::Even(n))
+                    .on_hover_text(format!("{n} equal lengths of the lap, timed from GPS"))
+                    .clicked()
+                {
+                    st.source = Some(Source::Even(n));
                     st.selected = None;
                 }
             }
@@ -412,8 +500,15 @@ impl SplitsTable<'_> {
                             let resp = ui
                                 .horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
-                                    let (lr, _) =
+                                    let estimated = c.estimated[ri];
+                                    let (lr, lap_resp) =
                                         ui.allocate_exact_size(vec2(lap_w, row_h), Sense::hover());
+                                    if estimated {
+                                        lap_resp.on_hover_text(
+                                            "≈ The MyChron didn't time this lap's splits, so \
+                                             they're worked out from GPS at the same lines",
+                                        );
+                                    }
                                     let cb = Rect::from_center_size(
                                         pos2(lr.left() + 10.0, lr.center().y),
                                         Vec2::splat(16.0),
@@ -513,6 +608,11 @@ impl SplitsTable<'_> {
                                             (_, None) => "—".to_string(),
                                             (Values::Times, Some(v)) => seconds(v),
                                             (_, Some(v)) => format_delta(v),
+                                        };
+                                        let text = if estimated && v.is_some() {
+                                            format!("≈{text}")
+                                        } else {
+                                            text
                                         };
                                         let color = if !on {
                                             DIM

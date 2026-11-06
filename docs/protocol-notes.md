@@ -186,6 +186,27 @@ then confirmed and corrected on the device.
 whose `spec/xrk_format.py` is an executable spec of the format. Its test data
 comes from MXP/MXm loggers; MyChron files still need checking against it.
 
+### Split times in `LAP` records (checked Nov 5, 2026)
+
+When the track the logger uses has split lines set up, it writes a `LAP`
+record for each split beside each whole lap's. libxrk reads only the whole
+laps (it skips non-zero segments), so `aim-xrk/src/splits.rs` reads the rest.
+
+- Payload (libxrk's `LapPayload::parse`): `[1]` segment, u8: **0 = the whole
+  lap, 1, 2, … = split k**; `[2:4]` lap number, u16; `[4:8]` duration, u32 ms;
+  end time, u32 ms, at `[16:20]` in a 20-byte payload and at `[28:32]` in a
+  32-byte one.
+- For a split, the duration runs **from the lap's start to split line k**
+  (cumulative) and the end time is the logger's time at the line, so end minus
+  duration is the lap's start, the same as on the whole-lap record.
+- A split record carries the **previous** lap's number, so splits are matched
+  to laps by that start time (exact in both samples), never by number.
+- Not every lap has them: a lap the logger didn't finish timing has none.
+- Seen in two public samples: a TCR car's `.xrk` (20-byte payloads; the lap of
+  2:14.936 has splits at 33.743 and 76.232 s, so 33.743 / 42.489 / 58.704) and
+  AiM's `test.xrk` (32-byte payloads, 3 splits on all 11 laps). No MyChron 6
+  file here has them, since none of its tracks have split lines set up.
+
 ### GPS timing against the other channels (open question, Oct 13 2026)
 
 **Observed.** RaceStudio 3's "Race Studio 2 .csv" export was compared sample by
