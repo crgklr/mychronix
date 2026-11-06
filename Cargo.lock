@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "aim-link"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "log",
  "nusb",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "aim-track"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "aim-link",
  "thiserror 2.0.21",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "aim-xrk"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "libxrk",
  "log",
@@ -2741,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "mychronix"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "aim-link",
  "aim-track",
@@ -2772,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "mychronix-cli"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "aim-link",
  "aim-xrk",
