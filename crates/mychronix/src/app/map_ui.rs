@@ -769,19 +769,23 @@ fn legend(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         let key = |ui: &mut Ui, color: Color32, text: &str| {
-            let (r, _) = ui.allocate_exact_size(vec2(16.0, 6.0), Sense::hover());
-            ui.painter().rect_filled(r, CornerRadius::same(3), color);
+            let (r, _) = ui.allocate_exact_size(vec2(18.0, 10.0), Sense::hover());
+            ui.painter().rect_filled(r, CornerRadius::same(5), color);
             ui.label(RichText::new(text).size(12.5).color(SECONDARY));
             ui.add_space(6.0);
         };
+        // A row of pills from f(0) to f(1), one color each, so a color on the line is easy to find.
         let ramp = |ui: &mut Ui, f: &dyn Fn(f32) -> Color32| {
-            let (bar, _) = ui.allocate_exact_size(vec2(120.0, 6.0), Sense::hover());
-            for j in 0..40 {
+            const PILLS: usize = 10;
+            let (bar, _) =
+                ui.allocate_exact_size(vec2(PILLS as f32 * 21.0 - 3.0, 10.0), Sense::hover());
+            for j in 0..PILLS {
                 let r = Rect::from_min_size(
-                    pos2(bar.left() + bar.width() * j as f32 / 40.0, bar.top()),
-                    vec2(bar.width() / 40.0 + 0.5, bar.height()),
+                    pos2(bar.left() + j as f32 * 21.0, bar.top()),
+                    vec2(18.0, 10.0),
                 );
-                ui.painter().rect_filled(r, 0.0, f(j as f32 / 39.0));
+                let t = j as f32 / (PILLS - 1) as f32;
+                ui.painter().rect_filled(r, CornerRadius::same(5), f(t));
             }
         };
         match by {
