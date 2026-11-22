@@ -443,7 +443,7 @@ impl SplitsTable<'_> {
                         medium(13.0),
                         SECONDARY,
                     );
-                    for k in 0..n {
+                    for (k, &length) in c.lengths.iter().enumerate().take(n) {
                         let (r, resp) = ui.allocate_exact_size(vec2(cell_w, 34.0), Sense::click());
                         let on = st.selected == Some(k);
                         if on || resp.hovered() {
@@ -465,7 +465,7 @@ impl SplitsTable<'_> {
                             egui::Align2::LEFT_CENTER,
                             format!(
                                 "{:.0} {}",
-                                crate::units::distance(c.lengths[k]),
+                                crate::units::distance(length),
                                 crate::units::distance_unit()
                             ),
                             regular(11.5),
