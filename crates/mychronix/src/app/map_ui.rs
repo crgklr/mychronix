@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use super::corners_ui::{APEX_NOTE, lap_position};
 use super::*;
 use crate::corner_model::{CornerModel, STEP_M, Slowing};
 
@@ -1011,9 +1012,9 @@ fn corner_numbers(
             true,
         ),
         (
-            "Brakes at",
-            crate::units::distance(a.brake_m),
-            crate::units::distance(b.brake_m),
+            "From apex",
+            crate::units::distance(a.slowing_m()),
+            crate::units::distance(b.slowing_m()),
             true,
             0,
             du.to_string(),
@@ -1065,17 +1066,29 @@ fn corner_numbers(
             );
             ui.end_row();
             for (label, x, y, higher, dec, unit, big) in rows {
-                ui.label(RichText::new(label).size(13.0).color(SECONDARY));
+                let name = ui.label(RichText::new(label).size(13.0).color(SECONDARY));
+                if matches!(label, "Entry" | "Apex") {
+                    name.on_hover_text(APEX_NOTE);
+                }
                 let size = if big { 17.0 } else { 13.5 };
-                ui.label(
+                let value = ui.label(
                     RichText::new(format!("{x:.dec$} {unit}"))
                         .font(if big { semibold(size) } else { regular(size) })
                         .color(TEXT),
                 );
+                if label == "From apex" {
+                    dwell_note(
+                        ui,
+                        value.rect,
+                        value.id.with("lap_position"),
+                        &lap_position(a.brake_m),
+                    );
+                }
                 if own {
                     ui.label("");
                 } else {
-                    let worse = if higher { x < y } else { x > y };
+                    // Slowing closer to the apex isn't better or worse in itself.
+                    let worse = label != "From apex" && if higher { x < y } else { x > y };
                     let close = (x - y).abs() < 0.5 * 10f64.powi(-(dec as i32));
                     ui.label(RichText::new(format!("{y:.dec$}")).size(13.5).color(
                         if close || !worse {
@@ -1088,15 +1101,6 @@ fn corner_numbers(
                 ui.end_row();
             }
         });
-    ui.add_space(8.0);
-    ui.add(
-        egui::Label::new(
-            RichText::new(format!("Brakes at: {du} from the start of the lap."))
-                .size(12.0)
-                .color(DIM),
-        )
-        .wrap(),
-    );
     // How repeatable the line is at the apex: the spread of where each counting lap went.
     if all_laps {
         let s = model.segments[corner];

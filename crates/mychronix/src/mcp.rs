@@ -491,6 +491,7 @@ fn corner_row(model: &CornerModel, trace: usize, k: usize) -> Value {
         "best_time_s": round(b.time_s, 3),
         "best_on_lap": model.traces[model.best_of[k]].number,
         "brakes_at": distance(a.brake_m),
+        "brakes_before_apex": distance(a.slowing_m()),
         "entry_speed": speed(a.entry_kmh),
         "apex_speed": speed(a.min_kmh),
         "speed_down_next_straight": speed(a.exit_kmh),
@@ -525,7 +526,7 @@ fn get_corners(
         "imu_braking": model.has_trail,
         "speed_calculated_from_rpm": session.channel("GPS Speed").is_none(),
         "units": units(),
-        "how_corners_are_measured": "Each corner runs from its braking point to the next corner's braking point; brakes_at is the distance from the start of the lap.",
+        "how_corners_are_measured": "Each corner runs from its braking point to the next corner's braking point; brakes_at is the distance from the start of the lap; brakes_before_apex is how far before the apex (the slowest point) braking or lifting starts.",
         "corners": (0..model.segments.len()).map(|k| corner_row(&model, trace, k)).collect::<Vec<_>>(),
     }))
 }
@@ -565,6 +566,7 @@ fn compare_laps(
                 "time_s": [round(x.time_s, 3), round(y.time_s, 3)],
                 "difference_s": round(x.time_s - y.time_s, 3),
                 "brakes_at": [distance(x.brake_m), distance(y.brake_m)],
+                "brakes_before_apex": [distance(x.slowing_m()), distance(y.slowing_m())],
                 "entry_speed": [speed(x.entry_kmh), speed(y.entry_kmh)],
                 "apex_speed": [speed(x.min_kmh), speed(y.min_kmh)],
                 "speed_down_next_straight": [speed(x.exit_kmh), speed(y.exit_kmh)],

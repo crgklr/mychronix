@@ -14,6 +14,17 @@ const LIFT: Color32 = theme::LIFT;
 /// The lap being looked at, against the best (green).
 const THIS_LAP: Color32 = Color32::from_rgb(0x5b, 0x9c, 0xf6);
 const ROW_H: f32 = 62.0;
+/// What "apex" and "entry" mean here, wherever they're named.
+pub(super) const APEX_NOTE: &str = "Apex: the slowest point in the corner. Entry: the top speed before it, where braking or lifting starts.";
+
+/// Where braking or lifting starts, measured the other way: from the start of the lap.
+pub(super) fn lap_position(brake_m: f64) -> String {
+    format!(
+        "Starts slowing {:.0} {} from the start of the lap",
+        crate::units::distance(brake_m),
+        crate::units::distance_unit()
+    )
+}
 
 fn slowing_color(s: Slowing) -> Color32 {
     match s {
@@ -246,8 +257,11 @@ impl App {
                 vec!["CORNER", "SPEED  (APEX ← ENTRY)", "SLOWING DOWN", "TIME"]
             };
             let (head, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
-            for (h, x) in headers.iter().zip(&xs) {
-                ui.painter().text(pos2(head.left() + x + if *x == 0.0 { 8.0 } else { 0.0 }, head.center().y), egui::Align2::LEFT_CENTER, *h, medium(11.0), DIM);
+            for (c, (h, x)) in headers.iter().zip(&xs).enumerate() {
+                let r = ui.painter().text(pos2(head.left() + x + if *x == 0.0 { 8.0 } else { 0.0 }, head.center().y), egui::Align2::LEFT_CENTER, *h, medium(11.0), DIM);
+                if c == 1 {
+                    ui.interact(r, ui.id().with("apex_head"), Sense::hover()).on_hover_text(APEX_NOTE);
+                }
             }
             ui.painter().hline(head.x_range(), head.bottom(), Stroke::new(1.0, theme::OUTLINE));
 
@@ -306,7 +320,9 @@ impl App {
                     bx += w;
                     i = j;
                 }
-                let from = format!("{:.0} {du} from {:.0} {du}", crate::units::distance(a.slowing_m()), crate::units::distance(a.brake_m));
+                let from = format!("{:.0} {du} from apex", crate::units::distance(a.slowing_m()));
+                let cell = Rect::from_x_y_ranges(x(2)..=x(3), rect.y_range());
+                dwell_note(ui, cell, ui.id().with(("lap_position", k)), &lap_position(a.brake_m));
                 let detail = if a.brake_s >= 0.05 { format!("{from} · {:.1} s on the brakes, peak {:.2} g", a.brake_s, a.peak_g) } else { format!("{from} · no braking") };
                 p.text(pos2(x(2), mid + 2.0), egui::Align2::LEFT_CENTER, detail, regular(12.0), DIM);
                 // Steering: the largest angle, and a dot per correction.
@@ -511,13 +527,14 @@ fn up_close(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize) {
                 let (su, du) = (crate::units::speed_unit(), crate::units::distance_unit());
                 let speed = |v: f64| crate::units::speed(v);
                 // (label, this lap, the best, higher is better, decimals, unit)
-                let rows: [(&str, f64, f64, bool, usize, &str); 6] = [
-                    ("Brakes at", crate::units::distance(a.brake_m), crate::units::distance(b.brake_m), true, 0, du),
-                    ("Entry", speed(a.entry_kmh), speed(b.entry_kmh), true, 1, su),
-                    ("Apex", speed(a.min_kmh), speed(b.min_kmh), true, 1, su),
-                    ("Down the straight", speed(a.exit_kmh), speed(b.exit_kmh), true, 1, su),
-                    ("On the brakes", a.brake_s, b.brake_s, false, 2, "s"),
-                    ("Corner time", a.time_s, b.time_s, false, 2, "s"),
+                let rows = [
+                    // Slowing closer to the apex isn't better or worse in itself: its difference stays neutral.
+                    ("From apex", crate::units::distance(a.slowing_m()), crate::units::distance(b.slowing_m()), None, 0, du),
+                    ("Entry", speed(a.entry_kmh), speed(b.entry_kmh), Some(true), 1, su),
+                    ("Apex", speed(a.min_kmh), speed(b.min_kmh), Some(true), 1, su),
+                    ("Down the straight", speed(a.exit_kmh), speed(b.exit_kmh), Some(true), 1, su),
+                    ("On the brakes", a.brake_s, b.brake_s, Some(false), 2, "s"),
+                    ("Corner time", a.time_s, b.time_s, Some(false), 2, "s"),
                 ];
                 egui::Grid::new(("corner_facts", corner)).num_columns(3).spacing(vec2(14.0, 7.0)).show(ui, |ui| {
                     ui.label("");
@@ -525,20 +542,29 @@ fn up_close(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize) {
                     ui.label(RichText::new(if bi == trace { "" } else { "VS BEST" }).font(medium(10.5)).color(DIM));
                     ui.end_row();
                     for (label, x, y, higher, dec, unit) in rows {
-                        ui.label(RichText::new(label).size(13.0).color(SECONDARY));
-                        ui.label(RichText::new(format!("{x:.dec$} {unit}")).size(13.0).color(TEXT));
+                        let name = ui.label(RichText::new(label).size(13.0).color(SECONDARY));
+                        if matches!(label, "Entry" | "Apex") {
+                            name.on_hover_text(APEX_NOTE);
+                        }
+                        let value = ui.label(RichText::new(format!("{x:.dec$} {unit}")).size(13.0).color(TEXT));
+                        if label == "From apex" {
+                            dwell_note(ui, value.rect, value.id.with("lap_position"), &lap_position(a.brake_m));
+                        }
                         let d = x - y;
                         if bi != trace && d.abs() >= 0.5 * 10f64.powi(-(dec as i32)) {
-                            let good = if higher { d > 0.0 } else { d < 0.0 };
-                            ui.label(RichText::new(format!("{d:+.dec$}")).size(13.0).color(if good { theme::GOOD } else { theme::LOSE_TEXT }));
+                            let color = match higher {
+                                Some(true) if d > 0.0 => theme::GOOD,
+                                Some(false) if d < 0.0 => theme::GOOD,
+                                Some(_) => theme::LOSE_TEXT,
+                                None => SECONDARY,
+                            };
+                            ui.label(RichText::new(format!("{d:+.dec$}")).size(13.0).color(color));
                         } else {
                             ui.label("");
                         }
                         ui.end_row();
                     }
                 });
-                ui.add_space(6.0);
-                ui.add(egui::Label::new(RichText::new(format!("Brakes at: {du} from the start of the lap.")).size(12.0).color(DIM)).wrap());
                 let _ = seg;
             });
         });

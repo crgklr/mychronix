@@ -375,6 +375,28 @@ pub(super) fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         });
 }
 
+/// A note that shows only once the pointer has rested on `rect` for a moment,
+/// not on a passing hover: for detail the reader rarely needs.
+pub(super) fn dwell_note(ui: &Ui, rect: Rect, id: egui::Id, text: &str) {
+    const DWELL_S: f32 = 1.0;
+    if !ui.rect_contains_pointer(rect) {
+        return;
+    }
+    let still = ui.input(|i| i.pointer.time_since_last_movement());
+    if still < DWELL_S {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f32(DWELL_S - still));
+        return;
+    }
+    egui::containers::Tooltip::always_open(
+        ui.ctx().clone(),
+        ui.layer_id(),
+        id,
+        egui::PopupAnchor::Pointer,
+    )
+    .show(|ui| ui.label(RichText::new(text).size(12.5)));
+}
+
 pub(super) fn graph_card(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(SURFACE)
