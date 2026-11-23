@@ -54,6 +54,24 @@ enum Command {
     /// Read a MyChron 4 data key plugged into this computer.
     #[command(subcommand)]
     Datakey(DataKeyCommand),
+    /// Line up onboard video with sessions.
+    #[command(subcommand)]
+    Video(VideoCommand),
+}
+
+#[derive(Subcommand)]
+enum VideoCommand {
+    /// Find which session a video (MP4/MOV) was recorded in, and where: by its
+    /// engine sound against the session's RPM, and a GoPro's gyro against the
+    /// MyChron's. Off until video sync is turned on in Mychronix's Settings.
+    Sync {
+        video: PathBuf,
+        /// Sessions to try (default: every downloaded session).
+        sessions: Vec<PathBuf>,
+        /// Save the best match beside its session (`a_NNNN.video.json`) if it's a clear one.
+        #[arg(long)]
+        save: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -106,7 +124,138 @@ fn main() -> anyhow::Result<()> {
         Command::Sessions { dir } => local_sessions(dir),
         Command::Device(cmd) => device(cmd),
         Command::Datakey(cmd) => datakey(cmd),
+        Command::Video(VideoCommand::Sync {
+            video,
+            sessions,
+            save,
+        }) => video_sync_cmd(&video, sessions, save),
     }
+}
+
+fn video_sync_cmd(video: &Path, sessions: Vec<PathBuf>, save: bool) -> anyhow::Result<()> {
+    if !video_sync_on()? {
+        anyhow::bail!(
+            "video sync is off: turn it on in Mychronix's Settings \
+             (or set \"video_sync\": true in ~/Mychronix/settings.json)"
+        );
+    }
+    let sessions = if sessions.is_empty() {
+        all_session_files(&sessions_root())?
+    } else {
+        sessions
+    };
+    eprintln!("Reading {}…", video.display());
+    let signals =
+        video_sync::video_signals(video).with_context(|| format!("reading {}", video.display()))?;
+    if signals.engine.is_none() && signals.turning.is_none() {
+        anyhow::bail!("{} has no sound or gyro to match", video.display());
+    }
+    eprintln!(
+        "Comparing with {} session{}…",
+        sessions.len(),
+        if sessions.len() == 1 { "" } else { "s" }
+    );
+    // Opening sessions is the slow part: spread them over the cores.
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let mut found: Vec<(PathBuf, video_sync::Match)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = sessions
+            .chunks(sessions.len().div_ceil(threads).max(1))
+            .map(|chunk| {
+                let signals = &signals;
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|path| {
+                            let session = Session::open(path).ok()?;
+                            let m =
+                                video_sync::find(signals, &video_sync::session_signals(&session))?;
+                            Some((path.clone(), m))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+    let length = signals.duration_s;
+    found.sort_by(|a, b| b.1.score(length).total_cmp(&a.1.score(length)));
+    let Some((best_path, best)) = found.first() else {
+        println!("No session matched: none overlaps it by a minute or more with RPM or a gyro.");
+        return Ok(());
+    };
+    for (path, m) in found.iter().take(3) {
+        let how: Vec<String> = m
+            .signals
+            .iter()
+            .map(|f| match f.method {
+                video_sync::Method::EngineSound => {
+                    format!("sound {:+.3} s (fit {:.1})", f.offset_s, f.fit)
+                }
+                video_sync::Method::Gyro => format!("gyro {:+.3} s (fit {:.2})", f.offset_s, f.fit),
+            })
+            .collect();
+        println!(
+            "{}\n  offset {:+.3} s  ·  {:.0} s overlap  ·  margin {:.2}  ·  {}",
+            path.display(),
+            m.offset_s,
+            m.overlap_s,
+            m.margin,
+            how.join(", ")
+        );
+    }
+    // Clear only if it beats the next session by a good stretch too.
+    let runner_up = found.get(1).map_or(0.0, |r| r.1.score(length));
+    let clear = best.is_confident() && best.score(length) >= 2.0 * runner_up;
+    println!();
+    if !clear {
+        println!("Not a clear match: check it before trusting it.");
+    } else {
+        println!(
+            "Session time = video time {} {:.3} s.",
+            if best.offset_s < 0.0 { "−" } else { "+" },
+            best.offset_s.abs()
+        );
+    }
+    if save {
+        if !clear {
+            anyhow::bail!("not saved: the match isn't clear enough");
+        }
+        video_sync::store::save(best_path, &signals, best)?;
+        println!(
+            "Saved to {}",
+            video_sync::store::path_for(best_path).display()
+        );
+    }
+    Ok(())
+}
+
+/// Every session file under the library: one folder per MyChron, plus loose imports.
+fn all_session_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let is_session = |p: &Path| {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            ["xrz", "xrk", "drk", "mc4"]
+                .iter()
+                .any(|x| e.eq_ignore_ascii_case(x))
+        })
+    };
+    let mut out = vec![];
+    for entry in std::fs::read_dir(root).with_context(|| format!("reading {}", root.display()))? {
+        let path = entry?.path();
+        if path.is_dir() {
+            for e in std::fs::read_dir(&path)?.flatten() {
+                if is_session(&e.path()) {
+                    out.push(e.path());
+                }
+            }
+        } else if is_session(&path) {
+            out.push(path);
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 fn sessions_root() -> PathBuf {
@@ -403,6 +552,19 @@ fn write_whole(target: &Path, data: &[u8]) -> anyhow::Result<()> {
     std::fs::write(&partial, data).with_context(|| format!("writing {}", partial.display()))?;
     std::fs::rename(&partial, target).with_context(|| format!("saving {}", target.display()))?;
     Ok(())
+}
+
+/// Whether video sync is turned on in the app's settings (off until it is).
+fn video_sync_on() -> anyhow::Result<bool> {
+    let path = dirs_home()?.join("Mychronix").join("settings.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let settings: serde_json::Value =
+        serde_json::from_str(&text).with_context(|| format!("reading {}", path.display()))?;
+    Ok(settings["video_sync"].as_bool().unwrap_or(false))
 }
 
 fn dirs_home() -> anyhow::Result<PathBuf> {

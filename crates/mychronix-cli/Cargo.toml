@@ -13,3 +13,4 @@ anyhow.workspace = true
 clap.workspace = true
 aim-link.workspace = true
 serde_json.workspace = true
+video-sync.workspace = true

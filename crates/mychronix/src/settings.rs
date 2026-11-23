@@ -29,6 +29,9 @@ pub struct Settings {
     /// Mychronix Performance Engineer: answer an AI assistant on this
     /// computer (`mychronix --mcp`). Off until turned on.
     pub mcp: bool,
+    /// Video sync: find where a GoPro or Insta360 video sits in a session.
+    /// Off until turned on.
+    pub video_sync: bool,
     /// The real width in meters of tracks the Map view draws, by track name
     /// (`{ "Lonato": 9 }`); other tracks get a typical width for their type.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -47,6 +50,7 @@ impl Default for Settings {
             update_check: true,
             aim_tracks: true,
             mcp: false,
+            video_sync: false,
             track_widths: Default::default(),
             other: Default::default(),
         }
@@ -143,6 +147,7 @@ mod tests {
     fn missing_settings_keep_their_defaults() {
         let s = parse(r#"{ "weather": false, "something_else": 1 }"#).unwrap();
         assert!(!s.weather && s.update_check && s.aim_tracks && !s.mcp && s.units.is_none());
+        assert!(!s.video_sync);
         let s = parse(r#"{ "units": "metric" }"#).unwrap();
         assert_eq!(s.units.as_deref(), Some("metric"));
         assert!(parse(r#"{ "weather": "no" }"#).is_err());

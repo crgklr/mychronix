@@ -1,7 +1,7 @@
 //! The Settings page: units, clock, what Mychronix fetches from the internet,
-//! and the Mychronix Performance Engineer (the MCP server an AI assistant on
-//! this computer can use). Changes are saved to `~/Mychronix/settings.json`
-//! and take effect at once.
+//! the Mychronix Performance Engineer (the MCP server an AI assistant on
+//! this computer can use), and video sync. Changes are saved to
+//! `~/Mychronix/settings.json` and take effect at once.
 
 use super::sessions_filter_ui::{section, segments_in, switch_row};
 use super::*;
@@ -97,6 +97,9 @@ impl App {
 
                 // Mychronix Performance Engineer
                 self.mcp_section(ui, s.mcp, &mut change);
+
+                // Video sync
+                video_sync_section(ui, s.video_sync, &mut change);
             });
         });
 
@@ -191,6 +194,36 @@ impl App {
             },
         );
     }
+}
+
+fn video_sync_section(ui: &mut Ui, on: bool, change: &mut Change) {
+    let summary = if on {
+        "On: videos can be lined up with your sessions"
+    } else {
+        "Off"
+    };
+    section(ui, Icon::Video, "Video sync", summary, false, |ui| {
+        ui.add(
+            egui::Label::new(
+                RichText::new(
+                    "Find where a GoPro or Insta360 video sits in a session, so a video editor can line the two up. Mychronix listens for the engine in the video's sound and matches it to the session's RPM, and matches the camera's gyro to the MyChron's when it has one.",
+                )
+                .size(14.0)
+                .color(TEXT),
+            )
+            .wrap(),
+        );
+        ui.add_space(6.0);
+        if switch_row(
+            ui,
+            on,
+            "Sync my videos with my sessions",
+            "Done on this computer: your videos aren't sent anywhere",
+        ) {
+            let v = !on;
+            *change = Some(Box::new(move |s| s.video_sync = v));
+        }
+    });
 }
 
 /// How an assistant app starts the Mychronix Performance Engineer: this

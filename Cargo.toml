@@ -13,6 +13,7 @@ repository = "https://github.com/crgklr/mychronix"
 aim-xrk = { path = "crates/aim-xrk" }
 aim-link = { path = "crates/aim-link" }
 aim-track = { path = "crates/aim-track" }
+video-sync = { path = "crates/video-sync" }
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }

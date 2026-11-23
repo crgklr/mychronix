@@ -113,6 +113,8 @@ fastframe_icons::icons! {
         Lightbulb => "lightbulb",
         /// A MyChron: its case, screen and two buttons (Mychronix's own, in Lucide's style).
         Mychron => "mychron",
+        /// A video camera, for video sync.
+        Video => "video",
     }
 }
 
