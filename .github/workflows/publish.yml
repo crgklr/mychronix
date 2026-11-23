@@ -36,7 +36,7 @@ jobs:
         run: |
           if [ -n "$KEY" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::No PACKAGE_SIGNING_KEY secret yet: the dnf and apt repositories weren't updated."; fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: steps.ready.outputs.ok
 
       - name: Install tools
@@ -53,12 +53,12 @@ jobs:
           PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
         run: scripts/publish-repos.sh
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         if: steps.ready.outputs.ok
         with:
           path: target/site
 
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         if: steps.ready.outputs.ok
         id: deploy
 
@@ -72,7 +72,7 @@ jobs:
         run: |
           if [ -n "$KEY" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::No HOMEBREW_TAP_KEY secret yet: the Homebrew tap wasn't updated."; fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: steps.ready.outputs.ok
 
       - name: Update the tap

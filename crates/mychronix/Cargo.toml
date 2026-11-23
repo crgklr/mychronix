@@ -2,6 +2,7 @@
 name = "mychronix"
 description = "Download and analyze AiM MyChron kart data"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 publish.workspace = true
 license.workspace = true
