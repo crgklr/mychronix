@@ -31,6 +31,10 @@ const PHASE_SEND_TO_LOGGER: u16 = 0x0a01;
 /// Largest frame the logger sends: 4-byte offset + 65,472 bytes of data.
 const MAX_FRAME: usize = 1 << 20;
 const CHUNK_RETRIES: usize = 3;
+/// Stale chunks to skip for one ask before giving up: a re-ask leaves a few,
+/// a logger (or something else on its open WiFi) that never sends the right
+/// one would otherwise be read forever.
+const STALE_LIMIT: usize = 64;
 
 /// Read-only commands, as (command, sub-command).
 pub mod cmd {
@@ -296,6 +300,7 @@ impl Logger {
     /// Asks for the chunk at `offset`, re-asking if the logger goes quiet and
     /// skipping stale chunks left over from an earlier ask.
     fn pull(&mut self, offset: u32) -> Result<Vec<u8>, Error> {
+        let mut stale = 0;
         for attempt in 0..=CHUNK_RETRIES {
             if attempt > 0 {
                 log::warn!(
@@ -311,6 +316,12 @@ impl Logger {
                             return Ok(f.payload[4..].to_vec());
                         }
                         // A duplicate of an earlier chunk: keep reading.
+                        stale += 1;
+                        if stale > STALE_LIMIT {
+                            return Err(Error::Protocol(format!(
+                                "only wrong chunks while waiting for offset {offset}"
+                            )));
+                        }
                     }
                     Ok(f) => {
                         return Err(Error::Protocol(format!(

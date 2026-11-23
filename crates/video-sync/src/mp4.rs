@@ -122,7 +122,9 @@ fn read_track(file: &mut File, start: u64, end: u64) -> Result<Option<Track>, Er
             b"stsz" => {
                 let (fixed, n) = (be_u32(&b[4..]), be_u32(&b[8..]) as usize);
                 stsz = if fixed != 0 {
-                    vec![fixed; n]
+                    // The count is the file's word: no more samples than fit in it.
+                    let file_len = file.metadata()?.len();
+                    vec![fixed; n.min((file_len / fixed as u64) as usize)]
                 } else {
                     (0..n.min(b.len().saturating_sub(12) / 4))
                         .map(|i| be_u32(&b[12 + i * 4..]))

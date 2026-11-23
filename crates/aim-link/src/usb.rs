@@ -29,6 +29,8 @@ const VID: u16 = 0x11cc;
 const PID: u16 = 0x0110;
 const BULK_IN: u8 = 0x81;
 const TIMEOUT: Duration = Duration::from_secs(5);
+/// Chunks are at most 64,512 bytes (`docs/protocol-notes.md`).
+const MAX_CHUNK: usize = 64_512;
 /// State: a chunk is ready to read.
 const READY: u32 = 0;
 /// Where the logger's settings are, which carry its identity (`SRC`/`idn`).
@@ -143,6 +145,9 @@ impl UsbLogger {
             if let (READY, len) = self.state()?
                 && len > 0
             {
+                if len as usize > MAX_CHUNK {
+                    return Err(usb_error(format!("the logger offered a {len}-byte chunk")));
+                }
                 return Ok(Some(len as usize));
             }
             std::thread::sleep(Duration::from_millis(5));

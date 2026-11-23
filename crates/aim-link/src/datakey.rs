@@ -120,7 +120,8 @@ fn run_info(index: u16, entry: &[u8], header: Vec<u8>) -> Result<RunInfo> {
     let field =
         |o| u32_at(&header, o).ok_or_else(|| KeyError::Unexpected("short run header".into()));
     let (laps_addr, data_addr, data_len) = (field(136)?, field(140)?, field(150)?);
-    if data_addr < laps_addr || data_len > 32 << 20 {
+    // The lap records come in one read, whose length is 16 bits.
+    if data_addr < laps_addr || data_addr - laps_addr > u16::MAX as u32 || data_len > 32 << 20 {
         return Err(KeyError::Unexpected(format!(
             "run {index}'s header doesn't add up"
         )));
@@ -247,7 +248,9 @@ impl DataKey {
     /// A `1D` command: `[1D][sub][0][addr: 3 LE][0][len: u16 LE]`, then the reply.
     fn command(&mut self, sub: u8, addr: u32, len: usize) -> Result<Vec<u8>> {
         let a = addr.to_le_bytes();
-        let l = (len as u16).to_le_bytes();
+        let l = u16::try_from(len)
+            .map_err(|_| KeyError::Unexpected(format!("a read of {len} bytes is too long")))?
+            .to_le_bytes();
         self.vendor(0x0D, 0, &[0x1D, sub, 0, a[0], a[1], a[2], 0, l[0], l[1]])?;
         self.read(len)
     }
@@ -376,5 +379,8 @@ mod tests {
         h[140..144].copy_from_slice(&0x1_0000u32.to_le_bytes()); // samples before the laps
         assert!(run_info(0, &entry(106, 1), h).is_err());
         assert!(run_info(0, &entry(106, 1), vec![0; 100]).is_err()); // too short
+        let mut h = header();
+        h[140..144].copy_from_slice(&0x3_0000u32.to_le_bytes()); // 64 KB of lap records
+        assert!(run_info(0, &entry(106, 1), h).is_err());
     }
 }

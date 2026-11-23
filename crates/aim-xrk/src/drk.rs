@@ -154,7 +154,11 @@ pub fn read_with_clock(data: &[u8]) -> Result<(Session, f64)> {
             .unwrap_or_else(|| "Channel".into())
             .replace("GPS_", "GPS ");
         let n = u32_at(b.data, 0x48).unwrap_or(0) as usize;
-        let raw: Vec<u16> = (0..n).filter_map(|i| u16_at(rr, pos + i * 2)).collect();
+        // The count comes from the file: read no further than the samples go.
+        let there = rr.len().saturating_sub(pos) / 2;
+        let raw: Vec<u16> = (0..n.min(there))
+            .filter_map(|i| u16_at(rr, pos + i * 2))
+            .collect();
         pos += n * 2;
         // Each channel ends with a short trailer that isn't readings (values
         // like 0x4316, 0x2620, 0x1015, 0x7FFF in the last two or three
@@ -505,5 +509,16 @@ mod tests {
         let e = &s.channels[0];
         assert_eq!(e.values, [5000.0, 6000.0]); // the "nothing connected" sample is dropped
         assert_eq!(e.times_ms, [0, 101]); // 100 ticks at 1000/990 ms per tick
+    }
+
+    #[test]
+    fn a_damaged_sample_count_fails_at_once() {
+        // A count of four billion used to be read one by one past the end.
+        let mut f = sample();
+        let at = f.windows(6).position(|w| w == b"Engine").unwrap() + 0x48;
+        f[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        let started = std::time::Instant::now();
+        assert!(read(&f).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 }
