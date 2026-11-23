@@ -362,6 +362,119 @@ pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Ch
     })
 }
 
+/// The gyro must turn this much per degree of steering (smoothed, so a
+/// little under 1) for the logger to count as turning with the wheel; a
+/// MyChron 6 on the wheel reads 0.77–0.86 (Nov 2026).
+const WHEEL_TURN: std::ops::RangeInclusive<f64> = 0.5..=1.5;
+
+/// The accelerometers (X, Y, Z) as if the steering wheel were straight, for a
+/// logger on the wheel when the file has a steering channel of its own (AiM's
+/// "Steering Angle", MyChron 6 firmware 02.42.74 on). The wheel turns the
+/// logger, so its forward direction swings with every corner and the mount
+/// doesn't check out; turned back by the steering angle about the column, it
+/// does. None when the logger doesn't turn with the steering (the gyro
+/// doesn't follow it: a fixed bracket with a steering sensor) or there's too
+/// little to go on.
+pub fn unsteered(
+    accel: [&Channel; 3],
+    gyro: [&Channel; 3],
+    steer: &Channel,
+    gps: &GpsTrack,
+) -> Option<[Channel; 3]> {
+    let n = accel
+        .iter()
+        .chain(&gyro)
+        .map(|c| c.values.len())
+        .min()
+        .unwrap_or(0);
+    if n < 500 || gps.len() < 100 || steer.values.len() < 500 {
+        return None;
+    }
+    let t = &gyro[0].times_ms[..n];
+    let gps_at = |v: &[f64], ms: i64| {
+        let i = gps.times_ms.partition_point(|&q| q <= ms).saturating_sub(1);
+        v[i.min(v.len() - 1)]
+    };
+    let steer_at = |ms: i64| {
+        let i = steer
+            .times_ms
+            .partition_point(|&q| q <= ms)
+            .saturating_sub(1);
+        steer.values[i.min(steer.values.len() - 1)]
+    };
+    let w = |i: usize| gyro.map(|c| c.values[i]);
+    let still: Vec<usize> = (0..n)
+        .filter(|&i| gps_at(&gps.speed_kmh, t[i]) < STILL_KMH)
+        .collect();
+    if still.len() < 50 {
+        return None;
+    }
+    let bias = [0, 1, 2].map(|k| still.iter().map(|&i| w(i)[k]).sum::<f64>() / still.len() as f64);
+    // The column: the gyro's turning against the steering's, both over a
+    // fifth of a second (the steering's own rate is too noisy sample to sample).
+    const HALF: usize = 5;
+    let (mut ss, mut sw) = (0.0, [0.0; 3]);
+    for i in HALF..n - HALF {
+        if gps_at(&gps.speed_kmh, t[i]) < MOVING_KMH {
+            continue;
+        }
+        let dt = (t[i + HALF] - t[i - HALF]) as f64 / 1000.0;
+        if dt <= 0.0 {
+            continue;
+        }
+        let rate = (steer_at(t[i + HALF]) - steer_at(t[i - HALF])) / dt;
+        let turn = [0, 1, 2].map(|k| {
+            (i - HALF..=i + HALF)
+                .map(|j| w(j)[k] - bias[k])
+                .sum::<f64>()
+                / (2 * HALF + 1) as f64
+        });
+        ss += rate * rate;
+        (0..3).for_each(|k| sw[k] += rate * turn[k]);
+    }
+    if ss <= 0.0 {
+        return None;
+    }
+    let per_degree = sw.map(|v| v / ss);
+    let gain = dot(per_degree, per_degree).sqrt();
+    if !WHEEL_TURN.contains(&gain) {
+        log::debug!("IMU: logger doesn't turn with the steering ({gain:.2} per degree)");
+        return None;
+    }
+    let column = unit(per_degree);
+    // Straight ahead: the steering while running straight.
+    let mut straight: Vec<f64> = (0..n)
+        .filter(|&i| {
+            gps_at(&gps.speed_kmh, t[i]) > 20.0 && gps_at(&gps.yaw_rate_dps, t[i]).abs() < 3.0
+        })
+        .map(|i| steer_at(t[i]))
+        .collect();
+    if straight.len() < 50 {
+        return None;
+    }
+    straight.sort_by(f64::total_cmp);
+    let center = straight[straight.len() / 2];
+    log::debug!("IMU: on the wheel ({gain:.2} per degree), straight at {center:.1}°");
+    // Turned back about the column (Rodrigues' rotation).
+    let mut out = accel.map(|c| Channel {
+        times_ms: c.times_ms[..n].to_vec(),
+        values: c.values[..n].to_vec(),
+        ..c.clone()
+    });
+    for i in 0..n {
+        let (s, c) = (steer_at(out[0].times_ms[i]) - center)
+            .to_radians()
+            .sin_cos();
+        let a = accel.map(|ch| ch.values[i]);
+        let x = cross(column, a);
+        let d = dot(column, a);
+        for k in 0..3 {
+            out[k].values[i] = a[k] * c + x[k] * s + column[k] * d * (1.0 - c);
+        }
+    }
+    Some(out)
+}
+
 /// "Grip used": how much of the session's grip the kart is using, %, from
 /// Forward g and the GPS's cornering g together (the length of the arrow on a
 /// grip circle). 100 % is the session's own limit: what the kart reached

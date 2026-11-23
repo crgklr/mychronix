@@ -340,23 +340,40 @@ impl From<libxrk::XrkFile> for Session {
             });
             // The built-in IMU in the kart's own directions, when it checks out.
             let find = |n: &str| channels.iter().find(|c| c.name == n);
+            let steer = channels
+                .iter()
+                .find(|c| c.name.to_lowercase().contains("steer") && !c.values.is_empty());
             if let (Some(x), Some(y), Some(z)) = (
                 find("AccelerometerX"),
                 find("AccelerometerY"),
                 find("AccelerometerZ"),
             ) {
-                let accel = [x, y, z];
-                match imu::find_mount(accel, g, &lon_g) {
-                    Ok(mount) => {
+                // A logger on the wheel, with the steering recorded: its
+                // readings as if the wheel were straight, when that fits better.
+                let unsteered = match (steer, find("GyroX"), find("GyroY"), find("GyroZ")) {
+                    (Some(s), Some(gx), Some(gy), Some(gz)) => {
+                        imu::unsteered([x, y, z], [gx, gy, gz], s, g)
+                    }
+                    _ => None,
+                };
+                let plain = imu::find_mount([x, y, z], g, &lon_g);
+                let turned = unsteered.as_ref().and_then(|u| {
+                    let m = imu::find_mount([&u[0], &u[1], &u[2]], g, &lon_g).ok()?;
+                    let better = plain.as_ref().map_or(true, |p| m.fit > p.fit);
+                    better.then_some((m, [&u[0], &u[1], &u[2]]))
+                });
+                let found = match turned {
+                    Some((m, accel)) => Ok((m, accel)),
+                    None => plain.map(|m| (m, [x, y, z])),
+                };
+                match found {
+                    Ok((mount, accel)) => {
                         log::debug!("IMU: tilted {:.0}°, fit {:.2}", mount.tilt_deg, mount.fit);
                         let mut extra = imu::kart_channels(accel, &mount);
                         extra.extend(imu::grip_used(&extra[0], &g.times_ms, &lat_g));
                         // Steering from the gyro, unless the file already has a steering channel.
-                        let has_steering = channels.iter().any(|c| {
-                            c.name.to_lowercase().contains("steer") && !c.values.is_empty()
-                        });
-                        if let (false, Some(gx), Some(gy), Some(gz)) =
-                            (has_steering, find("GyroX"), find("GyroY"), find("GyroZ"))
+                        if let (None, Some(gx), Some(gy), Some(gz)) =
+                            (steer, find("GyroX"), find("GyroY"), find("GyroZ"))
                         {
                             extra.extend(imu::steering([gx, gy, gz], &mount, g));
                         }
