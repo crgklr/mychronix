@@ -74,7 +74,12 @@ fn parse_release(text: &str) -> Option<Release> {
     let tag = v.get("tag_name")?.as_str()?;
     Some(Release {
         version: tag.trim_start_matches(['v', 'V']).to_string(),
-        url: v.get("html_url")?.as_str()?.to_string(),
+        // It's handed to the browser: only ever a page on GitHub.
+        url: v
+            .get("html_url")?
+            .as_str()
+            .filter(|u| u.starts_with("https://github.com/"))?
+            .to_string(),
         notes: v
             .get("body")
             .and_then(|b| b.as_str())
@@ -112,11 +117,13 @@ fn fetch() -> Result<Option<Release>, String> {
     if r.status().as_u16() == 404 {
         return Ok(None);
     }
-    let text = r
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .text()
-        .map_err(|e| e.to_string())?;
+    // A release's JSON is a few KB: read no more than a megabyte of it.
+    let mut text = String::new();
+    std::io::Read::read_to_string(
+        &mut std::io::Read::take(r.error_for_status().map_err(|e| e.to_string())?, 1 << 20),
+        &mut text,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(parse_release(&text))
 }
 
@@ -211,6 +218,10 @@ mod tests {
         );
         assert!(
             parse_release(r#"{"tag_name":"v0.3.0","html_url":"u","prerelease":true}"#).is_none()
+        );
+        // A link anywhere but GitHub isn't opened.
+        assert!(
+            parse_release(r#"{"tag_name":"v0.3.0","html_url":"file:///etc/passwd"}"#).is_none()
         );
         assert_eq!(repo().as_deref(), Some("crgklr/mychronix"));
     }
