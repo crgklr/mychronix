@@ -44,6 +44,14 @@ pub(super) struct CornersState {
     pub selected: Option<(usize, usize)>,
     /// Built once per (session, best lap); None inside when it can't be (no GPS).
     model: Option<(usize, i64, Option<std::sync::Arc<CornerModel>>)>,
+    /// The open session's track, (id, name), when it matched one: where its
+    /// corners are saved.
+    track: Option<(String, String)>,
+    /// A track's corners being chosen from its sessions (see
+    /// `track_corners::choose`), and the tracks (with their start/finish
+    /// lines) already tried this run.
+    choosing: Option<std::sync::mpsc::Receiver<()>>,
+    tried: std::collections::HashSet<String>,
     bumps: Option<(usize, i64, Vec<crate::bumps::Bump>)>,
     /// Measured last frame, so both cards end at the same height: what each
     /// card adds around its content (the map card's height besides the map,
@@ -58,32 +66,128 @@ impl App {
     pub(super) fn corner_model(
         &mut self,
         session: &std::sync::Arc<Session>,
+        ctx: &egui::Context,
     ) -> Option<std::sync::Arc<CornerModel>> {
-        // The fastest lap recorded in full: a gap in the best lap would stand in for the track.
-        let best = session
-            .reference_lap(MIN_LAP_MS, &self.analysis.recording_gaps)
-            .copied()?;
+        // The track's corners chosen in the background: build again with them.
+        if self.corners.choosing.is_some() && crate::jobs::drain(self.corners.choosing.as_ref()).1 {
+            self.corners.choosing = None;
+            self.corners.model = None;
+        }
+        let (best, counts) = self.corner_laps(session)?;
         let key = (std::sync::Arc::as_ptr(session) as usize, best.start_ms);
-        if self
-            .corners
-            .model
-            .as_ref()
-            .is_none_or(|m| (m.0, m.1) != key)
+        // The session's track: not known until the library has loaded.
+        let track = self.path.as_ref().and_then(|p| {
+            let lib = self.library.as_ref()?;
+            let t = &lib.tracks[lib.sessions.iter().find(|s| &s.path == p)?.track?];
+            Some((t.id.clone(), t.name.clone()))
+        });
+        if track != self.corners.track
+            || self
+                .corners
+                .model
+                .as_ref()
+                .is_none_or(|m| (m.0, m.1) != key)
         {
-            // A lap with a stretch the logger missed has no true time for the corners in it.
-            let counts: Vec<bool> = slow_laps(session)
-                .into_iter()
-                .zip(&session.laps)
-                .map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.analysis.recording_gaps))
-                .collect();
             let started = std::time::Instant::now();
-            let model = CornerModel::build(session, &best, &counts);
+            self.corners.track = track;
+            // Saved from laps started at another line (it's been moved since):
+            // chosen again, from laps that start at this one.
+            let line = self.path.as_ref().and_then(|p| {
+                let lib = self.library.as_ref()?;
+                let t = &lib.tracks[lib.sessions.iter().find(|s| &s.path == p)?.track?];
+                t.start_finish.map(|l| (l.lat, l.lon))
+            });
+            let saved = self
+                .corners
+                .track
+                .as_ref()
+                .and_then(|(id, _)| crate::track_corners::load(id))
+                .filter(|s| line.is_none_or(|l| s.starts_at(l)));
+            let model = CornerModel::build(session, &best, &counts, saved.as_ref());
+            if saved.is_none() {
+                self.choose_track_corners(line, ctx);
+            }
             log::debug!("corners: model built in {:?}", started.elapsed());
             self.corners.model = Some((key.0, key.1, model.map(std::sync::Arc::new)));
             self.corners.bumps = Some((key.0, key.1, crate::bumps::recurring(session, &best)));
             self.corners.selected = None;
         }
         self.corners.model.as_ref().and_then(|m| m.2.clone())
+    }
+
+    /// The lap corners are measured on (the fastest recorded in full: a gap
+    /// in it would stand in for the track), and which laps count toward bests
+    /// (a lap with a stretch the logger missed has no true time for the
+    /// corners in it).
+    fn corner_laps(&self, session: &Session) -> Option<(aim_xrk::Lap, Vec<bool>)> {
+        let best = session
+            .reference_lap(MIN_LAP_MS, &self.analysis.recording_gaps)
+            .copied()?;
+        let counts = slow_laps(session)
+            .into_iter()
+            .zip(&session.laps)
+            .map(|(slow, l)| !slow && !aim_xrk::has_gap(l, &self.analysis.recording_gaps))
+            .collect();
+        Some((best, counts))
+    }
+
+    /// Chooses the open session's track's corners from all its sessions, in
+    /// the background, once per track and start/finish line per run.
+    fn choose_track_corners(&mut self, line: Option<(f64, f64)>, ctx: &egui::Context) {
+        let (Some((id, _)), Some(lib), None) =
+            (&self.corners.track, &self.library, &self.corners.choosing)
+        else {
+            return;
+        };
+        if !self.corners.tried.insert(format!("{id} {line:?}")) {
+            return;
+        }
+        let Some(t) = lib.tracks.iter().position(|t| &t.id == id) else {
+            return;
+        };
+        let paths: Vec<_> = lib
+            .sessions
+            .iter()
+            .filter(|s| s.track == Some(t))
+            .map(|s| s.path.clone())
+            .collect();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.corners.choosing = Some(rx);
+        let (id, ctx) = (id.clone(), ctx.clone());
+        crate::jobs::spawn("track-corners", move || {
+            if let Some(corners) = crate::track_corners::choose(&paths)
+                && let Err(e) = crate::track_corners::save(&id, &corners)
+            {
+                log::warn!("couldn't save the corners for track {id}: {e}");
+            }
+            let _ = tx.send(());
+            ctx.request_repaint();
+        });
+    }
+
+    /// Saves this session's own corners as its track's.
+    fn use_session_corners(&mut self, session: &Session) {
+        let (Some((id, _)), Some((best, counts))) =
+            (self.corners.track.clone(), self.corner_laps(session))
+        else {
+            return;
+        };
+        let Some(model) = CornerModel::build(session, &best, &counts, None) else {
+            return;
+        };
+        let name = self
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        match crate::track_corners::save(&id, &model.to_saved(name)) {
+            Ok(()) => self.corners.model = None,
+            Err(e) => {
+                self.notices
+                    .error(format!("Couldn't save the corners: {e}"));
+            }
+        }
     }
 
     pub(super) fn corners_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
@@ -95,7 +199,7 @@ impl App {
             });
             return;
         }
-        let Some(model) = self.corner_model(session) else {
+        let Some(model) = self.corner_model(session, ui.ctx()) else {
             card(ui, |ui| {
                 ui.label(
                     RichText::new("Corners need GPS for the lap, and a corner to brake for.")
@@ -130,6 +234,7 @@ impl App {
             .unwrap_or_default();
 
         let mut pick = None;
+        let mut redo = false;
         let mut measured: (Option<f32>, Option<f32>) = (None, None);
         egui::ScrollArea::vertical()
             .id_salt("corners_scroll")
@@ -180,7 +285,34 @@ impl App {
                 });
                 ui.add_space(gap);
                 up_close(ui, &model, trace, corner);
+                // Where the corners come from, and setting them for the track.
+                if let (Some((_, track)), None) = (&self.corners.track, &self.corners.choosing) {
+                    ui.add_space(gap);
+                    ui.horizontal_wrapped(|ui| {
+                        let note = if model.from_track {
+                            format!("Corners are numbered the same in every session at {track}.")
+                        } else {
+                            format!("This session has its own corners: its laps don't follow {track}'s saved corners.")
+                        };
+                        ui.label(RichText::new(note).font(regular(13.0)).color(DIM));
+                        let c = ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("Use this session's corners for {track}"))
+                                    .font(medium(13.0))
+                                    .color(SECONDARY),
+                            )
+                            .sense(Sense::click()),
+                        );
+                        if c.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        redo = c.clicked();
+                    });
+                }
             });
+        if redo {
+            self.use_session_corners(session);
+        }
         if let Some(k) = pick {
             self.corners.selected = Some((trace, k));
         }

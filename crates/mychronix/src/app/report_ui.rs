@@ -19,7 +19,7 @@ pub(super) struct ReportState {
 
 impl App {
     pub(super) fn report_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        let model = self.corner_model(session);
+        let model = self.corner_model(session, ui.ctx());
         self.laps_figures(ui, session, model.as_deref());
         ui.add_space(14.0);
         let st = &mut self.report;

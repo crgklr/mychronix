@@ -40,6 +40,7 @@ mod splits;
 mod startup_notify;
 mod storage;
 mod theme;
+mod track_corners;
 mod tracks;
 mod units;
 mod update;

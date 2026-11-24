@@ -465,7 +465,11 @@ fn corners_of(
         .zip(&session.laps)
         .map(|(s, l)| !s && !aim_xrk::has_gap(l, &gaps))
         .collect();
-    let model = CornerModel::build(&session, &best, &counts)
+    // The track's saved corners, when it has some; set only in the app.
+    let saved = lib.sessions[i]
+        .track
+        .and_then(|t| crate::track_corners::load(&lib.tracks[t].id));
+    let model = CornerModel::build(&session, &best, &counts, saved.as_ref())
         .ok_or("Corners need GPS (this session has none, or no corner to brake for)")?;
     let lap = pick_lap(&session, lap)?;
     let index = session.laps.iter().position(|l| *l == lap).unwrap_or(0);

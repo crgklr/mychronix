@@ -454,6 +454,7 @@ impl App {
             "histogram" => AnalysisView::Histogram,
             "scatter" => AnalysisView::Scatter,
             "map" => AnalysisView::Map,
+            "corners" => AnalysisView::Corners,
             _ => self.analysis.analysis_view,
         };
     }

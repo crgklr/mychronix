@@ -222,7 +222,7 @@ impl walkers::Plugin for Overlay {
 
 impl App {
     pub(super) fn map_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        let Some(model) = self.corner_model(session) else {
+        let Some(model) = self.corner_model(session, ui.ctx()) else {
             card(ui, |ui| {
                 ui.label(
                     RichText::new("The map needs GPS for the lap, and a corner to brake for.")
@@ -662,7 +662,12 @@ impl App {
             st.target = Some(to);
         }
         if let Some((from, t0)) = st.anim {
-            let f = ((now - t0) / 0.35).clamp(0.0, 1.0);
+            // A screenshot is taken where the view ends up, not partway there.
+            let f = if crate::hooks::get().screenshot.is_some() {
+                1.0
+            } else {
+                ((now - t0) / 0.35).clamp(0.0, 1.0)
+            };
             let e = 1.0 - (1.0 - f).powi(3);
             let at = (
                 from.0 + (to.0 - from.0) * e,
