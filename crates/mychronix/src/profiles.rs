@@ -196,7 +196,7 @@ impl Kart {
 
 /// Racing engines offered when adding a kart, by maker: the ones with a
 /// picture. Anything else is entered as "Other engine".
-pub const ENGINES: [(&str, &[&str]); 8] = [
+pub const ENGINES: [(&str, &[&str]); 9] = [
     (
         "BRP-Rotax",
         &[
@@ -228,6 +228,10 @@ pub const ENGINES: [(&str, &[&str]); 8] = [
         ],
     ),
     ("Comer", &["Comer C50", "Comer C51", "Comer C52"]),
+    (
+        "Raket",
+        &["Raket 95 Micro", "Raket 95 Mini", "Raket 95 Cadet"],
+    ),
     ("Briggs & Stratton", &["Briggs & Stratton LO206"]),
     ("Tillotson", &["Tillotson T225RS"]),
     ("Honda", &["Honda GX200"]),
@@ -281,7 +285,9 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
     const COMER_C51: &[u8] = include_bytes!("../assets/engines/comer-c51.png");
     const COMER_C52: &[u8] = include_bytes!("../assets/engines/comer-c52.png");
     const HONDA_GX200: &[u8] = include_bytes!("../assets/engines/honda-gx200.png");
-    const BUNDLED: [(&str, &str, &[u8]); 23] = [
+    // The Raket 95 Micro, Mini and Cadet are one engine.
+    const RAKET_95: &[u8] = include_bytes!("../assets/engines/raket-95.png");
+    const BUNDLED: [(&str, &str, &[u8]); 26] = [
         ("iame-micro-swift", "iame-mini-swift", IAME_SWIFT),
         ("iame-mini-swift", "iame-mini-swift", IAME_SWIFT),
         ("iame-ka100", "iame-ka100", IAME_KA100),
@@ -304,6 +310,9 @@ pub fn engine_picture(engine: &str) -> Option<(String, Vec<u8>)> {
         ("comer-c50", "comer-c50", COMER_C50),
         ("comer-c51", "comer-c51", COMER_C51),
         ("comer-c52", "comer-c52", COMER_C52),
+        ("raket-95-micro", "raket-95", RAKET_95),
+        ("raket-95-mini", "raket-95", RAKET_95),
+        ("raket-95-cadet", "raket-95", RAKET_95),
         ("tillotson-t225rs", "tillotson-t225rs", TILLOTSON_225),
         ("predator-ghost-212", "predator-ghost-212", PREDATOR_GHOST),
         ("predator-79", "predator-79", PREDATOR_79),
@@ -775,6 +784,9 @@ mod tests {
         assert!(uri("IAME X30 Junior").is_some_and(|u| u.ends_with("iame-x30.png")));
         assert!(uri("IAME Mini Swift").is_some());
         assert_eq!(uri("IAME Micro Swift"), uri("IAME Mini Swift"));
+        assert!(uri("Raket 95 Cadet").is_some_and(|u| u.ends_with("raket-95.png")));
+        assert_eq!(uri("Raket 95 Micro"), uri("Raket 95 Cadet"));
+        assert_eq!(uri("Raket 95 Mini"), uri("Raket 95 Cadet"));
         assert!(uri("IAME KA100").is_some_and(|u| u.ends_with("iame-ka100.png")));
         assert!(uri("Vortex Mini ROK").is_some_and(|u| u.ends_with("vortex-mini-rok.png")));
         assert!(uri("Vortex ROK VLR").is_some_and(|u| u.ends_with("vortex-rok-vlr.png")));
