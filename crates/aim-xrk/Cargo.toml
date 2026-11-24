@@ -11,6 +11,7 @@ repository.workspace = true
 thiserror.workspace = true
 log.workspace = true
 # MIT-licensed XRK/XRZ reader (github.com/m3rlin45/libxrk); not on crates.io, so pinned by commit.
-# From a fork for now: the same commit as before with binrw 0.15, which current Rust warns 0.14
-# about (m3rlin45/libxrk#190). Back to upstream once that's merged.
-libxrk = { git = "https://github.com/crgklr/libxrk", rev = "3c0d4d0306e2c054de8ded1aaf547c16e3cdf618" }
+# From a fork for now: upstream's newest (which reads a MyChron 5S 2T's grouped channels) with
+# binrw 0.15, which current Rust warns 0.14 about (m3rlin45/libxrk#190). Back to upstream once
+# that's merged.
+libxrk = { git = "https://github.com/crgklr/libxrk", rev = "a9dd2efe9da95ad49196057b8f52c47a5c1390d4" }

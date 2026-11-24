@@ -2524,11 +2524,18 @@ dependencies = [
 [[package]]
 name = "libxrk"
 version = "0.1.0"
-source = "git+https://github.com/crgklr/libxrk?rev=3c0d4d0306e2c054de8ded1aaf547c16e3cdf618#3c0d4d0306e2c054de8ded1aaf547c16e3cdf618"
+source = "git+https://github.com/crgklr/libxrk?rev=a9dd2efe9da95ad49196057b8f52c47a5c1390d4#a9dd2efe9da95ad49196057b8f52c47a5c1390d4"
 dependencies = [
  "binrw",
  "flate2",
+ "half",
+ "libxrk-gps",
 ]
+
+[[package]]
+name = "libxrk-gps"
+version = "0.1.0"
+source = "git+https://github.com/crgklr/libxrk?rev=a9dd2efe9da95ad49196057b8f52c47a5c1390d4#a9dd2efe9da95ad49196057b8f52c47a5c1390d4"
 
 [[package]]
 name = "linebender_resource_handle"

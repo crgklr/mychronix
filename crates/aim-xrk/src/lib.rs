@@ -297,7 +297,12 @@ impl From<libxrk::XrkFile> for Session {
                 Channel {
                     name: c.name,
                     group: c.group,
-                    units: c.units,
+                    // A count (gear, switches, alarms): no unit, as from a MyChron 4.
+                    units: if c.units == "#" {
+                        String::new()
+                    } else {
+                        c.units
+                    },
                     decimals: c.dec_pts,
                     interpolate: c.interpolate,
                     times_ms,
@@ -428,6 +433,7 @@ fn to_f64(values: libxrk::ChannelValues) -> Vec<f64> {
         V::Int16(v) => v.into_iter().map(f64::from).collect(),
         V::Int32(v) => v.into_iter().map(f64::from).collect(),
         V::UInt32(v) => v.into_iter().map(f64::from).collect(),
+        V::Float16(v) => v.into_iter().map(|x| x.to_f64()).collect(),
         V::Float32(v) => v.into_iter().map(f64::from).collect(),
         V::Float64(v) => v,
     }
