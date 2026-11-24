@@ -126,7 +126,8 @@ fn lap_crossings(all: &[Crossing]) -> Vec<Crossing> {
 }
 
 /// Whether the logger's laps look untimed: one long lap, or a lap that's
-/// two or more of the others run together.
+/// two or more of the others run together. Measured by distance, not time:
+/// a lap with a stop in it (a red flag, a stop on track) is long, not two laps.
 pub fn needs_retiming(session: &Session) -> bool {
     let Some(gps) = session.gps.as_ref().filter(|g| g.len() > 100) else {
         return false;
@@ -138,19 +139,29 @@ pub fn needs_retiming(session: &Session) -> bool {
     }
     let laps = &session.laps;
     // Out-lap and in-lap aside, the laps that should be complete.
-    let inner: Vec<i64> = laps
+    let inner: Vec<f64> = laps
         .iter()
         .skip(1)
         .take(laps.len().saturating_sub(2))
-        .map(Lap::duration_ms)
+        .map(|l| lap_distance_m(gps, l))
         .collect();
     if inner.is_empty() {
         return true;
     }
     let mut sorted = inner.clone();
-    sorted.sort_unstable();
+    sorted.sort_by(f64::total_cmp);
     let median = sorted[sorted.len() / 2];
-    inner.iter().any(|&d| d as f64 > median as f64 * 1.8)
+    inner.iter().any(|&d| d > median * 1.8)
+}
+
+/// How far the kart went in a lap, from GPS speed (m).
+fn lap_distance_m(gps: &crate::GpsTrack, lap: &Lap) -> f64 {
+    let t = &gps.times_ms;
+    let lo = t.partition_point(|&x| x <= lap.start_ms).max(1);
+    let hi = t.partition_point(|&x| x <= lap.end_ms);
+    (lo..hi)
+        .map(|i| gps.speed_kmh[i] / 3.6 * (t[i] - t[i - 1]) as f64 / 1000.0)
+        .sum()
 }
 
 /// Laps timed from GPS: the candidate start/finish (index into
@@ -286,6 +297,25 @@ mod tests {
             g.yaw_rate_dps.push(0.0);
         }
         g
+    }
+
+    #[test]
+    fn a_stop_makes_a_lap_long_not_far() {
+        // 10 m/s for 20 s, then stopped for 40 s.
+        let mut g = circle(4);
+        for v in &mut g.speed_kmh[201..=600] {
+            *v = 0.0;
+        }
+        let lap = |a: i64, b: i64| Lap {
+            number: 1,
+            start_ms: a,
+            end_ms: b,
+        };
+        let run = lap_distance_m(&g, &lap(0, 20_000));
+        let with_stop = lap_distance_m(&g, &lap(0, 60_000));
+        assert!((run - 200.0).abs() < 1.0, "{run}");
+        // Three times as long, no further.
+        assert!((with_stop - run).abs() < 1.0, "{with_stop}");
     }
 
     #[test]
