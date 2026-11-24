@@ -70,8 +70,23 @@ impl App {
         .flatten()
         .collect::<Vec<_>>()
         .join("  ·  ");
+        // Its track's line, when the track has saved corners: laps from
+        // different sessions are then read at the same places on track.
+        let line = self
+            .library
+            .as_ref()
+            .and_then(|lib| {
+                let t = lib.sessions.iter().find(|s| s.path == path)?.track?;
+                crate::track_corners::load(&lib.tracks[t].id)
+            })
+            .map(|c| c.line);
         self.comparison.laps.push(crate::compare::CompareLap::new(
-            path, session, lap, label, slot,
+            path,
+            session,
+            lap,
+            label,
+            slot,
+            line.as_deref(),
         ));
     }
 

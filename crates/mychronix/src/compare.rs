@@ -1,14 +1,24 @@
 //! Lap comparison along distance.
 //!
-//! Each lap's distance comes from integrating its GPS speed, then every lap is
-//! scaled to the reference lap's length so the same corner falls at the same
-//! distance even when the lines differ slightly. Channels and time are then
-//! read at matching distances.
+//! Each lap's distance is where it was along its track's line, when the track
+//! has one (saved with its corners, see `track_corners`), so laps that took
+//! different lines, from any session, are read at the same places; else it
+//! comes from integrating its GPS speed, and every lap is scaled to the
+//! reference lap's length so the same corner falls at the same distance even
+//! when the lines differ slightly. Channels and time are then read at
+//! matching distances.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use aim_xrk::{Channel, Lap, Session};
+
+/// Putting a lap on a track's line: how far back and ahead of the kart's
+/// last place to look (m), and how far off the line a lap may stray and
+/// still be on it (m; GPS wanders a few meters from day to day).
+const LOOK_BACK_M: f64 = 10.0;
+const LOOK_AHEAD_M: f64 = 40.0;
+const OFF_LINE_M: f64 = 25.0;
 
 /// One lap in the comparison.
 #[derive(Clone)]
@@ -24,9 +34,23 @@ pub struct CompareLap {
 }
 
 impl CompareLap {
-    pub fn new(path: PathBuf, session: Arc<Session>, lap: Lap, label: String, slot: usize) -> Self {
-        // Positions, else the GPS module's speed (MyChron 4), else speed worked out from RPM.
-        let profile = DistanceProfile::from_gps(&session, &lap)
+    /// `line`: the track's line ((lat, lon) every `corner_model::STEP_M`),
+    /// when it has one, to read the lap along.
+    pub fn new(
+        path: PathBuf,
+        session: Arc<Session>,
+        lap: Lap,
+        label: String,
+        slot: usize,
+        line: Option<&[(f64, f64)]>,
+    ) -> Self {
+        // Along the track's line, else positions, else the GPS module's speed
+        // (MyChron 4), else speed worked out from RPM.
+        let profile = line
+            .and_then(|l| {
+                DistanceProfile::along_line(&session, &lap, l, crate::corner_model::STEP_M)
+            })
+            .or_else(|| DistanceProfile::from_gps(&session, &lap))
             .or_else(|| DistanceProfile::from_channel(&session, &lap, "GPS Speed"))
             .or_else(|| {
                 DistanceProfile::from_channel(&session, &lap, crate::setup::SPEED_FROM_RPM)
@@ -108,6 +132,73 @@ impl DistanceProfile {
             prev = (t, v);
         }
         (dist.last().copied().unwrap_or(0.0) > 1.0).then_some(Self {
+            times_ms: times,
+            dist_m: dist,
+        })
+    }
+
+    /// Where the kart was along a track's line through the lap: each GPS
+    /// point put on the nearest part of `line` ((lat, lon) every `step_m`
+    /// from the start/finish), so laps that took different lines are read at
+    /// the same places on track. None when the lap strays from the line
+    /// (another layout, a spin) or doesn't get round it.
+    pub fn along_line(
+        session: &Session,
+        lap: &Lap,
+        line: &[(f64, f64)],
+        step_m: f64,
+    ) -> Option<Self> {
+        let gps = session.gps.as_ref()?;
+        let &(lat0, lon0) = line.first()?;
+        let xy: Vec<(f64, f64)> = line
+            .iter()
+            .map(|&(lat, lon)| aim_xrk::geo::to_local(lat0, lon0, lat, lon))
+            .collect();
+        if xy.len() < 10 {
+            return None;
+        }
+        let length = (xy.len() - 1) as f64 * step_m;
+        let lo = gps.times_ms.partition_point(|&t| t < lap.start_ms);
+        let hi = gps.times_ms.partition_point(|&t| t <= lap.end_ms);
+        let mut times = vec![lap.start_ms];
+        let mut dist = vec![0.0];
+        let mut worst = 0.0f64;
+        for i in lo..hi {
+            let (px, py) = aim_xrk::geo::to_local(lat0, lon0, gps.latitude[i], gps.longitude[i]);
+            // Only just ahead of (or a little behind) where the kart was: a
+            // part of the track that passes close by is never mistaken for it.
+            let at = *dist.last().unwrap();
+            let a = ((at - LOOK_BACK_M) / step_m).max(0.0) as usize;
+            let b = (((at + LOOK_AHEAD_M) / step_m) as usize).min(xy.len() - 2);
+            let (s, off) = (a..=b.max(a))
+                .map(|k| {
+                    let ((x0, y0), (x1, y1)) = (xy[k], xy[k + 1]);
+                    let (dx, dy) = (x1 - x0, y1 - y0);
+                    let f = (((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy).max(1e-9))
+                        .clamp(0.0, 1.0);
+                    (
+                        (k as f64 + f) * step_m,
+                        (px - x0 - f * dx).hypot(py - y0 - f * dy),
+                    )
+                })
+                .min_by(|p, q| p.1.total_cmp(&q.1))?;
+            worst = worst.max(off);
+            // Forward only (GPS jitter can put a point a hair behind the last).
+            if s > at && gps.times_ms[i] > *times.last().unwrap() {
+                times.push(gps.times_ms[i]);
+                dist.push(s);
+            }
+        }
+        let end = *dist.last().unwrap();
+        if worst > OFF_LINE_M || end < length * 0.9 {
+            return None;
+        }
+        // The lap ends at the line.
+        if lap.end_ms > *times.last().unwrap() && length > end {
+            times.push(lap.end_ms);
+            dist.push(length);
+        }
+        Some(Self {
             times_ms: times,
             dist_m: dist,
         })

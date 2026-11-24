@@ -27,7 +27,7 @@ const BRAKING_G: f64 = -0.15;
 const TURNING_G: f64 = 0.3;
 /// A best lap follows a track's saved line when it's typically within this
 /// of it (m)… GPS wanders a few meters from day to day (0.6 to 3.4 m typical,
-/// 8 m at most, over 61 sessions at one track, Nov 2026).
+/// 8 m at most, over 53 sessions at two tracks, Nov 2026).
 const FIT_M: f64 = 6.0;
 /// …and nine tenths of it, and every corner, within this: another layout
 /// is 20 m or more off in places.
@@ -170,14 +170,44 @@ impl CornerModel {
         counts: &[bool],
         saved: Option<&TrackCorners>,
     ) -> Option<Self> {
+        Self::build_with(session, best, counts, saved, true)
+    }
+
+    /// `on_track`: with saved corners the best lap follows, read every lap
+    /// along their line (see `DistanceProfile::along_line`); else each lap's
+    /// distance, scaled to the best lap's length.
+    fn build_with(
+        session: &Session,
+        best: &Lap,
+        counts: &[bool],
+        saved: Option<&TrackCorners>,
+        on_track: bool,
+    ) -> Option<Self> {
         let gps = session.gps.as_ref()?;
         let (zones, best_profile) = braking::lap_zones(session, best)?;
-        let length_m = best_profile.length();
+        let (lat0, lon0) = (*gps.latitude.first()?, *gps.longitude.first()?);
+        let origin = (lat0, lon0);
+        // The saved corners, when the best lap follows their line: where they
+        // fall on it, by its own distance.
+        let placed = saved.and_then(|s| {
+            let n = (best_profile.length() / STEP_M) as usize;
+            let xy: Vec<(f64, f64)> = (0..=n)
+                .map(|k| {
+                    let t = best_profile.time_at(k as f64 * STEP_M);
+                    let lat = interp_t(&gps.times_ms, &gps.latitude, t);
+                    let lon = interp_t(&gps.times_ms, &gps.longitude, t);
+                    local_xy(lat0, lon0, lat, lon)
+                })
+                .collect();
+            Some((s, place(s, &xy, origin, best_profile.length())?))
+        });
+        // Read along the line: the corners where they were saved, on its scale.
+        let line = placed.as_ref().filter(|_| on_track).map(|(s, _)| *s);
+        let length_m = line.map_or(best_profile.length(), |s| s.length_m());
         use crate::channels::{Role, find};
         let forward = find(session, Role::ForwardG)?;
         let cornering = find(session, Role::CorneringG)?;
         let steering = crate::channels::steering(session);
-        let (lat0, lon0) = (*gps.latitude.first()?, *gps.longitude.first()?);
         let gps_t: Vec<f64> = gps.times_ms.iter().map(|&t| t as f64).collect();
         let n = (length_m / STEP_M) as usize;
         // Every STEP_M along the best lap, and its very end (the last step is
@@ -194,7 +224,11 @@ impl CornerModel {
             if i == 0 || i + 1 == session.laps.len() {
                 continue;
             }
-            let Some(p) = DistanceProfile::from_gps(session, lap) else {
+            // Along the line where the lap follows it, else its distance scaled.
+            let Some(p) = line
+                .and_then(|s| DistanceProfile::along_line(session, lap, &s.line, STEP_M))
+                .or_else(|| DistanceProfile::from_gps(session, lap))
+            else {
                 continue;
             };
             let times: Vec<f64> = p.times_ms.iter().map(|&t| t as f64).collect();
@@ -229,13 +263,12 @@ impl CornerModel {
             trace_counts.push(counts.get(i).copied().unwrap_or(false));
         }
         let best_trace = traces.iter().position(|t| session.laps[t.lap] == *best)?;
-        let origin = (lat0, lon0);
-        let placed = saved.and_then(|s| place(s, &traces[best_trace].xy, origin, length_m));
         let from_track = placed.is_some();
-        let segments = match placed {
-            Some(s) => s,
-            None if zones.is_empty() => return None,
-            None => {
+        let segments = match (line, placed) {
+            (Some(s), _) => saved_segments(s),
+            (None, Some((_, segs))) => segs,
+            (None, None) if zones.is_empty() => return None,
+            (None, None) => {
                 let starts: Vec<f64> = zones
                     .iter()
                     .enumerate()
@@ -407,6 +440,35 @@ impl CornerModel {
         out.truncate(2);
         out
     }
+}
+
+/// The saved corners as segments along their own line.
+fn saved_segments(saved: &TrackCorners) -> Vec<Segment> {
+    let n = saved.corners.len();
+    (0..n)
+        .map(|k| Segment {
+            from: if k == 0 { 0.0 } else { saved.corners[k].from_m },
+            apex: saved.corners[k].apex_m,
+            to: saved
+                .corners
+                .get(k + 1)
+                .map_or(saved.length_m(), |c| c.from_m),
+        })
+        .collect()
+}
+
+/// `values` at time `t` (ms), linearly between samples, clamped at the ends.
+fn interp_t(times_ms: &[i64], values: &[f64], t: f64) -> f64 {
+    let i = times_ms.partition_point(|&x| (x as f64) < t);
+    if i == 0 {
+        return values[0];
+    }
+    if i >= times_ms.len() {
+        return values[values.len() - 1];
+    }
+    let (t0, t1) = (times_ms[i - 1] as f64, times_ms[i] as f64);
+    let f = if t1 > t0 { (t - t0) / (t1 - t0) } else { 0.0 };
+    values[i - 1] + f * (values[i] - values[i - 1])
 }
 
 /// The saved corners on a best lap (its path `xy`, every [`STEP_M`] from the
