@@ -25,6 +25,7 @@ mod device;
 mod digest;
 mod events;
 mod hooks;
+mod imagery;
 mod import;
 mod jobs;
 mod logging;

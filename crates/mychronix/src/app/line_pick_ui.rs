@@ -264,10 +264,10 @@ impl App {
                     }
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
-                        let tiles = super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite);
+                        let tiles = super::map_tiles::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite);
                         let overlay = LineOverlay { trace: pick.trace.clone(), outline: pick.outline.clone(), racing: pick.racing.clone(), chosen: pick.chosen, clicked: clicked.clone() };
                         let center = pick.trace.first().map(|p| walkers::lat_lon(p.lat, p.lon)).unwrap_or(walkers::lat_lon(0.0, 0.0));
-                        let map = ui.add_sized(size, walkers::Map::new(super::tracks_ui::shown(tiles), &mut pick.memory, center).with_plugin(overlay));
+                        let map = ui.add_sized(size, walkers::Map::new(super::map_tiles::shown(tiles), &mut pick.memory, center).with_plugin(overlay));
                         let corner = Rect::from_min_size(map.rect.right_top() + vec2(-190.0, 10.0), vec2(180.0, 36.0));
                         // Over the map's corner, without taking room below it.
                         let mut over = ui.new_child(egui::UiBuilder::new().max_rect(corner).layout(Layout::right_to_left(Align::Center)));
@@ -292,7 +292,7 @@ impl App {
                             swatch(ui, TRACE, 2.0, "Every lap");
                             swatch(ui, theme::FAVORITE, 4.0, "Start/finish");
                         });
-                        let credit = if satellite { "Imagery © Esri, Maxar, Earthstar Geographics." } else { "Map data © OpenStreetMap contributors." };
+                        let credit = format!("{}.", super::map_tiles::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), satellite).credit());
                         ui.label(RichText::new(format!("Drag to move, scroll to zoom.  {credit}")).size(11.5).color(DIM));
                     });
                     // The steps, and where it's saved.

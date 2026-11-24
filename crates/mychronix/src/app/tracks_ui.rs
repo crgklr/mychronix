@@ -550,7 +550,7 @@ impl App {
         let sectors = pick.sectors(mode, self.track_page.split_count);
         let overlay = pick.overlay(mode, sectors.as_ref());
 
-        tiles(
+        super::map_tiles::tiles(
             &mut self.map_tiles,
             &mut self.sat_tiles,
             ui.ctx(),
@@ -570,7 +570,7 @@ impl App {
             );
         }
         let satellite = self.track_page.satellite;
-        let tiles: &mut MapTiles = if satellite {
+        let tiles: &mut super::map_tiles::MapTiles = if satellite {
             self.sat_tiles.as_mut().unwrap()
         } else {
             self.map_tiles.as_mut().unwrap()
@@ -587,11 +587,7 @@ impl App {
         if toggle {
             self.track_page.satellite = !self.track_page.satellite;
         }
-        let credit = if self.track_page.satellite {
-            "Imagery © Esri, Maxar, Earthstar Geographics."
-        } else {
-            "Map data © OpenStreetMap contributors."
-        };
+        let credit = format!("{}.", tiles.credit());
         // Offline, maps viewed before come from the cache; others draw the track on a blank background.
         let credit = if self.background.aim_tracks_offline {
             format!("{credit}  Offline: maps you haven't viewed before appear once you're online.")
@@ -910,7 +906,7 @@ fn fit_drawn(memory: &mut walkers::MapMemory, overlay: &TrackOverlay, size: Vec2
 /// top-right corner. True when the switch was flipped.
 fn map_frame(
     ui: &mut Ui,
-    tiles: &mut MapTiles,
+    tiles: &mut super::map_tiles::MapTiles,
     memory: &mut walkers::MapMemory,
     center: walkers::Position,
     overlay: TrackOverlay,
@@ -926,7 +922,7 @@ fn map_frame(
             ui.set_height(map_h);
             // The wheel scrolls the page past the map; Ctrl + wheel zooms it.
             let map = ui.add(
-                walkers::Map::new(shown(tiles), memory, center)
+                walkers::Map::new(super::map_tiles::shown(tiles), memory, center)
                     .panning(false)
                     .with_plugin(overlay),
             );
@@ -1427,101 +1423,6 @@ fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
             .color(SECONDARY),
         );
     });
-}
-
-/// `tiles` for a map, or none with MYCHRONIX_NO_TILES (see `hooks`).
-pub(super) fn shown(tiles: &mut MapTiles) -> Option<&mut dyn walkers::Tiles> {
-    (!crate::hooks::get().no_tiles).then_some(tiles as &mut dyn walkers::Tiles)
-}
-
-/// The map's tiles, OpenStreetMap or satellite, made on first use (shared by Tracks and Map).
-pub(super) fn tiles<'a>(
-    street: &'a mut Option<MapTiles>,
-    imagery: &'a mut Option<MapTiles>,
-    ctx: &egui::Context,
-    satellite: bool,
-) -> &'a mut MapTiles {
-    let options = || walkers::HttpOptions {
-        cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
-        user_agent: Some(walkers::HeaderValue::from_static(
-            "Mychronix/0.1 (AiM MyChron data analysis; Linux desktop)",
-        )),
-        ..Default::default()
-    };
-    if satellite {
-        imagery.get_or_insert_with(|| MapTiles {
-            http: walkers::HttpTiles::with_options(EsriImagery, options(), ctx.clone()),
-            fallbacks: &SATELLITE_FALLBACKS,
-        })
-    } else {
-        street.get_or_insert_with(|| MapTiles {
-            http: walkers::HttpTiles::with_options(
-                walkers::sources::OpenStreetMap,
-                options(),
-                ctx.clone(),
-            ),
-            fallbacks: &[],
-        })
-    }
-}
-
-/// Zooms whose satellite tiles are fetched beside closer ones: where there's
-/// no closer imagery, the map shows these enlarged (zoom 17 is about a meter
-/// a pixel, and nearly everywhere has it).
-const SATELLITE_FALLBACKS: [u8; 2] = [17, 15];
-
-/// A map's tiles, which also fetch the same place at `fallbacks` zooms: a
-/// tile that doesn't exist up close is drawn from the closest of those.
-pub(super) struct MapTiles {
-    http: walkers::HttpTiles,
-    fallbacks: &'static [u8],
-}
-
-impl walkers::Tiles for MapTiles {
-    fn at(&mut self, id: walkers::TileId) -> Option<walkers::TilePiece> {
-        for &zoom in self.fallbacks.iter().filter(|&&z| z < id.zoom) {
-            let d = id.zoom - zoom;
-            self.http.at(walkers::TileId {
-                x: id.x >> d,
-                y: id.y >> d,
-                zoom,
-            });
-        }
-        self.http.at(id)
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        self.http.attribution()
-    }
-
-    fn tile_size(&self) -> u32 {
-        self.http.tile_size()
-    }
-}
-
-/// Esri World Imagery: satellite and aerial photos. Free for personal,
-/// non-commercial use with attribution.
-struct EsriImagery;
-
-impl walkers::sources::TileSource for EsriImagery {
-    fn tile_url(&self, id: walkers::TileId) -> String {
-        format!(
-            // Where there's no imagery this close, "not found" (not Esri's
-            // "Map data not yet available" picture): `MapTiles` shows a
-            // farther one enlarged.
-            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}?blankTile=false",
-            id.zoom, id.y, id.x
-        )
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        walkers::sources::Attribution {
-            text: "Esri, Maxar, Earthstar Geographics",
-            url: "https://www.esri.com/",
-            logo_light: None,
-            logo_dark: None,
-        }
-    }
 }
 
 /// Center and web-map zoom that fit `points` into a `size` pixel view with a margin.

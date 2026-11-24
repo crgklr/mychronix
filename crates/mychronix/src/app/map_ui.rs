@@ -473,9 +473,9 @@ impl App {
         // The wheel zooms, as on any map; dragging moves it.
         let map = if self.map_view.satellite {
             let tiles =
-                super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
+                super::map_tiles::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
             ui.add(
-                walkers::Map::new(super::tracks_ui::shown(tiles), &mut memory, start)
+                walkers::Map::new(super::map_tiles::shown(tiles), &mut memory, start)
                     .zoom_with_ctrl(false)
                     .with_plugin(overlay),
             )
@@ -595,11 +595,13 @@ impl App {
                 input.numbers = Some(false);
             }
         }
-        if self.map_view.satellite {
+        if self.map_view.satellite
+            && let Some(credit) = self.sat_tiles.as_mut().map(|t| t.credit())
+        {
             ui.painter().text(
                 switch.right_top() + vec2(-4.0, -6.0),
                 egui::Align2::RIGHT_BOTTOM,
-                "Imagery © Esri, Maxar, Earthstar Geographics",
+                credit,
                 regular(10.5),
                 Color32::from_white_alpha(150),
             );
