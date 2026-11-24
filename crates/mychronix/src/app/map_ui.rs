@@ -1192,6 +1192,26 @@ fn corner_numbers(
     laps: &[aim_xrk::Lap],
     all_laps: bool,
 ) {
+    corner_heading(ui, model, trace, corner);
+    ui.add_space(6.0);
+    let rows = number_rows(model, trace, corner, rpm, laps);
+    number_grid(ui, model, trace, corner, rows);
+    if all_laps {
+        line_spread(ui, model, corner);
+    } else {
+        ui.add(
+            egui::Label::new(
+                RichText::new("Turn on All laps to see how repeatable the line is here.")
+                    .size(12.0)
+                    .color(DIM),
+            )
+            .wrap(),
+        );
+    }
+}
+
+/// The corner's number, the laps compared, and the time lost there.
+fn corner_heading(ui: &mut Ui, model: &CornerModel, trace: usize, corner: usize) {
     let bi = model.best_of[corner];
     let own = bi == trace;
     let (a, b) = (&model.stats[trace][corner], &model.stats[bi][corner]);
@@ -1230,7 +1250,23 @@ fn corner_numbers(
             ui.label(RichText::new("lost here").size(13.0).color(SECONDARY));
         }
     });
-    ui.add_space(6.0);
+}
+
+/// A row of a corner's numbers: (label, this lap, the best, higher is better,
+/// decimals, unit, big).
+type NumberRow = (&'static str, f64, f64, bool, usize, String, bool);
+
+/// The corner's numbers for this lap and the best of it: speeds, where the
+/// slowing starts, braking, and (where recorded) RPM, steering and cornering.
+fn number_rows(
+    model: &CornerModel,
+    trace: usize,
+    corner: usize,
+    rpm: Option<&Channel>,
+    laps: &[aim_xrk::Lap],
+) -> Vec<NumberRow> {
+    let bi = model.best_of[corner];
+    let (a, b) = (&model.stats[trace][corner], &model.stats[bi][corner]);
     let (su, du) = (crate::units::speed_unit(), crate::units::distance_unit());
     let speed = |v: f64| crate::units::speed(v);
     let apex_rpm = |t: usize, s: &crate::corner_model::Stats| {
@@ -1250,8 +1286,7 @@ fn corner_numbers(
             .iter()
             .fold(0.0_f64, |m, g| m.max(g.abs()))
     };
-    // (label, this lap, the best, higher is better, decimals, unit, big)
-    let mut rows: Vec<(&str, f64, f64, bool, usize, String, bool)> = vec![
+    let mut rows: Vec<NumberRow> = vec![
         (
             "Entry",
             speed(a.entry_kmh),
@@ -1313,6 +1348,20 @@ fn corner_numbers(
         "g".into(),
         false,
     ));
+    rows
+}
+
+/// The numbers in a grid: this lap's, and the best's where it's worse.
+fn number_grid(
+    ui: &mut Ui,
+    model: &CornerModel,
+    trace: usize,
+    corner: usize,
+    rows: Vec<NumberRow>,
+) {
+    let bi = model.best_of[corner];
+    let own = bi == trace;
+    let brake_m = model.stats[trace][corner].brake_m;
     egui::Grid::new(("map_numbers", corner))
         .num_columns(3)
         .spacing(vec2(12.0, 6.0))
@@ -1349,7 +1398,7 @@ fn corner_numbers(
                         ui,
                         value.rect,
                         value.id.with("lap_position"),
-                        &lap_position(a.brake_m),
+                        &lap_position(brake_m),
                     );
                 }
                 if own {
@@ -1369,45 +1418,48 @@ fn corner_numbers(
                 ui.end_row();
             }
         });
-    // How repeatable the line is at the apex: the spread of where each counting lap went.
-    if all_laps {
-        let s = model.segments[corner];
-        let best_xy = &model.traces[model.best].xy;
-        let i = ((s.apex / STEP_M).round() as usize).min(best_xy.len() - 2);
-        let (p, q) = (best_xy[i.saturating_sub(1)], best_xy[i + 1]);
-        let (dx, dy) = (q.0 - p.0, q.1 - p.1);
-        let len = (dx * dx + dy * dy).sqrt().max(1e-6);
-        let offs: Vec<f64> = (0..model.traces.len())
-            .filter(|&t| model.counts[t])
-            .map(|t| {
-                let a = model.traces[t].xy[i];
-                ((a.0 - best_xy[i].0) * -dy + (a.1 - best_xy[i].1) * dx) / len
-            })
-            .collect();
-        if offs.len() > 1 {
-            let mean = offs.iter().sum::<f64>() / offs.len() as f64;
-            let sd =
-                (offs.iter().map(|o| (o - mean).powi(2)).sum::<f64>() / offs.len() as f64).sqrt();
-            ui.add_space(4.0);
-            // In words: GPS can't tell lines much closer than half a meter apart.
-            let how = if sd < 0.5 {
-                "was consistent"
-            } else if sd < 1.2 {
-                "varied a little"
-            } else {
-                "varied a lot"
-            };
-            ui.add(egui::Label::new(RichText::new(format!("Across {} laps, your line at the apex {how}.", offs.len())).size(12.5).color(TEXT)).wrap())
-                .on_hover_text("From the MyChron's GPS, which can't tell lines less than about half a meter apart.");
-        }
-    } else {
+}
+
+/// How repeatable the line is at the apex: the spread of where each counting lap went.
+fn line_spread(ui: &mut Ui, model: &CornerModel, corner: usize) {
+    let s = model.segments[corner];
+    let best_xy = &model.traces[model.best].xy;
+    let i = ((s.apex / STEP_M).round() as usize).min(best_xy.len() - 2);
+    let (p, q) = (best_xy[i.saturating_sub(1)], best_xy[i + 1]);
+    let (dx, dy) = (q.0 - p.0, q.1 - p.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+    let offs: Vec<f64> = (0..model.traces.len())
+        .filter(|&t| model.counts[t])
+        .map(|t| {
+            let a = model.traces[t].xy[i];
+            ((a.0 - best_xy[i].0) * -dy + (a.1 - best_xy[i].1) * dx) / len
+        })
+        .collect();
+    if offs.len() > 1 {
+        let mean = offs.iter().sum::<f64>() / offs.len() as f64;
+        let sd = (offs.iter().map(|o| (o - mean).powi(2)).sum::<f64>() / offs.len() as f64).sqrt();
+        ui.add_space(4.0);
+        // In words: GPS can't tell lines much closer than half a meter apart.
+        let how = if sd < 0.5 {
+            "was consistent"
+        } else if sd < 1.2 {
+            "varied a little"
+        } else {
+            "varied a lot"
+        };
         ui.add(
             egui::Label::new(
-                RichText::new("Turn on All laps to see how repeatable the line is here.")
-                    .size(12.0)
-                    .color(DIM),
+                RichText::new(format!(
+                    "Across {} laps, your line at the apex {how}.",
+                    offs.len()
+                ))
+                .size(12.5)
+                .color(TEXT),
             )
             .wrap(),
+        )
+        .on_hover_text(
+            "From the MyChron's GPS, which can't tell lines less than about half a meter apart.",
         );
     }
 }
