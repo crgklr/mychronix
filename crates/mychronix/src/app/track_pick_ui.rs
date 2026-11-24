@@ -126,70 +126,13 @@ impl App {
             return;
         };
         let session = &lib.sessions[si];
-        let around = lib.around(session);
-        let distance = |i: usize| around.iter().find(|(j, _)| *j == i).map(|(_, d)| *d);
-        // The list: the tracks here, nearest first, narrowed to what's typed
-        // (closest names first). Where the MyChron didn't place the session,
-        // your own tracks, ones you've raced and favorites.
-        let search = pick.search.trim().to_string();
-        let pool: Vec<usize> = if session.place().is_some() {
-            around.iter().map(|(i, _)| *i).collect()
-        } else {
-            (0..lib.tracks.len())
-                .filter(|&i| {
-                    lib.tracks[i].kind == Kind::Custom
-                        || !lib.tracks[i].sessions.is_empty()
-                        || favorites.contains(&lib.tracks[i].guid)
-                })
-                .collect()
-        };
-        let mut list: Vec<(usize, u8)> = pool
-            .into_iter()
-            .filter_map(|i| {
-                if search.is_empty() {
-                    Some((i, 0))
-                } else {
-                    name_match(&search, &lib.tracks[i]).map(|q| (i, q))
-                }
-            })
-            .collect();
-        list.sort_by(|a, b| {
-            a.1.cmp(&b.1).then(
-                distance(a.0)
-                    .unwrap_or(f64::MAX)
-                    .total_cmp(&distance(b.0).unwrap_or(f64::MAX)),
-            )
-        });
-        let exact = list.iter().any(|&(_, q)| q == 0) && !search.is_empty();
-        let mut list: Vec<usize> = list.into_iter().map(|(i, _)| i).collect();
-        // A name of your own: the one typed, when no track has it, or the
-        // session's current one.
-        let free = match &pick.choice {
-            _ if !search.is_empty() => (!exact).then(|| search.clone()),
-            Some(Choice::Name(n)) => Some(n.clone()),
-            _ => None,
-        };
-        let free_row = free.is_some();
-        list.truncate(SHOWN - usize::from(free_row));
-        // The current pick stays in view.
-        if let Some(Choice::Track(g)) = &pick.choice
-            && let Some(i) = lib
-                .tracks
-                .iter()
-                .position(|t| &t.guid == g)
-                .filter(|i| !list.contains(i))
-        {
-            if list.len() >= SHOWN - usize::from(free_row) {
-                list.pop();
-            }
-            list.insert(0, i);
-        }
-        let this = (session.logger.clone(), session.summary.date);
-        let same_day: Vec<PathBuf> = match &this {
-            (logger, Some(date)) => lib
+        let (list, free) = pick_choices(&lib, session, &pick, &favorites);
+        let date = session.summary.date;
+        let same_day: Vec<PathBuf> = match date {
+            Some(date) => lib
                 .sessions
                 .iter()
-                .filter(|s| &s.logger == logger && s.summary.date == Some(*date))
+                .filter(|s| s.logger == session.logger && s.summary.date == Some(date))
                 .map(|s| s.path.clone())
                 .collect(),
             _ => vec![pick.path.clone()],
@@ -206,43 +149,9 @@ impl App {
                 "Which track this session was at. Laps, best times and track pages use it.",
             );
             look::body(ui, |ui| {
-                look::label(ui, "Track");
-                // Typing replaces a name picked before (it would be out of sight).
-                if look::text(ui, &mut pick.search, "Search, or type a name", None).changed()
-                    && matches!(pick.choice, Some(Choice::Name(_)))
-                {
-                    pick.choice = None;
-                }
-                for &i in &list {
-                    let t = &lib.tracks[i];
-                    let on = pick.choice == Some(Choice::Track(t.guid.clone()));
-                    if look::option(
-                        ui,
-                        on,
-                        None,
-                        &t.name,
-                        &about(t, &source(t, &lib, &profiles)),
-                    ) {
-                        pick.choice = Some(Choice::Track(t.guid.clone()));
-                    }
-                }
-                if let Some(name) = &free {
-                    let on = pick.choice == Some(Choice::Name(name.clone()));
-                    if look::option(
-                        ui,
-                        on,
-                        None,
-                        &format!("Name it \u{201c}{name}\u{201d}"),
-                        "No track here by that name. If one arrives, you'll be asked.",
-                    ) {
-                        pick.choice = Some(Choice::Name(name.clone()));
-                    }
-                }
-                if list.is_empty() && free.is_none() {
-                    look::note(ui, "No tracks here yet. Type the track's name.", DIM);
-                }
+                pick_options(ui, &mut pick, &lib, &profiles, &list, free.as_deref());
                 if same_day.len() > 1 {
-                    let date = this.1.map(crate::dates::us_short).unwrap_or_default();
+                    let date = date.map(crate::dates::us_short).unwrap_or_default();
                     ui.add_space(8.0);
                     look::label(ui, "Change");
                     if look::option(ui, !pick.whole_day, None, "Just this session", "") {
@@ -282,59 +191,64 @@ impl App {
             } else {
                 vec![pick.path.clone()]
             };
-            let mut failed = None;
-            for p in &targets {
-                let mut m = crate::device::SessionMeta::load(p).unwrap_or_default();
-                match &pick.choice {
-                    Some(Choice::Track(g)) => {
-                        m.track = lib
-                            .tracks
-                            .iter()
-                            .find(|t| &t.guid == g)
-                            .map(|t| t.name.clone())
-                            .unwrap_or_default();
-                        m.track_guid = Some(g.clone());
-                        m.track_declined.clear();
-                    }
-                    Some(Choice::Name(n)) => {
-                        // The tracks here now were passed over: only ones that arrive later are offered.
-                        m.track = n.clone();
-                        m.track_guid = Some(String::new());
-                        m.track_declined = lib
-                            .sessions
-                            .iter()
-                            .find(|s| &s.path == p)
-                            .map(|s| {
-                                lib.around(s)
-                                    .into_iter()
-                                    .map(|(i, _)| lib.tracks[i].guid.clone())
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                    }
-                    None => continue,
-                }
-                if let Err(e) = m.save(p) {
-                    failed = Some(e.to_string());
-                }
-            }
-            log::info!("track set for {} session(s)", targets.len());
-            // Their laps are worked out again against the track now theirs.
-            crate::digest::Digests::forget(&targets);
-            self.sensors.digests = None;
-            self.sensors.digests_asked.clear();
-            if let Some(e) = failed {
-                self.notices.error(format!("Couldn't save the track: {e}"));
-            }
-            self.reload_library();
-            // The open one shows its laps at the track now theirs straight away.
-            if let Some(open) = self.path.clone().filter(|p| targets.contains(p)) {
-                self.act(Action::Reopen(open));
-            }
+            self.save_track_pick(&lib, pick.choice.as_ref(), targets);
             return;
         }
         if open {
             self.track_pick = Some(pick);
+        }
+    }
+
+    /// Saves the track `choice` for the sessions at `targets`, and reads the library again.
+    fn save_track_pick(&mut self, lib: &Library, choice: Option<&Choice>, targets: Vec<PathBuf>) {
+        let mut failed = None;
+        for p in &targets {
+            let mut m = crate::device::SessionMeta::load(p).unwrap_or_default();
+            match choice {
+                Some(Choice::Track(g)) => {
+                    m.track = lib
+                        .tracks
+                        .iter()
+                        .find(|t| &t.guid == g)
+                        .map(|t| t.name.clone())
+                        .unwrap_or_default();
+                    m.track_guid = Some(g.clone());
+                    m.track_declined.clear();
+                }
+                Some(Choice::Name(n)) => {
+                    // The tracks here now were passed over: only ones that arrive later are offered.
+                    m.track = n.clone();
+                    m.track_guid = Some(String::new());
+                    m.track_declined = lib
+                        .sessions
+                        .iter()
+                        .find(|s| &s.path == p)
+                        .map(|s| {
+                            lib.around(s)
+                                .into_iter()
+                                .map(|(i, _)| lib.tracks[i].guid.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                }
+                None => continue,
+            }
+            if let Err(e) = m.save(p) {
+                failed = Some(e.to_string());
+            }
+        }
+        log::info!("track set for {} session(s)", targets.len());
+        // Their laps are worked out again against the track now theirs.
+        crate::digest::Digests::forget(&targets);
+        self.sensors.digests = None;
+        self.sensors.digests_asked.clear();
+        if let Some(e) = failed {
+            self.notices.error(format!("Couldn't save the track: {e}"));
+        }
+        self.reload_library();
+        // The open one shows its laps at the track now theirs straight away.
+        if let Some(open) = self.path.clone().filter(|p| targets.contains(p)) {
+            self.act(Action::Reopen(open));
         }
     }
 
@@ -372,6 +286,243 @@ impl App {
         let Some(mut state) = self.offer_pick.take() else {
             return;
         };
+        let tracks: Vec<usize> = offer.tracks.iter().copied().take(SHOWN).collect();
+        let words = OfferWords::new(lib, &offer, &tracks, &profiles);
+        let (mut later, mut save) = (false, false);
+        let closed = look::dialog(ctx, "track_offer", look::WIDTH, |ui| {
+            use look;
+            look::header(
+                ui,
+                Icon::MapPin,
+                SECONDARY,
+                None,
+                &words.title,
+                &format!("{} {}", words.arrived, words.ask),
+            );
+            look::body(ui, |ui| {
+                offer_options(ui, &mut state, lib, &profiles, &offer, &tracks);
+            });
+            let (l, r) = look::footer(
+                ui,
+                "Not now",
+                (
+                    if words.same_name { "Assign" } else { "Save" },
+                    Some(Icon::Check),
+                    look::Kind::Primary,
+                    true,
+                ),
+            );
+            later = l;
+            save = r;
+        });
+        // Only an answer closes it: a click beside it shouldn't make it vanish.
+        let _ = closed;
+        if later {
+            log::info!(
+                "asked later about {} session(s) named {}",
+                offer.sessions.len(),
+                offer.typed
+            );
+            self.offers_closed.insert(offer.typed.to_lowercase());
+            return;
+        }
+        if !save {
+            self.offer_pick = Some(state);
+            return;
+        }
+        let chosen = state
+            .pick
+            .and_then(|k| tracks.get(k))
+            .map(|&i| (lib.tracks[i].name.clone(), lib.tracks[i].guid.clone()));
+        let offered: Vec<String> = offer
+            .tracks
+            .iter()
+            .map(|&i| lib.tracks[i].guid.clone())
+            .collect();
+        let paths: Vec<PathBuf> = offer
+            .sessions
+            .iter()
+            .map(|&i| lib.sessions[i].path.clone())
+            .collect();
+        self.save_offer(&offer.typed, chosen, &offered, &paths);
+    }
+
+    /// Saves the answer to the offer for sessions named `typed` (at `paths`):
+    /// the track `chosen` (name and guid), or none, and then the tracks
+    /// `offered` aren't offered again. Reads the library again.
+    fn save_offer(
+        &mut self,
+        typed: &str,
+        chosen: Option<(String, String)>,
+        offered: &[String],
+        paths: &[PathBuf],
+    ) {
+        let mut failed = None;
+        for p in paths {
+            let mut m = crate::device::SessionMeta::load(p).unwrap_or_default();
+            match &chosen {
+                Some((name, guid)) => {
+                    m.track = name.clone();
+                    m.track_guid = Some(guid.clone());
+                    m.track_declined.clear();
+                }
+                None => {
+                    for g in offered {
+                        if !m.track_declined.contains(g) {
+                            m.track_declined.push(g.clone());
+                        }
+                    }
+                }
+            }
+            if let Err(e) = m.save(p) {
+                failed = Some(e.to_string());
+            }
+        }
+        if chosen.is_some() {
+            crate::digest::Digests::forget(paths);
+            self.sensors.digests = None;
+            self.sensors.digests_asked.clear();
+        }
+        match &chosen {
+            Some((name, _)) => log::info!(
+                "used track {name} for {} session(s) named {typed}",
+                paths.len()
+            ),
+            None => log::info!("kept {} session(s) named {typed} as they are", paths.len()),
+        }
+        if let Some(e) = failed {
+            self.notices.error(format!("Couldn't save the track: {e}"));
+        }
+        self.reload_library();
+    }
+}
+
+/// The tracks the pick dialog lists for `session`: the tracks here, nearest
+/// first, narrowed to what's typed (closest names first); where the MyChron
+/// didn't place the session, your own tracks, ones you've raced and
+/// favorites. The current pick stays in view. Also the name of your own it
+/// offers: the one typed, when no track has it, or the session's current one.
+fn pick_choices(
+    lib: &Library,
+    session: &tracks::LocalSession,
+    pick: &TrackPick,
+    favorites: &crate::tracks::Favorites,
+) -> (Vec<usize>, Option<String>) {
+    let around = lib.around(session);
+    let distance = |i: usize| around.iter().find(|(j, _)| *j == i).map(|(_, d)| *d);
+    let search = pick.search.trim().to_string();
+    let pool: Vec<usize> = if session.place().is_some() {
+        around.iter().map(|(i, _)| *i).collect()
+    } else {
+        (0..lib.tracks.len())
+            .filter(|&i| {
+                lib.tracks[i].kind == Kind::Custom
+                    || !lib.tracks[i].sessions.is_empty()
+                    || favorites.contains(&lib.tracks[i].guid)
+            })
+            .collect()
+    };
+    let mut list: Vec<(usize, u8)> = pool
+        .into_iter()
+        .filter_map(|i| {
+            if search.is_empty() {
+                Some((i, 0))
+            } else {
+                name_match(&search, &lib.tracks[i]).map(|q| (i, q))
+            }
+        })
+        .collect();
+    list.sort_by(|a, b| {
+        a.1.cmp(&b.1).then(
+            distance(a.0)
+                .unwrap_or(f64::MAX)
+                .total_cmp(&distance(b.0).unwrap_or(f64::MAX)),
+        )
+    });
+    let exact = list.iter().any(|&(_, q)| q == 0) && !search.is_empty();
+    let mut list: Vec<usize> = list.into_iter().map(|(i, _)| i).collect();
+    let free = match &pick.choice {
+        _ if !search.is_empty() => (!exact).then(|| search.clone()),
+        Some(Choice::Name(n)) => Some(n.clone()),
+        _ => None,
+    };
+    let free_row = free.is_some();
+    list.truncate(SHOWN - usize::from(free_row));
+    if let Some(Choice::Track(g)) = &pick.choice
+        && let Some(i) = lib
+            .tracks
+            .iter()
+            .position(|t| &t.guid == g)
+            .filter(|i| !list.contains(i))
+    {
+        if list.len() >= SHOWN - usize::from(free_row) {
+            list.pop();
+        }
+        list.insert(0, i);
+    }
+    (list, free)
+}
+
+/// The pick dialog's search field and choices: the tracks `list`ed, and the
+/// name of your own (`free`), when there's one to offer.
+fn pick_options(
+    ui: &mut Ui,
+    pick: &mut TrackPick,
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    list: &[usize],
+    free: Option<&str>,
+) {
+    look::label(ui, "Track");
+    // Typing replaces a name picked before (it would be out of sight).
+    if look::text(ui, &mut pick.search, "Search, or type a name", None).changed()
+        && matches!(pick.choice, Some(Choice::Name(_)))
+    {
+        pick.choice = None;
+    }
+    for &i in list {
+        let t = &lib.tracks[i];
+        let on = pick.choice == Some(Choice::Track(t.guid.clone()));
+        if look::option(ui, on, None, &t.name, &about(t, &source(t, lib, profiles))) {
+            pick.choice = Some(Choice::Track(t.guid.clone()));
+        }
+    }
+    if let Some(name) = free {
+        let on = pick.choice == Some(Choice::Name(name.to_string()));
+        if look::option(
+            ui,
+            on,
+            None,
+            &format!("Name it \u{201c}{name}\u{201d}"),
+            "No track here by that name. If one arrives, you'll be asked.",
+        ) {
+            pick.choice = Some(Choice::Name(name.to_string()));
+        }
+    }
+    if list.is_empty() && free.is_none() {
+        look::note(ui, "No tracks here yet. Type the track's name.", DIM);
+    }
+}
+
+/// What a track offer says: its title, how the track arrived, and the question.
+struct OfferWords {
+    title: String,
+    arrived: String,
+    ask: String,
+    /// Whether the best guess has the name you typed (then it's a yes or no,
+    /// else a choice).
+    same_name: bool,
+}
+
+impl OfferWords {
+    /// In plain words: where the best guess (the first of `tracks`) came
+    /// from, and whether its name is the one you typed.
+    fn new(
+        lib: &Library,
+        offer: &crate::tracks::TrackOffer,
+        tracks: &[usize],
+        profiles: &crate::profiles::Profiles,
+    ) -> Self {
         let n = offer.sessions.len();
         let mut days: Vec<aim_xrk::summary::Date> = offer
             .sessions
@@ -389,12 +540,8 @@ impl App {
             (Some(a), _) => format!(" on {}", crate::dates::us_short(*a)),
             _ => String::new(),
         };
-        let tracks: Vec<usize> = offer.tracks.iter().copied().take(SHOWN).collect();
-        let (mut later, mut save) = (false, false);
-        // Plain words: where the best guess came from, and whether its name
-        // is the one you typed (then it's a yes or no), or not (then a choice).
         let lead = &lib.tracks[tracks[0]];
-        let from = source(lead, lib, &profiles);
+        let from = source(lead, lib, profiles);
         let same_name = name_match(&offer.typed, lead).is_some_and(|q| q <= 1);
         let them = if n == 1 {
             "a session".to_string()
@@ -445,136 +592,58 @@ impl App {
                 if n == 1 { "it is" } else { "they are" }
             )
         };
-        let closed = look::dialog(ctx, "track_offer", look::WIDTH, |ui| {
-            use look;
-            look::header(
-                ui,
-                Icon::MapPin,
-                SECONDARY,
-                None,
-                &title,
-                &format!("{arrived} {ask}"),
-            );
-            look::body(ui, |ui| {
-                for (k, &i) in tracks.iter().enumerate() {
-                    let t = &lib.tracks[i];
-                    if look::option(
-                        ui,
-                        state.pick == Some(k),
-                        None,
-                        &t.name,
-                        &about(t, &source(t, lib, &profiles)),
-                    ) {
-                        state.pick = Some(k);
-                    }
-                }
-                let keep = format!(
-                    "{} the name \u{201c}{}\u{201d}, and {} offered again.",
-                    if n == 1 { "It keeps" } else { "They keep" },
-                    offer.typed,
-                    if tracks.len() == 1 {
-                        "this track isn't"
-                    } else {
-                        "these tracks aren't"
-                    }
-                );
-                if look::option(
-                    ui,
-                    state.pick.is_none(),
-                    None,
-                    if n == 1 {
-                        "Keep it as it is"
-                    } else {
-                        "Keep them as they are"
-                    },
-                    &keep,
-                ) {
-                    state.pick = None;
-                }
-            });
-            let (l, r) = look::footer(
-                ui,
-                "Not now",
-                (
-                    if same_name { "Assign" } else { "Save" },
-                    Some(Icon::Check),
-                    look::Kind::Primary,
-                    true,
-                ),
-            );
-            later = l;
-            save = r;
-        });
-        // Only an answer closes it: a click beside it shouldn't make it vanish.
-        let _ = closed;
-        if later {
-            log::info!(
-                "asked later about {} session(s) named {}",
-                offer.sessions.len(),
-                offer.typed
-            );
-            self.offers_closed.insert(offer.typed.to_lowercase());
-            return;
+        Self {
+            title,
+            arrived,
+            ask,
+            same_name,
         }
-        if !save {
-            self.offer_pick = Some(state);
-            return;
+    }
+}
+
+/// The offer's choices: each of its `tracks`, or keeping the sessions as they are.
+fn offer_options(
+    ui: &mut Ui,
+    state: &mut OfferPick,
+    lib: &Library,
+    profiles: &crate::profiles::Profiles,
+    offer: &crate::tracks::TrackOffer,
+    tracks: &[usize],
+) {
+    let n = offer.sessions.len();
+    for (k, &i) in tracks.iter().enumerate() {
+        let t = &lib.tracks[i];
+        if look::option(
+            ui,
+            state.pick == Some(k),
+            None,
+            &t.name,
+            &about(t, &source(t, lib, profiles)),
+        ) {
+            state.pick = Some(k);
         }
-        let chosen = state
-            .pick
-            .and_then(|k| tracks.get(k))
-            .map(|&i| (lib.tracks[i].name.clone(), lib.tracks[i].guid.clone()));
-        let offered: Vec<String> = offer
-            .tracks
-            .iter()
-            .map(|&i| lib.tracks[i].guid.clone())
-            .collect();
-        let paths: Vec<PathBuf> = offer
-            .sessions
-            .iter()
-            .map(|&i| lib.sessions[i].path.clone())
-            .collect();
-        let mut failed = None;
-        for p in &paths {
-            let mut m = crate::device::SessionMeta::load(p).unwrap_or_default();
-            match &chosen {
-                Some((name, guid)) => {
-                    m.track = name.clone();
-                    m.track_guid = Some(guid.clone());
-                    m.track_declined.clear();
-                }
-                None => {
-                    for g in &offered {
-                        if !m.track_declined.contains(g) {
-                            m.track_declined.push(g.clone());
-                        }
-                    }
-                }
-            }
-            if let Err(e) = m.save(p) {
-                failed = Some(e.to_string());
-            }
+    }
+    let keep = format!(
+        "{} the name \u{201c}{}\u{201d}, and {} offered again.",
+        if n == 1 { "It keeps" } else { "They keep" },
+        offer.typed,
+        if tracks.len() == 1 {
+            "this track isn't"
+        } else {
+            "these tracks aren't"
         }
-        if chosen.is_some() {
-            crate::digest::Digests::forget(&paths);
-            self.sensors.digests = None;
-            self.sensors.digests_asked.clear();
-        }
-        match &chosen {
-            Some((name, _)) => log::info!(
-                "used track {name} for {} session(s) named {}",
-                paths.len(),
-                offer.typed
-            ),
-            None => log::info!(
-                "kept {} session(s) named {} as they are",
-                paths.len(),
-                offer.typed
-            ),
-        }
-        if let Some(e) = failed {
-            self.notices.error(format!("Couldn't save the track: {e}"));
-        }
-        self.reload_library();
+    );
+    if look::option(
+        ui,
+        state.pick.is_none(),
+        None,
+        if n == 1 {
+            "Keep it as it is"
+        } else {
+            "Keep them as they are"
+        },
+        &keep,
+    ) {
+        state.pick = None;
     }
 }

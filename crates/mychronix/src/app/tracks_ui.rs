@@ -172,7 +172,36 @@ impl App {
             .favorites
             .get_or_insert_with(tracks::Favorites::load)
             .clone();
-        // Tabs.
+        self.track_tabs(ui, lib, &favorites);
+        ui.add_space(8.0);
+        search_field(
+            ui,
+            &mut self.track_page.filter,
+            "Search tracks, cities, regions",
+        );
+        ui.add_space(8.0);
+
+        let needle = self.track_page.filter.to_lowercase();
+        let searching = !needle.is_empty();
+        let (rows, system_header) = self.track_rows(lib, &favorites, &needle);
+        let input = self.track_rows_draw(ui, lib, &rows, system_header, searching, &favorites);
+        if rows.is_empty() {
+            let msg = match self.track_page.view {
+                TrackView::Favorites if !searching => {
+                    "No favorites yet. Star a track to keep it here."
+                }
+                TrackView::Custom if !searching => {
+                    "No custom tracks yet. They come over from your MyChron when you connect."
+                }
+                _ => "No tracks match.",
+            };
+            ui.label(RichText::new(msg).color(DIM));
+        }
+        self.track_list_apply(lib, input);
+    }
+
+    /// The tabs over the track list: all, favorites, custom and raced, with how many of each.
+    fn track_tabs(&mut self, ui: &mut Ui, lib: &Library, favorites: &tracks::Favorites) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let count =
@@ -206,15 +235,16 @@ impl App {
                 }
             }
         });
-        ui.add_space(8.0);
-        search_field(
-            ui,
-            &mut self.track_page.filter,
-            "Search tracks, cities, regions",
-        );
-        ui.add_space(8.0);
+    }
 
-        let needle = self.track_page.filter.to_lowercase();
+    /// The track list's rows for the tab picked and what's typed (see
+    /// [`list_rows`]), and the system country's header row.
+    fn track_rows(
+        &mut self,
+        lib: &Library,
+        favorites: &tracks::Favorites,
+        needle: &str,
+    ) -> (Vec<Row>, Option<usize>) {
         let searching = !needle.is_empty();
         let in_view = |t: &tracks::Track| match self.track_page.view {
             TrackView::All => true,
@@ -222,7 +252,7 @@ impl App {
             TrackView::Custom => t.kind == Kind::Custom,
             TrackView::Raced => !t.sessions.is_empty(),
         };
-        let matches = |t: &tracks::Track| in_view(t) && (!searching || t.search.contains(&needle));
+        let matches = |t: &tracks::Track| in_view(t) && (!searching || t.search.contains(needle));
         let by_name = |a: &usize, b: &usize| lib.tracks[*a].sort_key.cmp(&lib.tracks[*b].sort_key);
 
         let system = crate::countries::system_country();
@@ -242,16 +272,27 @@ impl App {
             .filter(|(_, t)| matches(t))
             .map(|(i, t)| (i, t.country.as_str()))
             .collect();
-        let (rows, system_header) = list_rows(
+        list_rows(
             shown,
             by_name,
             grouped,
             &self.track_page.groups_open,
             searching,
             system.as_deref(),
-        );
+        )
+    }
 
-        // Variable-height rows, drawn only where visible.
+    /// The track list's rows, of two heights, drawn only where visible (and
+    /// scrolled to the system country the first time). Returns what was clicked.
+    fn track_rows_draw(
+        &mut self,
+        ui: &mut Ui,
+        lib: &Library,
+        rows: &[Row],
+        system_header: Option<usize>,
+        searching: bool,
+        favorites: &tracks::Favorites,
+    ) -> TrackListInput {
         let heights: Vec<f32> = rows
             .iter()
             .map(|r| {
@@ -280,9 +321,7 @@ impl App {
             self.track_page.list_ready = true;
         }
 
-        let mut clicked = None;
-        let mut toggled = None;
-        let mut starred = None;
+        let mut input = TrackListInput::default();
         scroll.show_viewport(ui, |ui, viewport| {
             let full = ui.max_rect();
             ui.set_height(total);
@@ -299,44 +338,11 @@ impl App {
                 if response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                let p = ui.painter();
                 match &rows[k] {
                     Row::Header(code, label, count, open) => {
-                        if response.hovered() {
-                            p.rect_filled(
-                                rect.shrink2(vec2(0.0, 3.0)),
-                                CornerRadius::same(theme::RADIUS_SMALL + 2),
-                                SURFACE_HOVER,
-                            );
-                        }
-                        let chevron = if *open {
-                            Icon::ChevronDown
-                        } else {
-                            Icon::ChevronRight
-                        };
-                        chevron.image(SECONDARY, 16.0).paint_at(
-                            ui,
-                            Rect::from_center_size(
-                                pos2(rect.left() + 16.0, rect.center().y),
-                                Vec2::splat(16.0),
-                            ),
-                        );
-                        p.text(
-                            pos2(rect.left() + 32.0, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            label,
-                            semibold(14.5),
-                            TEXT,
-                        );
-                        p.text(
-                            pos2(rect.right() - 12.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            group_thousands(*count),
-                            regular(12.5),
-                            DIM,
-                        );
+                        header_row(ui, rect, &response, label, *count, *open);
                         if response.clicked() && !searching {
-                            toggled = Some(code.clone());
+                            input.toggled = Some(code.clone());
                         }
                     }
                     Row::Track(i) => {
@@ -349,42 +355,35 @@ impl App {
                             k,
                             self.track_page.sel == Some(*i),
                             self.track_page.view,
-                            &favorites,
+                            favorites,
                         );
                         if open {
-                            clicked = Some(*i);
+                            input.open = Some(*i);
                         }
                         if star {
-                            starred = Some(lib.tracks[*i].guid.clone());
+                            input.starred = Some(lib.tracks[*i].guid.clone());
                         }
                     }
                 }
             }
         });
-        if rows.is_empty() {
-            let msg = match self.track_page.view {
-                TrackView::Favorites if !searching => {
-                    "No favorites yet. Star a track to keep it here."
-                }
-                TrackView::Custom if !searching => {
-                    "No custom tracks yet. They come over from your MyChron when you connect."
-                }
-                _ => "No tracks match.",
-            };
-            ui.label(RichText::new(msg).color(DIM));
-        }
-        if let Some(code) = toggled
+        input
+    }
+
+    /// What was clicked in the track list, applied once it's drawn.
+    fn track_list_apply(&mut self, lib: &Library, input: TrackListInput) {
+        if let Some(code) = input.toggled
             && !self.track_page.groups_open.remove(&code)
         {
             self.track_page.groups_open.insert(code);
         }
-        if let Some(guid) = starred
+        if let Some(guid) = input.starred
             && let Some(f) = self.track_page.favorites.as_mut()
             && let Err(e) = f.toggle(&guid)
         {
             self.notices.error(format!("Couldn't save favorites: {e}"));
         }
-        if let Some(i) = clicked {
+        if let Some(i) = input.open {
             self.select_track(lib, i);
         }
     }
@@ -509,45 +508,7 @@ impl App {
                         ui.label(RichText::new(comment).size(13.0).color(SECONDARY));
                     }
                     // Everything AiM stores for the track, verbatim.
-                    egui::CollapsingHeader::new(
-                        RichText::new("All AiM fields").size(13.0).color(SECONDARY),
-                    )
-                    .id_salt(("aim_fields", i))
-                    .show(ui, |ui| {
-                        egui::Grid::new(("aim_fields_grid", i))
-                            .num_columns(2)
-                            .spacing([16.0, 4.0])
-                            .show(ui, |ui| {
-                                let mut row = |k: &str, v: String| {
-                                    ui.label(RichText::new(k).size(12.5).color(DIM));
-                                    ui.label(RichText::new(v).size(12.5).color(TEXT));
-                                    ui.end_row();
-                                };
-                                row("AiM id", t.id.clone());
-                                row("Track guid", t.guid.clone());
-                                if let Some(l) = t.length_m {
-                                    row(
-                                        "Length",
-                                        if crate::units::imperial() {
-                                            format!(
-                                                "{:.0} ft ({:.2} mi)",
-                                                crate::units::distance(l as f64),
-                                                l / 1609.344
-                                            )
-                                        } else {
-                                            format!("{l:.0} m ({:.2} km)", l / 1000.0)
-                                        },
-                                    );
-                                }
-                                row("Type", t.track_kind.label());
-                                if let Some(f) = file {
-                                    row("Outline", format!("{} points", f.outline.len()));
-                                }
-                                for (k, v) in info.map(|i| i.fields.clone()).unwrap_or_default() {
-                                    row(&k, v);
-                                }
-                            });
-                    });
+                    aim_fields(ui, t, i, file);
                 });
                 if let Some(png) = file.and_then(|f| f.logo_png.clone()) {
                     ui.add(
@@ -562,115 +523,32 @@ impl App {
 
     /// The map: streets or satellite, with the track, your lap, its splits or its elevation on top.
     fn track_detail_map(&mut self, ui: &mut Ui, lib: &Library, i: usize, map_h: f32) {
-        let t = &lib.tracks[i];
-        let file = self
-            .track_page
-            .file
-            .as_ref()
-            .filter(|(j, _)| *j == i)
-            .map(|(_, f)| f);
-        // The track file's own start/finish, read on selection (AiM tracks' come with the details).
-        let start_finish = file.and_then(|f| f.start_finish).or(t.start_finish);
-        // Map: OpenStreetMap with the track drawn on top.
-        let file_outline = self
-            .track_page
-            .file
-            .as_ref()
-            .filter(|(j, _)| *j == i)
-            .map(|(_, f)| f.outline.clone())
-            .unwrap_or_default();
-        let outline: Vec<aim_track::LatLon> = if !t.outline.is_empty() {
-            t.outline.clone()
-        } else {
-            file_outline
-        };
-        let lap = self
-            .track_page
-            .speed_laps
-            .get(&t.guid)
-            .and_then(Option::as_ref);
-
+        let pick = TrackMapPick::new(
+            &lib.tracks[i],
+            i,
+            self.track_page.file.as_ref(),
+            &self.track_page.speed_laps,
+        );
         // Speed / splits / outline switch, when there's a lap to show.
         if self.track_page.split_count < 2 {
             self.track_page.split_count = 3;
         }
-        // Elevation comes with the track file's outline (every AiM track has it).
-        let elevation: Vec<f32> = self
-            .track_page
-            .file
-            .as_ref()
-            .filter(|(j, f)| *j == i && f.elevation_m.len() == outline.len())
-            .map(|(_, f)| f.elevation_m.clone())
-            .unwrap_or_default();
-        let mut modes = Vec::new();
-        if lap.is_some() {
-            modes.extend([(MapMode::Speed, "Your speed"), (MapMode::Splits, "Splits")]);
-        }
-        if !elevation.is_empty() {
-            modes.push((MapMode::Elevation, "Elevation"));
-        }
-        modes.push((MapMode::Outline, "Outline"));
-        if !modes.iter().any(|(m, _)| *m == self.track_page.map) {
+        if !pick.modes.iter().any(|(m, _)| *m == self.track_page.map) {
             // e.g. Your speed on a track you haven't raced: fall back to what this track has.
-            self.track_page.map = modes[0].0;
+            self.track_page.map = pick.modes[0].0;
         }
-        if modes.len() > 1 {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                for (mode, label) in &modes {
-                    if chip(ui, label, self.track_page.map == *mode).clicked() {
-                        self.track_page.map = *mode;
-                    }
-                }
-                if self.track_page.map == MapMode::Splits {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        for n in (2..=6).rev() {
-                            if chip(ui, &n.to_string(), self.track_page.split_count == n).clicked()
-                            {
-                                self.track_page.split_count = n;
-                            }
-                        }
-                        ui.label(RichText::new("Sectors").size(12.5).color(DIM));
-                    });
-                }
-            });
+        if pick.modes.len() > 1 {
+            map_modes(
+                ui,
+                &pick.modes,
+                &mut self.track_page.map,
+                &mut self.track_page.split_count,
+            );
             ui.add_space(8.0);
         }
         let mode = self.track_page.map;
-        let show_speed = mode == MapMode::Speed;
-        // Splits are placed along the track's own outline when it has one, else along your lap.
-        let sectors = (mode == MapMode::Splits)
-            .then(|| {
-                let reference = if !outline.is_empty() {
-                    outline.clone()
-                } else {
-                    lap.map(|l| l.points.clone()).unwrap_or_default()
-                };
-                splits::Sectors::even(&reference, start_finish, self.track_page.split_count)
-            })
-            .flatten();
-        let overlay = TrackOverlay {
-            outline: if mode == MapMode::Outline {
-                if !outline.is_empty() {
-                    outline.clone()
-                } else {
-                    lap.map(|l| l.points.clone()).unwrap_or_default()
-                }
-            } else {
-                Vec::new()
-            },
-            outline_color: if t.kind == Kind::Custom {
-                SERIES[1]
-            } else {
-                SERIES[0]
-            },
-            speed: show_speed.then(|| lap.cloned()).flatten(),
-            sectors: sectors
-                .as_ref()
-                .map(|s| (s.path.clone(), s.boundaries.clone())),
-            elevation: (mode == MapMode::Elevation).then(|| (outline.clone(), elevation.clone())),
-            start_finish,
-        };
+        let sectors = pick.sectors(mode, self.track_page.split_count);
+        let overlay = pick.overlay(mode, sectors.as_ref());
 
         tiles(
             &mut self.map_tiles,
@@ -678,68 +556,34 @@ impl App {
             ui.ctx(),
             self.track_page.satellite,
         );
-        let center = start_finish
-            .or(t.center)
+        let center = pick
+            .start_finish
+            .or(pick.track.center)
             .map(|p| walkers::lat_lon(p.lat, p.lon))
             .unwrap_or(walkers::lat_lon(0.0, 0.0));
         // Zoom to fit the drawn track once per selection.
         if std::mem::take(&mut self.track_page.fit_map) {
-            let drawn: Vec<aim_track::LatLon> =
-                match (&overlay.speed, &overlay.sectors, &overlay.elevation) {
-                    (Some(l), _, _) => l.points.clone(),
-                    (None, Some((path, _)), _) => path.clone(),
-                    (None, None, Some((path, _))) => path.clone(),
-                    _ => overlay.outline.clone(),
-                };
-            if let Some((c, zoom)) = fit_view(&drawn, vec2(ui.available_width(), map_h)) {
-                self.track_page
-                    .map_memory
-                    .center_at(walkers::lat_lon(c.lat, c.lon));
-                let _ = self.track_page.map_memory.set_zoom(zoom);
-            }
+            fit_drawn(
+                &mut self.track_page.map_memory,
+                &overlay,
+                vec2(ui.available_width(), map_h),
+            );
         }
-        let mut toggle = false;
-        Frame::new()
-            .corner_radius(CornerRadius::same(theme::RADIUS))
-            .fill(SURFACE)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.set_height(map_h);
-                let tiles: &mut walkers::HttpTiles = if self.track_page.satellite {
-                    self.sat_tiles.as_mut().unwrap()
-                } else {
-                    self.map_tiles.as_mut().unwrap()
-                };
-                // The wheel scrolls the page past the map; Ctrl + wheel zooms it.
-                let map = ui.add(
-                    walkers::Map::new(shown(tiles), &mut self.track_page.map_memory, center)
-                        .panning(false)
-                        .with_plugin(overlay),
-                );
-                // Map / Satellite switch in the map's top-right corner.
-                let corner = Rect::from_min_size(
-                    map.rect.right_top() + vec2(-190.0, 10.0),
-                    vec2(180.0, 36.0),
-                );
-                ui.scope_builder(
-                    egui::UiBuilder::new()
-                        .max_rect(corner)
-                        .layout(Layout::right_to_left(Align::Center)),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        if chip(ui, "Satellite", self.track_page.satellite).clicked()
-                            && !self.track_page.satellite
-                        {
-                            toggle = true;
-                        }
-                        if chip(ui, "Map", !self.track_page.satellite).clicked()
-                            && self.track_page.satellite
-                        {
-                            toggle = true;
-                        }
-                    },
-                );
-            });
+        let satellite = self.track_page.satellite;
+        let tiles: &mut walkers::HttpTiles = if satellite {
+            self.sat_tiles.as_mut().unwrap()
+        } else {
+            self.map_tiles.as_mut().unwrap()
+        };
+        let toggle = map_frame(
+            ui,
+            tiles,
+            &mut self.track_page.map_memory,
+            center,
+            overlay,
+            satellite,
+            map_h,
+        );
         if toggle {
             self.track_page.satellite = !self.track_page.satellite;
         }
@@ -754,117 +598,9 @@ impl App {
         } else {
             credit.to_string()
         };
-        let credit = credit.as_str();
 
         ui.add_space(6.0);
-        match (mode, lap) {
-            (MapMode::Speed, Some(lap)) => {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("{:.0}", crate::units::speed(lap.min_kmh)))
-                            .size(12.0)
-                            .color(DIM),
-                    );
-                    let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
-                    for k in 0..40 {
-                        let r = Rect::from_min_size(
-                            pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()),
-                            vec2(bar.width() / 40.0 + 0.5, bar.height()),
-                        );
-                        ui.painter()
-                            .rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
-                    }
-                    ui.label(
-                        RichText::new(format!(
-                            "{:.0} {}",
-                            crate::units::speed(lap.max_kmh),
-                            crate::units::speed_unit()
-                        ))
-                        .size(12.0)
-                        .color(DIM),
-                    );
-                    ui.add_space(14.0);
-                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                    ui.painter().circle_filled(dot.center(), 8.0, TEXT);
-                    ui.painter().text(
-                        dot.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "1",
-                        semibold(10.5),
-                        ON_TEXT,
-                    );
-                    ui.label(
-                        RichText::new(
-                            "Corners, at their slowest point (numbered as in Analysis → Corners)",
-                        )
-                        .size(12.0)
-                        .color(DIM),
-                    );
-                });
-                ui.label(
-                    RichText::new(format!("{}  {credit}", lap.source))
-                        .size(11.5)
-                        .color(DIM),
-                );
-            }
-            (MapMode::Splits, Some(lap)) => {
-                if let Some(sec) = &sectors {
-                    ui.horizontal(|ui| {
-                        for k in 0..sec.count() {
-                            let (sw, _) = ui.allocate_exact_size(vec2(18.0, 10.0), Sense::hover());
-                            ui.painter().line_segment(
-                                [sw.left_center(), sw.right_center()],
-                                Stroke::new(4.0, SERIES[k % SERIES.len()]),
-                            );
-                            ui.label(
-                                RichText::new(format!("S{}", k + 1))
-                                    .size(12.5)
-                                    .color(SECONDARY),
-                            );
-                            ui.add_space(6.0);
-                        }
-                    });
-                }
-                ui.label(
-                    RichText::new(format!("Splits placed by Mychronix at equal distances from the start/finish, timed from your GPS.  {credit}"))
-                        .size(11.5)
-                        .color(DIM),
-                );
-                ui.add_space(10.0);
-                if let Some(sec) = &sectors {
-                    split_table(ui, lap, sec);
-                }
-            }
-            (MapMode::Elevation, _) => {
-                let (lo, hi) = elevation
-                    .iter()
-                    .fold((f32::MAX, f32::MIN), |(a, b), &e| (a.min(e), b.max(e)));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{lo:.0}")).size(12.0).color(DIM));
-                    let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
-                    for k in 0..40 {
-                        let r = Rect::from_min_size(pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()), vec2(bar.width() / 40.0 + 0.5, bar.height()));
-                        ui.painter().rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
-                    }
-                    ui.label(RichText::new(format!("{:.0} {u} above sea level  ·  {:.0} {u} between lowest and highest point", crate::units::distance(hi as f64), crate::units::distance((hi - lo) as f64), u = crate::units::distance_unit())).size(12.0).color(DIM));
-                });
-                ui.label(RichText::new(format!("Elevation from AiM's track file, as in RaceStudio's track preview.  {credit}")).size(11.5).color(DIM));
-            }
-            _ => {
-                let note = if outline.is_empty() {
-                    "AiM tracks give the start/finish only; record a session here to see the shape."
-                } else if t.kind == Kind::Custom {
-                    "Outline from the custom track file."
-                } else {
-                    "Outline from AiM's track file."
-                };
-                ui.label(
-                    RichText::new(format!("{note}  {credit}"))
-                        .size(11.5)
-                        .color(DIM),
-                );
-            }
-        }
+        pick.legend(ui, mode, sectors.as_ref(), &credit);
     }
 
     /// Sessions recorded at the track, everyone's or one driver's.
@@ -946,66 +682,7 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for &(si, driver) in &shown {
                     let s = &lib.sessions[si];
-                    let sum = &s.summary;
-                    let (rect, response) =
-                        ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
-                    if ui.is_rect_visible(rect) {
-                        let p = ui.painter();
-                        if response.hovered() {
-                            p.rect_filled(
-                                rect,
-                                CornerRadius::same(theme::RADIUS_SMALL + 2),
-                                SURFACE_HOVER,
-                            );
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
-                        let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
-                        p.text(
-                            pos2(l, top),
-                            egui::Align2::LEFT_CENTER,
-                            format!("Session {}", sum.number.unwrap_or(0)),
-                            medium(14.0),
-                            TEXT,
-                        );
-                        let who = Some(driver.to_string()).filter(|d| !d.is_empty());
-                        let when = [
-                            who,
-                            sum.date.map(crate::dates::us_short),
-                            sum.start_time.as_deref().map(crate::dates::clock_time),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join("  ·  ");
-                        p.text(
-                            pos2(l, bottom),
-                            egui::Align2::LEFT_CENTER,
-                            when,
-                            regular(12.5),
-                            DIM,
-                        );
-                        let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
-                        let best = sum
-                            .best_lap_ms
-                            .map(|b| format_lap_time(b as i64))
-                            .unwrap_or_else(|| "—".into());
-                        p.text(
-                            pos2(r, top),
-                            egui::Align2::RIGHT_CENTER,
-                            best,
-                            medium(14.0),
-                            if is_best { theme::GOOD } else { TEXT },
-                        );
-                        let laps = sum.laps.unwrap_or(0);
-                        p.text(
-                            pos2(r, bottom),
-                            egui::Align2::RIGHT_CENTER,
-                            plural(laps as usize, "lap"),
-                            regular(12.5),
-                            DIM,
-                        );
-                    }
+                    let response = track_session_row(ui, s, driver, track_best);
                     if response.clicked() {
                         open = Some(s.path.clone());
                     }
@@ -1019,6 +696,483 @@ impl App {
             self.act(Action::Open(path));
         }
     }
+}
+
+/// Everything AiM stores for track `i` (`t`, its file read on selection), in a
+/// collapsed list.
+fn aim_fields(ui: &mut Ui, t: &tracks::Track, i: usize, file: Option<&aim_track::TrackFile>) {
+    egui::CollapsingHeader::new(RichText::new("All AiM fields").size(13.0).color(SECONDARY))
+        .id_salt(("aim_fields", i))
+        .show(ui, |ui| {
+            egui::Grid::new(("aim_fields_grid", i))
+                .num_columns(2)
+                .spacing([16.0, 4.0])
+                .show(ui, |ui| {
+                    let mut row = |k: &str, v: String| {
+                        ui.label(RichText::new(k).size(12.5).color(DIM));
+                        ui.label(RichText::new(v).size(12.5).color(TEXT));
+                        ui.end_row();
+                    };
+                    row("AiM id", t.id.clone());
+                    row("Track guid", t.guid.clone());
+                    if let Some(l) = t.length_m {
+                        row(
+                            "Length",
+                            if crate::units::imperial() {
+                                format!(
+                                    "{:.0} ft ({:.2} mi)",
+                                    crate::units::distance(l as f64),
+                                    l / 1609.344
+                                )
+                            } else {
+                                format!("{l:.0} m ({:.2} km)", l / 1000.0)
+                            },
+                        );
+                    }
+                    row("Type", t.track_kind.label());
+                    if let Some(f) = file {
+                        row("Outline", format!("{} points", f.outline.len()));
+                    }
+                    for (k, v) in file.map(|f| f.info.fields.clone()).unwrap_or_default() {
+                        row(&k, v);
+                    }
+                });
+        });
+}
+
+/// What the Tracks map can show for a track: its outline and elevation, your
+/// fastest lap there, its start/finish, and the views these make possible.
+struct TrackMapPick<'a> {
+    track: &'a tracks::Track,
+    start_finish: Option<aim_track::LatLon>,
+    outline: Vec<aim_track::LatLon>,
+    /// Meters above sea level at each point of the outline (empty without them).
+    elevation: Vec<f32>,
+    lap: Option<&'a SpeedLap>,
+    modes: Vec<(MapMode, &'static str)>,
+}
+
+impl<'a> TrackMapPick<'a> {
+    /// Track `i`, with the track file read on selection (`file`, when it's this one's).
+    fn new(
+        track: &'a tracks::Track,
+        i: usize,
+        file: Option<&'a (usize, aim_track::TrackFile)>,
+        speed_laps: &'a std::collections::HashMap<String, Option<SpeedLap>>,
+    ) -> Self {
+        let file = file.filter(|(j, _)| *j == i).map(|(_, f)| f);
+        // The track file's own start/finish, read on selection (AiM tracks' come with the details).
+        let start_finish = file.and_then(|f| f.start_finish).or(track.start_finish);
+        let outline: Vec<aim_track::LatLon> = if !track.outline.is_empty() {
+            track.outline.clone()
+        } else {
+            file.map(|f| f.outline.clone()).unwrap_or_default()
+        };
+        let lap = speed_laps.get(&track.guid).and_then(Option::as_ref);
+        // Elevation comes with the track file's outline (every AiM track has it).
+        let elevation: Vec<f32> = file
+            .filter(|f| f.elevation_m.len() == outline.len())
+            .map(|f| f.elevation_m.clone())
+            .unwrap_or_default();
+        let mut modes = Vec::new();
+        if lap.is_some() {
+            modes.extend([(MapMode::Speed, "Your speed"), (MapMode::Splits, "Splits")]);
+        }
+        if !elevation.is_empty() {
+            modes.push((MapMode::Elevation, "Elevation"));
+        }
+        modes.push((MapMode::Outline, "Outline"));
+        Self {
+            track,
+            start_finish,
+            outline,
+            elevation,
+            lap,
+            modes,
+        }
+    }
+
+    /// The track's own outline, or without one, your lap's path.
+    fn outline_or_lap(&self) -> Vec<aim_track::LatLon> {
+        if !self.outline.is_empty() {
+            self.outline.clone()
+        } else {
+            self.lap.map(|l| l.points.clone()).unwrap_or_default()
+        }
+    }
+
+    /// On the Splits view, `count` sectors of equal length from the start/finish.
+    fn sectors(&self, mode: MapMode, count: usize) -> Option<splits::Sectors> {
+        // Splits are placed along the track's own outline when it has one, else along your lap.
+        (mode == MapMode::Splits)
+            .then(|| splits::Sectors::even(&self.outline_or_lap(), self.start_finish, count))
+            .flatten()
+    }
+
+    /// What the map draws on top for the view `mode`.
+    fn overlay(&self, mode: MapMode, sectors: Option<&splits::Sectors>) -> TrackOverlay {
+        TrackOverlay {
+            outline: if mode == MapMode::Outline {
+                self.outline_or_lap()
+            } else {
+                Vec::new()
+            },
+            outline_color: if self.track.kind == Kind::Custom {
+                SERIES[1]
+            } else {
+                SERIES[0]
+            },
+            speed: (mode == MapMode::Speed)
+                .then(|| self.lap.cloned())
+                .flatten(),
+            sectors: sectors.map(|s| (s.path.clone(), s.boundaries.clone())),
+            elevation: (mode == MapMode::Elevation)
+                .then(|| (self.outline.clone(), self.elevation.clone())),
+            start_finish: self.start_finish,
+        }
+    }
+
+    /// Under the map: the key to what it shows, where it came from, and the map's `credit`.
+    fn legend(&self, ui: &mut Ui, mode: MapMode, sectors: Option<&splits::Sectors>, credit: &str) {
+        match (mode, self.lap) {
+            (MapMode::Speed, Some(lap)) => speed_legend(ui, lap, credit),
+            (MapMode::Splits, Some(lap)) => {
+                if let Some(sec) = sectors {
+                    sector_key(ui, sec);
+                }
+                ui.label(
+                    RichText::new(format!("Splits placed by Mychronix at equal distances from the start/finish, timed from your GPS.  {credit}"))
+                        .size(11.5)
+                        .color(DIM),
+                );
+                ui.add_space(10.0);
+                if let Some(sec) = sectors {
+                    split_table(ui, lap, sec);
+                }
+            }
+            (MapMode::Elevation, _) => elevation_legend(ui, &self.elevation, credit),
+            _ => {
+                let note = if self.outline.is_empty() {
+                    "AiM tracks give the start/finish only; record a session here to see the shape."
+                } else if self.track.kind == Kind::Custom {
+                    "Outline from the custom track file."
+                } else {
+                    "Outline from AiM's track file."
+                };
+                ui.label(
+                    RichText::new(format!("{note}  {credit}"))
+                        .size(11.5)
+                        .color(DIM),
+                );
+            }
+        }
+    }
+}
+
+/// The chips over the map that pick what it shows, and on the Splits view, how many sectors.
+fn map_modes(ui: &mut Ui, modes: &[(MapMode, &str)], map: &mut MapMode, split_count: &mut usize) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (mode, label) in modes {
+            if chip(ui, label, *map == *mode).clicked() {
+                *map = *mode;
+            }
+        }
+        if *map == MapMode::Splits {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                for n in (2..=6).rev() {
+                    if chip(ui, &n.to_string(), *split_count == n).clicked() {
+                        *split_count = n;
+                    }
+                }
+                ui.label(RichText::new("Sectors").size(12.5).color(DIM));
+            });
+        }
+    });
+}
+
+/// Zooms `memory` to fit what `overlay` draws in a map of `size`.
+fn fit_drawn(memory: &mut walkers::MapMemory, overlay: &TrackOverlay, size: Vec2) {
+    let drawn: Vec<aim_track::LatLon> = match (&overlay.speed, &overlay.sectors, &overlay.elevation)
+    {
+        (Some(l), _, _) => l.points.clone(),
+        (None, Some((path, _)), _) => path.clone(),
+        (None, None, Some((path, _))) => path.clone(),
+        _ => overlay.outline.clone(),
+    };
+    if let Some((c, zoom)) = fit_view(&drawn, size) {
+        memory.center_at(walkers::lat_lon(c.lat, c.lon));
+        let _ = memory.set_zoom(zoom);
+    }
+}
+
+/// The map in its card, `map_h` tall, with the Map / Satellite switch in its
+/// top-right corner. True when the switch was flipped.
+fn map_frame(
+    ui: &mut Ui,
+    tiles: &mut walkers::HttpTiles,
+    memory: &mut walkers::MapMemory,
+    center: walkers::Position,
+    overlay: TrackOverlay,
+    satellite: bool,
+    map_h: f32,
+) -> bool {
+    let mut toggle = false;
+    Frame::new()
+        .corner_radius(CornerRadius::same(theme::RADIUS))
+        .fill(SURFACE)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_height(map_h);
+            // The wheel scrolls the page past the map; Ctrl + wheel zooms it.
+            let map = ui.add(
+                walkers::Map::new(shown(tiles), memory, center)
+                    .panning(false)
+                    .with_plugin(overlay),
+            );
+            // Map / Satellite switch in the map's top-right corner.
+            let corner =
+                Rect::from_min_size(map.rect.right_top() + vec2(-190.0, 10.0), vec2(180.0, 36.0));
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(corner)
+                    .layout(Layout::right_to_left(Align::Center)),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if chip(ui, "Satellite", satellite).clicked() && !satellite {
+                        toggle = true;
+                    }
+                    if chip(ui, "Map", !satellite).clicked() && satellite {
+                        toggle = true;
+                    }
+                },
+            );
+        });
+    toggle
+}
+
+/// The color scale shared by the speed and elevation keys, slow (or low) to fast (or high).
+fn color_scale(ui: &mut Ui) {
+    let (bar, _) = ui.allocate_exact_size(vec2(160.0, 8.0), Sense::hover());
+    for k in 0..40 {
+        let r = Rect::from_min_size(
+            pos2(bar.left() + bar.width() * k as f32 / 40.0, bar.top()),
+            vec2(bar.width() / 40.0 + 0.5, bar.height()),
+        );
+        ui.painter()
+            .rect_filled(r, 0.0, speed_color(k as f32 / 39.0));
+    }
+}
+
+/// The key to the speed view: the speed scale and the corner numbers, then where the lap came from.
+fn speed_legend(ui: &mut Ui, lap: &SpeedLap, credit: &str) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{:.0}", crate::units::speed(lap.min_kmh)))
+                .size(12.0)
+                .color(DIM),
+        );
+        color_scale(ui);
+        ui.label(
+            RichText::new(format!(
+                "{:.0} {}",
+                crate::units::speed(lap.max_kmh),
+                crate::units::speed_unit()
+            ))
+            .size(12.0)
+            .color(DIM),
+        );
+        ui.add_space(14.0);
+        let (dot, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+        ui.painter().circle_filled(dot.center(), 8.0, TEXT);
+        ui.painter().text(
+            dot.center(),
+            egui::Align2::CENTER_CENTER,
+            "1",
+            semibold(10.5),
+            ON_TEXT,
+        );
+        ui.label(
+            RichText::new("Corners, at their slowest point (numbered as in Analysis → Corners)")
+                .size(12.0)
+                .color(DIM),
+        );
+    });
+    ui.label(
+        RichText::new(format!("{}  {credit}", lap.source))
+            .size(11.5)
+            .color(DIM),
+    );
+}
+
+/// Each sector's color and name, in a row.
+fn sector_key(ui: &mut Ui, sec: &splits::Sectors) {
+    ui.horizontal(|ui| {
+        for k in 0..sec.count() {
+            let (sw, _) = ui.allocate_exact_size(vec2(18.0, 10.0), Sense::hover());
+            ui.painter().line_segment(
+                [sw.left_center(), sw.right_center()],
+                Stroke::new(4.0, SERIES[k % SERIES.len()]),
+            );
+            ui.label(
+                RichText::new(format!("S{}", k + 1))
+                    .size(12.5)
+                    .color(SECONDARY),
+            );
+            ui.add_space(6.0);
+        }
+    });
+}
+
+/// The key to the elevation view: the scale from lowest to highest, and where it came from.
+fn elevation_legend(ui: &mut Ui, elevation: &[f32], credit: &str) {
+    let (lo, hi) = elevation
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), &e| (a.min(e), b.max(e)));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{lo:.0}")).size(12.0).color(DIM));
+        color_scale(ui);
+        ui.label(
+            RichText::new(format!(
+                "{:.0} {u} above sea level  ·  {:.0} {u} between lowest and highest point",
+                crate::units::distance(hi as f64),
+                crate::units::distance((hi - lo) as f64),
+                u = crate::units::distance_unit()
+            ))
+            .size(12.0)
+            .color(DIM),
+        );
+    });
+    ui.label(
+        RichText::new(format!(
+            "Elevation from AiM's track file, as in RaceStudio's track preview.  {credit}"
+        ))
+        .size(11.5)
+        .color(DIM),
+    );
+}
+
+/// What was clicked in the track list this frame, applied together once it's drawn.
+#[derive(Default)]
+struct TrackListInput {
+    /// A track opened.
+    open: Option<usize>,
+    /// A country's group opened or closed (its code).
+    toggled: Option<String>,
+    /// A track's star (its guid).
+    starred: Option<String>,
+}
+
+/// A country's header in the track list, in `rect`: a chevron, its name and how many tracks.
+fn header_row(
+    ui: &Ui,
+    rect: Rect,
+    response: &egui::Response,
+    label: &str,
+    count: usize,
+    open: bool,
+) {
+    let p = ui.painter();
+    if response.hovered() {
+        p.rect_filled(
+            rect.shrink2(vec2(0.0, 3.0)),
+            CornerRadius::same(theme::RADIUS_SMALL + 2),
+            SURFACE_HOVER,
+        );
+    }
+    let chevron = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    chevron.image(SECONDARY, 16.0).paint_at(
+        ui,
+        Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), Vec2::splat(16.0)),
+    );
+    p.text(
+        pos2(rect.left() + 32.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        semibold(14.5),
+        TEXT,
+    );
+    p.text(
+        pos2(rect.right() - 12.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        group_thousands(count),
+        regular(12.5),
+        DIM,
+    );
+}
+
+/// One session in a track's list of them: number, driver, date and time;
+/// best lap (green when it's the best shown, `track_best`) and laps on the right.
+fn track_session_row(
+    ui: &mut Ui,
+    s: &tracks::LocalSession,
+    driver: &str,
+    track_best: Option<u64>,
+) -> egui::Response {
+    let sum = &s.summary;
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        if response.hovered() {
+            p.rect_filled(
+                rect,
+                CornerRadius::same(theme::RADIUS_SMALL + 2),
+                SURFACE_HOVER,
+            );
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let (l, r) = (rect.left() + 10.0, rect.right() - 10.0);
+        let (top, bottom) = (rect.top() + 15.0, rect.top() + 33.0);
+        p.text(
+            pos2(l, top),
+            egui::Align2::LEFT_CENTER,
+            format!("Session {}", sum.number.unwrap_or(0)),
+            medium(14.0),
+            TEXT,
+        );
+        let who = Some(driver.to_string()).filter(|d| !d.is_empty());
+        let when = [
+            who,
+            sum.date.map(crate::dates::us_short),
+            sum.start_time.as_deref().map(crate::dates::clock_time),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("  ·  ");
+        p.text(
+            pos2(l, bottom),
+            egui::Align2::LEFT_CENTER,
+            when,
+            regular(12.5),
+            DIM,
+        );
+        let is_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == track_best;
+        let best = sum
+            .best_lap_ms
+            .map(|b| format_lap_time(b as i64))
+            .unwrap_or_else(|| "—".into());
+        p.text(
+            pos2(r, top),
+            egui::Align2::RIGHT_CENTER,
+            best,
+            medium(14.0),
+            if is_best { theme::GOOD } else { TEXT },
+        );
+        let laps = sum.laps.unwrap_or(0);
+        p.text(
+            pos2(r, bottom),
+            egui::Align2::RIGHT_CENTER,
+            plural(laps as usize, "lap"),
+            regular(12.5),
+            DIM,
+        );
+    }
+    response
 }
 
 /// A small drawing of a track's outline, fitted into `rect`.
@@ -1650,7 +1804,25 @@ fn track_row(
         regular(12.0),
         DIM,
     );
-    // Right: favorite star, then the name on the device; custom tag and sessions below.
+    let star_resp = track_row_right(ui, t, rect, k, favorites);
+    if star_resp.clicked() {
+        starred = true;
+    }
+    if response.clicked() && !star_resp.clicked() {
+        open = true;
+    }
+    (open, starred)
+}
+
+/// The right of a track's row, in `rect`: its favorite star, then the name on
+/// the device; the custom tag and how many sessions below. Returns the star's response.
+fn track_row_right(
+    ui: &mut Ui,
+    t: &tracks::Track,
+    rect: Rect,
+    k: usize,
+    favorites: &tracks::Favorites,
+) -> egui::Response {
     let star = Rect::from_center_size(
         pos2(rect.right() - 20.0, rect.top() + 18.0),
         Vec2::splat(26.0),
@@ -1666,9 +1838,6 @@ fn track_row(
     };
     icon.image(tint, 16.0)
         .paint_at(ui, Rect::from_center_size(star.center(), Vec2::splat(16.0)));
-    if star_resp.clicked() {
-        starred = true;
-    }
     let p = ui.painter();
     p.text(
         pos2(star.left() - 4.0, rect.top() + 18.0),
@@ -1703,10 +1872,7 @@ fn track_row(
         );
         p.galley(r.center() - galley.size() / 2.0, galley, TEXT);
     }
-    if response.clicked() && !star_resp.clicked() {
-        open = true;
-    }
-    (open, starred)
+    star_resp
 }
 
 /// The track list's row heights: a country's header, a track.

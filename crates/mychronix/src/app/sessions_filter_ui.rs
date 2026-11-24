@@ -299,13 +299,65 @@ fn date_field(
     value: Day,
     look: CalendarLook,
 ) -> Option<Day> {
-    let CalendarLook {
-        shade: (from, to),
-        race_days,
-        right,
-    } = look;
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     let open = calendar.is_some_and(|c| c.0 == k);
+    let (rect, resp) = date_box(ui, open, label, value);
+    if resp.clicked() {
+        *calendar = if open {
+            None
+        } else {
+            Some((k, value.first_of_month()))
+        };
+    }
+    let (_, month) = calendar.filter(|c| c.0 == k)?;
+
+    let (mut picked, mut nav) = (None, None);
+    let area = egui::Area::new(ui.id().with(("calendar", k)))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(pos2(look.right, rect.top()))
+        .show(ui.ctx(), |ui| {
+            Frame::new()
+                .fill(SURFACE_ACTIVE)
+                .stroke(Stroke::new(1.0, theme::OUTLINE))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(14))
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: Color32::from_black_alpha(120),
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    nav = calendar_head(ui, month);
+                    picked = calendar_days(ui, month, value, look);
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
+                        ui.painter().circle_filled(r.center(), 3.0, theme::GOOD);
+                        ui.label(
+                            RichText::new("Race day")
+                                .font(regular(12.5))
+                                .color(SECONDARY),
+                        );
+                    });
+                });
+        });
+    if let Some(m) = nav {
+        *calendar = Some((k, m));
+    }
+    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    if picked.is_some() || escape || (area.response.clicked_elsewhere() && !resp.clicked()) {
+        *calendar = None;
+    }
+    picked
+}
+
+/// A calendar's day cells are this many points square.
+const CALENDAR_CELL: f32 = 40.0;
+
+/// The field itself: its label, the date and a calendar icon, highlighted while open.
+fn date_box(ui: &mut Ui, open: bool, label: &str, value: Day) -> (Rect, egui::Response) {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     let p = ui.painter();
     p.rect_filled(
         rect,
@@ -348,184 +400,151 @@ fn date_field(
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    if resp.clicked() {
-        *calendar = if open {
-            None
-        } else {
-            Some((k, value.first_of_month()))
-        };
-    }
-    let (_, month) = calendar.filter(|c| c.0 == k)?;
+    (rect, resp)
+}
 
-    let today = naive(crate::dates::today());
-    let (mut picked, mut nav) = (None, None);
-    let cell = 40.0;
-    let area = egui::Area::new(ui.id().with(("calendar", k)))
-        .order(egui::Order::Foreground)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .fixed_pos(pos2(right, rect.top()))
-        .show(ui.ctx(), |ui| {
-            Frame::new()
-                .fill(SURFACE_ACTIVE)
-                .stroke(Stroke::new(1.0, theme::OUTLINE))
-                .corner_radius(CornerRadius::same(12))
-                .inner_margin(Margin::same(14))
-                .shadow(egui::Shadow {
-                    offset: [0, 8],
-                    blur: 24,
-                    spread: 0,
-                    color: Color32::from_black_alpha(120),
-                })
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 4.0;
-                    // Month, with the previous and next ones either side.
-                    let (head, _) = ui.allocate_exact_size(vec2(cell * 7.0, 34.0), Sense::hover());
-                    ui.painter().text(
-                        head.center(),
-                        egui::Align2::CENTER_CENTER,
-                        month.strftime("%B %Y").to_string(),
-                        semibold(15.5),
-                        TEXT,
-                    );
-                    for (step, icon, x) in [
-                        (-1, Icon::ChevronLeft, head.left() + 17.0),
-                        (1, Icon::ChevronRight, head.right() - 17.0),
-                    ] {
-                        let r = Rect::from_center_size(pos2(x, head.center().y), Vec2::splat(32.0));
-                        let b = ui.interact(r, ui.id().with(("month", step)), Sense::click());
-                        if b.hovered() {
-                            ui.painter()
-                                .rect_filled(r, CornerRadius::same(8), SURFACE_HOVER);
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        icon.image(SECONDARY, 17.0)
-                            .paint_at(ui, Rect::from_center_size(r.center(), Vec2::splat(17.0)));
-                        if b.clicked() {
-                            nav = month.checked_add(jiff::Span::new().months(step)).ok();
-                        }
-                    }
-                    let (names, _) = ui.allocate_exact_size(vec2(cell * 7.0, 22.0), Sense::hover());
-                    for (i, n) in ["S", "M", "T", "W", "T", "F", "S"].iter().enumerate() {
-                        ui.painter().text(
-                            pos2(names.left() + cell * (i as f32 + 0.5), names.center().y),
-                            egui::Align2::CENTER_CENTER,
-                            *n,
-                            medium(12.5),
-                            DIM,
-                        );
-                    }
-                    // The days, Sunday first.
-                    let lead = month.weekday().to_sunday_zero_offset() as i32;
-                    let days = month.days_in_month() as i32;
-                    let rows = (lead + days + 6) / 7;
-                    for row in 0..rows {
-                        let (line, _) =
-                            ui.allocate_exact_size(vec2(cell * 7.0, cell), Sense::hover());
-                        for col in 0..7 {
-                            let n = row * 7 + col - lead + 1;
-                            if n < 1 || n > days {
-                                continue;
-                            }
-                            let Ok(d) = Day::new(month.year(), month.month(), n as i8) else {
-                                continue;
-                            };
-                            let r = Rect::from_min_size(
-                                pos2(line.left() + cell * col as f32, line.top()),
-                                Vec2::splat(cell),
-                            );
-                            let c = ui.interact(r, ui.id().with(("day", n)), Sense::click());
-                            let p = ui.painter();
-                            if d >= from && d <= to && from < to {
-                                // The range: a band, rounded at its ends.
-                                let band = Rect::from_x_y_ranges(
-                                    if d == from {
-                                        r.center().x..=r.right()
-                                    } else {
-                                        r.left()..=r.right()
-                                    },
-                                    r.center().y - 15.0..=r.center().y + 15.0,
-                                );
-                                let band = if d == to {
-                                    Rect::from_x_y_ranges(
-                                        band.left()..=r.center().x,
-                                        band.y_range(),
-                                    )
-                                } else {
-                                    band
-                                };
-                                p.rect_filled(band, CornerRadius::ZERO, SURFACE_HOVER);
-                            }
-                            let ring = r.shrink(4.0);
-                            let chosen = d == value;
-                            if chosen {
-                                p.rect_filled(ring, CornerRadius::same(16), TEXT);
-                            } else if c.hovered() {
-                                p.rect_filled(ring, CornerRadius::same(16), theme::OUTLINE);
-                            } else if Some(d) == today {
-                                p.rect_stroke(
-                                    ring,
-                                    CornerRadius::same(16),
-                                    Stroke::new(1.0, DIM),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            let ink = if chosen { ON_TEXT } else { TEXT };
-                            p.text(
-                                r.center() - vec2(0.0, 2.0),
-                                egui::Align2::CENTER_CENTER,
-                                n.to_string(),
-                                medium(14.0),
-                                ink,
-                            );
-                            if race_days.contains(&d) {
-                                p.circle_filled(
-                                    pos2(r.center().x, r.center().y + 9.0),
-                                    2.0,
-                                    if chosen { ON_TEXT } else { theme::GOOD },
-                                );
-                            }
-                            if c.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-                            if c.clicked() {
-                                picked = Some(d);
-                            }
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
-                        ui.painter().circle_filled(r.center(), 3.0, theme::GOOD);
-                        ui.label(
-                            RichText::new("Race day")
-                                .font(regular(12.5))
-                                .color(SECONDARY),
-                        );
-                    });
-                });
-        });
-    if let Some(m) = nav {
-        *calendar = Some((k, m));
+/// The calendar's month, with the previous and next ones either side, and
+/// the days of the week. Returns the month stepped to.
+fn calendar_head(ui: &mut Ui, month: Day) -> Option<Day> {
+    let cell = CALENDAR_CELL;
+    let mut nav = None;
+    let (head, _) = ui.allocate_exact_size(vec2(cell * 7.0, 34.0), Sense::hover());
+    ui.painter().text(
+        head.center(),
+        egui::Align2::CENTER_CENTER,
+        month.strftime("%B %Y").to_string(),
+        semibold(15.5),
+        TEXT,
+    );
+    for (step, icon, x) in [
+        (-1, Icon::ChevronLeft, head.left() + 17.0),
+        (1, Icon::ChevronRight, head.right() - 17.0),
+    ] {
+        let r = Rect::from_center_size(pos2(x, head.center().y), Vec2::splat(32.0));
+        let b = ui.interact(r, ui.id().with(("month", step)), Sense::click());
+        if b.hovered() {
+            ui.painter()
+                .rect_filled(r, CornerRadius::same(8), SURFACE_HOVER);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        icon.image(SECONDARY, 17.0)
+            .paint_at(ui, Rect::from_center_size(r.center(), Vec2::splat(17.0)));
+        if b.clicked() {
+            nav = month.checked_add(jiff::Span::new().months(step)).ok();
+        }
     }
-    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    if picked.is_some() || escape || (area.response.clicked_elsewhere() && !resp.clicked()) {
-        *calendar = None;
+    let (names, _) = ui.allocate_exact_size(vec2(cell * 7.0, 22.0), Sense::hover());
+    for (i, n) in ["S", "M", "T", "W", "T", "F", "S"].iter().enumerate() {
+        ui.painter().text(
+            pos2(names.left() + cell * (i as f32 + 0.5), names.center().y),
+            egui::Align2::CENTER_CENTER,
+            *n,
+            medium(12.5),
+            DIM,
+        );
+    }
+    nav
+}
+
+/// The month's days, Sunday first, a row a week. Returns the day clicked.
+fn calendar_days(ui: &mut Ui, month: Day, value: Day, look: CalendarLook) -> Option<Day> {
+    let cell = CALENDAR_CELL;
+    let today = naive(crate::dates::today());
+    let mut picked = None;
+    let lead = month.weekday().to_sunday_zero_offset() as i32;
+    let days = month.days_in_month() as i32;
+    let rows = (lead + days + 6) / 7;
+    for row in 0..rows {
+        let (line, _) = ui.allocate_exact_size(vec2(cell * 7.0, cell), Sense::hover());
+        for col in 0..7 {
+            let n = row * 7 + col - lead + 1;
+            if n < 1 || n > days {
+                continue;
+            }
+            let Ok(d) = Day::new(month.year(), month.month(), n as i8) else {
+                continue;
+            };
+            let r = Rect::from_min_size(
+                pos2(line.left() + cell * col as f32, line.top()),
+                Vec2::splat(cell),
+            );
+            let c = ui.interact(r, ui.id().with(("day", n)), Sense::click());
+            calendar_day(ui, r, d, &c, d == value, Some(d) == today, look);
+            if c.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if c.clicked() {
+                picked = Some(d);
+            }
+        }
     }
     picked
 }
 
-impl App {
-    /// The filter panel. `newest`: the newest session's day (for "Last race day").
-    pub(super) fn sessions_filter_panel(
-        &mut self,
-        ui: &mut Ui,
-        lib: &Library,
-        profiles: &crate::profiles::Profiles,
-        newest: Option<Day>,
-    ) {
-        let f = &mut self.session_filter;
-        let us = |d: Day| d.strftime("%b %-d, %Y").to_string();
+/// One day of the calendar in `r`: the range's band behind it, a ring for
+/// the date chosen (or hovered, or today), its number and a race day's dot.
+fn calendar_day(
+    ui: &Ui,
+    r: Rect,
+    d: Day,
+    c: &egui::Response,
+    chosen: bool,
+    today: bool,
+    look: CalendarLook,
+) {
+    let (from, to) = look.shade;
+    let p = ui.painter();
+    if d >= from && d <= to && from < to {
+        // The range: a band, rounded at its ends.
+        let band = Rect::from_x_y_ranges(
+            if d == from {
+                r.center().x..=r.right()
+            } else {
+                r.left()..=r.right()
+            },
+            r.center().y - 15.0..=r.center().y + 15.0,
+        );
+        let band = if d == to {
+            Rect::from_x_y_ranges(band.left()..=r.center().x, band.y_range())
+        } else {
+            band
+        };
+        p.rect_filled(band, CornerRadius::ZERO, SURFACE_HOVER);
+    }
+    let ring = r.shrink(4.0);
+    if chosen {
+        p.rect_filled(ring, CornerRadius::same(16), TEXT);
+    } else if c.hovered() {
+        p.rect_filled(ring, CornerRadius::same(16), theme::OUTLINE);
+    } else if today {
+        p.rect_stroke(
+            ring,
+            CornerRadius::same(16),
+            Stroke::new(1.0, DIM),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let ink = if chosen { ON_TEXT } else { TEXT };
+    p.text(
+        r.center() - vec2(0.0, 2.0),
+        egui::Align2::CENTER_CENTER,
+        d.day().to_string(),
+        medium(14.0),
+        ink,
+    );
+    if look.race_days.contains(&d) {
+        p.circle_filled(
+            pos2(r.center().x, r.center().y + 9.0),
+            2.0,
+            if chosen { ON_TEXT } else { theme::GOOD },
+        );
+    }
+}
 
-        // When.
+impl SessionFilter {
+    /// When: the presets, or a range picked on the From and To calendars.
+    fn when_section(&mut self, ui: &mut Ui, lib: &Library, newest: Option<Day>) {
+        let us = |d: Day| d.strftime("%b %-d, %Y").to_string();
         let today = naive(crate::dates::today()).unwrap_or_default();
         let first = lib
             .sessions
@@ -533,10 +552,10 @@ impl App {
             .filter_map(|s| s.summary.date)
             .min()
             .and_then(naive);
-        let (bf, bt) = f.bounds(newest);
+        let (bf, bt) = self.bounds(newest);
         // The dates shown are the ones in force: the preset's, else the range picked.
         let shown = [bf.or(first).unwrap_or(today), bt.unwrap_or(today)];
-        let summary = match f.range {
+        let summary = match self.range {
             Range::All => "Every session".to_string(),
             Range::LastDay => newest
                 .map(|d| format!("Only {}", us(d)))
@@ -554,10 +573,10 @@ impl App {
             Icon::Calendar,
             "When",
             &summary,
-            f.range != Range::All,
+            self.range != Range::All,
             |ui| {
                 // A custom range leaves none of these picked.
-                let mut range = f.range;
+                let mut range = self.range;
                 segments(
                     ui,
                     &mut range,
@@ -568,9 +587,9 @@ impl App {
                         (Range::LastDay, "Last race day"),
                     ],
                 );
-                if range != f.range {
-                    f.range = range;
-                    f.calendar = None;
+                if range != self.range {
+                    self.range = range;
+                    self.calendar = None;
                 }
                 ui.add_space(10.0);
                 ui.label(
@@ -581,7 +600,7 @@ impl App {
                 // The calendar opens to the left of the panel's cards.
                 // "All time" has no range to shade.
                 let look = CalendarLook {
-                    shade: if f.range == Range::All {
+                    shade: if self.range == Range::All {
                         (today, today)
                     } else {
                         (shown[0], shown[1])
@@ -589,34 +608,44 @@ impl App {
                     race_days: &race_days,
                     right: ui.max_rect().left() - 30.0,
                 };
-                for (k, label) in [(0u8, "From"), (1, "To")] {
-                    if let Some(d) =
-                        date_field(ui, &mut f.calendar, k, label, shown[k as usize], look)
-                    {
-                        // Picking a date starts a range from what was shown.
-                        if f.range != Range::Custom {
-                            (f.from, f.to, f.range) =
-                                (Some(shown[0]), Some(shown[1]), Range::Custom);
-                        }
-                        if k == 0 {
-                            f.from = Some(d)
-                        } else {
-                            f.to = Some(d)
-                        }
-                        // A From after the To swaps them.
-                        if let (Some(a), Some(b)) = (f.from, f.to)
-                            && a > b
-                        {
-                            (f.from, f.to) = (Some(b), Some(a));
-                        }
-                    }
-                }
+                self.date_fields(ui, shown, look);
             },
         ) {
-            (f.range, f.from, f.to, f.calendar) = (Range::All, None, None, None);
+            (self.range, self.from, self.to, self.calendar) = (Range::All, None, None, None);
         }
+    }
 
-        // Drivers.
+    /// The From and To fields, `shown` in them; a date picked makes a custom range.
+    fn date_fields(&mut self, ui: &mut Ui, shown: [Day; 2], look: CalendarLook) {
+        for (k, label) in [(0u8, "From"), (1, "To")] {
+            if let Some(d) = date_field(ui, &mut self.calendar, k, label, shown[k as usize], look) {
+                // Picking a date starts a range from what was shown.
+                if self.range != Range::Custom {
+                    (self.from, self.to, self.range) =
+                        (Some(shown[0]), Some(shown[1]), Range::Custom);
+                }
+                if k == 0 {
+                    self.from = Some(d)
+                } else {
+                    self.to = Some(d)
+                }
+                // A From after the To swaps them.
+                if let (Some(a), Some(b)) = (self.from, self.to)
+                    && a > b
+                {
+                    (self.from, self.to) = (Some(b), Some(a));
+                }
+            }
+        }
+    }
+
+    /// Drivers, each with a check box and how many sessions they drove.
+    fn drivers_section(
+        &mut self,
+        ui: &mut Ui,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+    ) {
         let mut drivers: Vec<(String, usize)> = Vec::new();
         for s in &lib.sessions {
             let d = s.driver(profiles);
@@ -637,7 +666,7 @@ impl App {
         });
         let picked: Vec<&str> = drivers
             .iter()
-            .filter(|d| f.drivers.contains(&d.0))
+            .filter(|d| self.drivers.contains(&d.0))
             .map(|d| d.0.as_str())
             .collect();
         let summary = if picked.is_empty() {
@@ -654,16 +683,18 @@ impl App {
             |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for (d, n) in &drivers {
-                    if check_row(ui, f.drivers.contains(d), d, *n) && !f.drivers.remove(d) {
-                        f.drivers.insert(d.clone());
+                    if check_row(ui, self.drivers.contains(d), d, *n) && !self.drivers.remove(d) {
+                        self.drivers.insert(d.clone());
                     }
                 }
             },
         ) {
-            f.drivers.clear();
+            self.drivers.clear();
         }
+    }
 
-        // Tracks, most raced first; searchable once there are many.
+    /// Tracks, most raced first; searchable once there are many.
+    fn tracks_section(&mut self, ui: &mut Ui, lib: &Library) {
         let mut tracks: Vec<(usize, usize)> = Vec::new();
         for s in &lib.sessions {
             if let Some(t) = s.track {
@@ -679,7 +710,7 @@ impl App {
         });
         let picked: Vec<&str> = tracks
             .iter()
-            .filter(|t| f.tracks.contains(&t.0))
+            .filter(|t| self.tracks.contains(&t.0))
             .map(|t| lib.tracks[t.0].name.as_str())
             .collect();
         let summary = match picked.len() {
@@ -697,10 +728,10 @@ impl App {
             |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 if tracks.len() > 6 {
-                    search_field(ui, &mut f.track_search, "Find a track…");
+                    search_field(ui, &mut self.track_search, "Find a track…");
                     ui.add_space(6.0);
                 }
-                let needle = f.track_search.to_lowercase();
+                let needle = self.track_search.to_lowercase();
                 for (t, n) in &tracks {
                     let name = &lib.tracks[*t].name;
                     let full = lib.tracks[*t].full_name.clone().unwrap_or_default();
@@ -710,34 +741,52 @@ impl App {
                     {
                         continue;
                     }
-                    if check_row(ui, f.tracks.contains(t), name, *n) && !f.tracks.remove(t) {
-                        f.tracks.insert(*t);
+                    if check_row(ui, self.tracks.contains(t), name, *n) && !self.tracks.remove(t) {
+                        self.tracks.insert(*t);
                     }
                 }
             },
         ) {
-            f.tracks.clear();
+            self.tracks.clear();
         }
+    }
 
-        // Timed laps.
-        let summary = if f.timed_only {
+    /// Whether to show only sessions with timed laps.
+    fn laps_section(&mut self, ui: &mut Ui) {
+        let summary = if self.timed_only {
             "Only sessions with timed laps"
         } else {
             "Every session, timed or not"
         };
-        if section(ui, Icon::Timer, "Laps", summary, f.timed_only, |ui| {
+        if section(ui, Icon::Timer, "Laps", summary, self.timed_only, |ui| {
             if switch_row(
                 ui,
-                f.timed_only,
+                self.timed_only,
                 "Timed laps only",
                 "Hides warm-ups and runs with no full lap",
             ) {
-                f.timed_only = !f.timed_only;
+                self.timed_only = !self.timed_only;
             }
         }) {
-            f.timed_only = false;
+            self.timed_only = false;
         }
+    }
+}
 
+impl App {
+    /// The filter panel. `newest`: the newest session's day (for "Last race day").
+    pub(super) fn sessions_filter_panel(
+        &mut self,
+        ui: &mut Ui,
+        lib: &Library,
+        profiles: &crate::profiles::Profiles,
+        newest: Option<Day>,
+    ) {
+        let f = &mut self.session_filter;
+        f.when_section(ui, lib, newest);
+        f.drivers_section(ui, lib, profiles);
+        f.tracks_section(ui, lib);
+        f.laps_section(ui);
         // At the end, so nothing above moves when it appears.
         if f.active() && button(ui, Some(Icon::X), "Clear all filters", false).clicked() {
             *f = SessionFilter::default();
