@@ -2,7 +2,7 @@
 //! session: its racing lap times (for sparklines), the sensors that recorded
 //! real readings, and the sensor problems found (see `aim_xrk::checks`).
 //! Worked out in the background once per file and cached in
-//! `session-digests-v5.json` in the cache folder (the version goes up when what a digest holds changes), keyed by path and size.
+//! `session-digests-v6.json` in the cache folder (the version goes up when what a digest holds changes), keyed by path and size.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Digest {
     pub logger: String,
+    /// The MyChron configuration the session was recorded with (AiM's
+    /// "vehicle"): one per kart, with that kart's sensors.
+    #[serde(default)]
+    pub vehicle: String,
     /// Racing laps in order: (lap number, ms).
     pub laps: Vec<(i32, i64)>,
     /// Sensor channels that recorded real readings.
@@ -48,6 +52,7 @@ impl Digest {
                 .logger_id
                 .map(|i| i.to_string())
                 .unwrap_or_default(),
+            vehicle: session.info.vehicle.clone().unwrap_or_default(),
             laps: aim_xrk::notes::racing_laps(session)
                 .iter()
                 .map(|l| (l.number, l.duration_ms()))
@@ -127,7 +132,7 @@ impl Digests {
     fn file() -> Option<PathBuf> {
         // v3: laps timed from GPS (see `jobs::relap`); v4: against tracks'
         // real start/finish lines, and with few laps.
-        crate::paths::cache_dir().map(|d| d.join("session-digests-v5.json"))
+        crate::paths::cache_dir().map(|d| d.join("session-digests-v6.json"))
     }
 
     /// The saved digests. When the tracks have changed since (a custom track
@@ -203,11 +208,15 @@ impl Digests {
             .map(|d| d.model.clone())
     }
 
-    /// Whether `channel` recorded real readings in any session from `logger`.
-    pub fn worked(&self, logger: &str, channel: &str) -> bool {
-        self.by_key
-            .values()
-            .any(|d| d.logger == logger && d.working.iter().any(|c| c == channel))
+    /// Whether `channel` recorded real readings in any session from `logger`
+    /// with the same configuration (`vehicle`, when the file names one): a
+    /// MyChron moved between karts only has a sensor fitted on some of them.
+    pub fn worked(&self, logger: &str, vehicle: &str, channel: &str) -> bool {
+        self.by_key.values().any(|d| {
+            d.logger == logger
+                && (vehicle.is_empty() || d.vehicle == vehicle)
+                && d.working.iter().any(|c| c == channel)
+        })
     }
 
     /// The issues in a session worth reporting (see `aim_xrk::checks::worth_reporting`).
@@ -215,7 +224,11 @@ impl Digests {
         digest
             .issues()
             .into_iter()
-            .filter(|i| aim_xrk::checks::worth_reporting(i, |c| self.worked(&digest.logger, c)))
+            .filter(|i| {
+                aim_xrk::checks::worth_reporting(i, |c| {
+                    self.worked(&digest.logger, &digest.vehicle, c)
+                })
+            })
             .collect()
     }
 }
@@ -288,6 +301,33 @@ mod tests {
         ] {
             assert_eq!(parse_kind(&kind_text(k)), Some(k));
         }
+    }
+
+    #[test]
+    fn a_sensor_counts_as_fitted_only_on_the_kart_it_worked_on() {
+        let digest = |vehicle: &str, working: &[&str], issues: &[&str]| Digest {
+            logger: "7".into(),
+            vehicle: vehicle.into(),
+            working: working.iter().map(|c| c.to_string()).collect(),
+            issues: issues
+                .iter()
+                .map(|c| (c.to_string(), kind_text(IssueKind::NotConnected)))
+                .collect(),
+            ..Default::default()
+        };
+        // One MyChron on two karts: exhaust temp fitted on one, not the other.
+        let fitted = digest("30", &["Temp TC 1"], &[]);
+        let other_kart = digest("90", &[], &["Temp TC 1"]);
+        let same_kart = digest("30", &[], &["Temp TC 1"]);
+        let unnamed = digest("", &[], &["Temp TC 1"]);
+        let digests = Digests {
+            by_key: BTreeMap::from([("a|1".to_string(), fitted)]),
+            ..Default::default()
+        };
+        let reported = |d: &Digest| digests.reportable(d).len();
+        assert_eq!(reported(&other_kart), 0);
+        assert_eq!(reported(&same_kart), 1);
+        assert_eq!(reported(&unnamed), 1);
     }
 
     #[test]
