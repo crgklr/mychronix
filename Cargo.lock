@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "aim-link"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "futures-lite",
  "log",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "aim-track"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "aim-link",
  "thiserror 2.0.21",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "aim-xrk"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "libxrk",
  "log",
@@ -2723,7 +2723,7 @@ dependencies = [
 
 [[package]]
 name = "mychronix"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "aim-link",
  "aim-track",
@@ -2754,7 +2754,7 @@ dependencies = [
 
 [[package]]
 name = "mychronix-cli"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "aim-link",
  "aim-xrk",
@@ -5216,7 +5216,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video-sync"
-version = "0.1.24"
+version = "0.1.25"
 dependencies = [
  "aim-xrk",
  "log",
