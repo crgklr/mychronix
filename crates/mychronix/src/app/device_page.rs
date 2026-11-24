@@ -44,14 +44,34 @@ impl App {
     /// Applies what the MyChron worker has finished and keeps scanning for a
     /// logger (the Device page and the Garage both show its status).
     pub(super) fn device_poll(&mut self, ctx: &egui::Context) {
-        use crate::device::{Command, Event};
         let ctx = ctx.clone();
+        let Some(events) = self.worker_events(&ctx) else {
+            return;
+        };
+        for e in events {
+            self.on_event(e, &ctx);
+        }
+        // MYCHRONIX_FAKE_DEVICE=<logger id> shows that logger's downloaded sessions as if it were
+        // connected, for checking this page's layout without the MyChron (development only).
+        if self.device.logger.is_none()
+            && let Some(id) = crate::hooks::get().fake_device
+        {
+            self.fake_device(id);
+        }
+        // Keep looking while nothing is connected; check now and then that a logger is still there.
+        let now = ctx.input(|i| i.time);
+        self.usb_poll(now);
+        self.scan_when_due(now);
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    /// What the MyChron worker has finished since last frame (starting the
+    /// worker if there's none). None when it stopped: it's cleared, to start again.
+    fn worker_events(&mut self, ctx: &egui::Context) -> Option<Vec<crate::device::Event>> {
         let worker = self
             .device
             .worker
             .get_or_insert_with(|| crate::device::Worker::spawn(ctx.clone()));
-
-        // Apply whatever the worker has finished.
         let mut events = Vec::new();
         let mut worker_died = false;
         loop {
@@ -71,144 +91,120 @@ impl App {
             self.device.scanning = false;
             self.device.progress = None;
             self.notices.error("The connection to the MyChron stopped unexpectedly and has been restarted. Try again.");
-            return;
+            return None;
         }
-        for e in events {
-            match e {
-                Event::Scanned {
-                    logger,
-                    usb,
-                    networks,
-                    current,
-                } => {
-                    self.on_scanned(logger, usb, networks, current);
+        Some(events)
+    }
+
+    /// Applies one thing the worker finished.
+    fn on_event(&mut self, e: crate::device::Event, ctx: &egui::Context) {
+        use crate::device::{Command, Event};
+        match e {
+            Event::Scanned {
+                logger,
+                usb,
+                networks,
+                current,
+            } => {
+                self.on_scanned(logger, usb, networks, current);
+            }
+            Event::Joined { ssid } => {
+                self.device.joined = Some(ssid);
+                self.device.busy = Some("Looking for your MyChron…".into());
+                self.device.scanning = true;
+                let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Scan);
+            }
+            Event::Left => {
+                self.device.joined = None;
+                self.device.logger = None;
+                self.device.tracks = Default::default();
+                self.device.files.clear();
+                self.device.summaries.clear();
+                self.device.busy = None;
+            }
+            Event::Listed {
+                files,
+                summaries,
+                tracks,
+            } => {
+                self.on_listed(files, summaries, tracks);
+            }
+            Event::Progress {
+                index,
+                count,
+                file,
+                done,
+                total,
+            } => {
+                self.device.progress = Some((index, count, file, done, total));
+            }
+            Event::Downloaded { saved } => {
+                self.on_downloaded(saved, ctx);
+            }
+            Event::Error(msg) => {
+                // A setup typed for a download that failed is offered again next time.
+                if let Some((_, setup)) = self.device.pending_setup.take() {
+                    self.device.unsaved_setup = Some(setup);
                 }
-                Event::Joined { ssid } => {
-                    self.device.joined = Some(ssid);
-                    self.device.busy = Some("Looking for your MyChron…".into());
-                    self.device.scanning = true;
-                    let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Scan);
-                }
-                Event::Left => {
-                    self.device.joined = None;
-                    self.device.logger = None;
-                    self.device.tracks = Default::default();
-                    self.device.files.clear();
-                    self.device.summaries.clear();
-                    self.device.busy = None;
-                }
-                Event::Listed {
-                    files,
-                    summaries,
-                    tracks,
-                } => {
-                    self.on_listed(files, summaries, tracks);
-                }
-                Event::Progress {
-                    index,
-                    count,
-                    file,
-                    done,
-                    total,
-                } => {
-                    self.device.progress = Some((index, count, file, done, total));
-                }
-                Event::Downloaded { saved } => {
-                    self.on_downloaded(saved, &ctx);
-                }
-                Event::Error(msg) => {
-                    // A setup typed for a download that failed is offered again next time.
-                    if let Some((_, setup)) = self.device.pending_setup.take() {
-                        self.device.unsaved_setup = Some(setup);
-                    }
-                    self.device.busy = None;
-                    self.device.progress = None;
-                    self.notices.error(msg);
-                }
+                self.device.busy = None;
+                self.device.progress = None;
+                self.notices.error(msg);
             }
         }
+    }
 
-        // MYCHRONIX_FAKE_DEVICE=<logger id> shows that logger's downloaded sessions as if it were
-        // connected, for checking this page's layout without the MyChron (development only).
-        if self.device.logger.is_none()
-            && let Some(id) = crate::hooks::get().fake_device
-        {
-            let mut raw = vec![0u8; 236];
-            raw[0] = 0xec;
-            raw[84..87].copy_from_slice(b"idn");
-            raw[96..100].copy_from_slice(&id.to_le_bytes());
-            self.device.logger =
-                aim_link::Beacon::parse(AP_ADDRESS_FAKE, std::time::Duration::from_millis(3), raw)
-                    .ok();
-            self.device.current_wifi = Some(format!("AiM-MYC6-{:06}", id % 1_000_000));
-            if let Some(dir) = self.logger_dir() {
-                let mut files = Vec::new();
-                let mut summaries = Vec::new();
-                for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                    let p = e.path();
-                    let name = p.file_name().unwrap().to_string_lossy().into_owned();
-                    if name.ends_with(".xrz") {
-                        // Listed as the download noted it, so saved sessions read as downloaded.
-                        let listed = crate::device::SessionMeta::load(&p)
-                            .map(|m| m.listed)
-                            .unwrap_or_default();
-                        let (date, time) = listed
-                            .split_once(' ')
-                            .map(|(d, t)| (d.to_string(), t.to_string()))
-                            .unwrap_or_default();
-                        files.push(aim_link::DirEntry {
-                            name: name.clone(),
-                            size: e.metadata().map(|m| m.len()).unwrap_or(0),
-                            date,
-                            time,
-                        });
-                        if let Some(mut sum) = std::fs::read(p.with_extension("xri"))
-                            .ok()
-                            .and_then(|b| aim_xrk::parse_xri(&b).ok())
-                        {
-                            sum.file = Some(name);
-                            summaries.push(sum);
-                        }
-                    }
-                }
-                // Pretend the newest two aren't downloaded yet.
-                files.sort_by(|a, b| a.name.cmp(&b.name));
-                if let Some(last) = files.last_mut() {
-                    last.size += 1;
-                }
-                self.device.files = files;
-                self.device.summaries = summaries;
-                let warm_up = |name: &str| {
-                    self.device
-                        .summaries
-                        .iter()
-                        .find(|s| s.file.as_deref() == Some(name))
-                        .is_some_and(listed_warm_up)
-                };
-                self.device.selected = self
-                    .new_on_logger()
-                    .into_iter()
-                    .filter(|e| !warm_up(&e.name))
-                    .map(|e| e.name)
-                    .collect();
-                // Its custom tracks: the ones on this computer.
-                let custom = crate::paths::data("tracks/custom")
-                    .and_then(|d| std::fs::read_dir(d).ok())
-                    .into_iter()
-                    .flatten()
-                    .flatten();
-                let names = custom
-                    .filter_map(|e| aim_track::read_tkk(e.path()).ok())
-                    .map(|t| (t.name, crate::device::TrackCopy::Here));
-                self.device.tracks = crate::device::MyChronTracks {
-                    custom: names.collect(),
-                };
+    /// MYCHRONIX_FAKE_DEVICE: that logger as if connected, listing the sessions
+    /// downloaded from it (the newest as not downloaded yet) and the custom
+    /// tracks on this computer. No scanning after.
+    fn fake_device(&mut self, id: u32) {
+        let mut raw = vec![0u8; 236];
+        raw[0] = 0xec;
+        raw[84..87].copy_from_slice(b"idn");
+        raw[96..100].copy_from_slice(&id.to_le_bytes());
+        self.device.logger =
+            aim_link::Beacon::parse(AP_ADDRESS_FAKE, std::time::Duration::from_millis(3), raw).ok();
+        self.device.current_wifi = Some(format!("AiM-MYC6-{:06}", id % 1_000_000));
+        if let Some(dir) = self.logger_dir() {
+            let (mut files, summaries) = fake_listing(&dir);
+            // Pretend the newest two aren't downloaded yet.
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            if let Some(last) = files.last_mut() {
+                last.size += 1;
             }
-            self.device.last_scan = f64::MAX;
+            self.device.files = files;
+            self.device.summaries = summaries;
+            let warm_up = |name: &str| {
+                self.device
+                    .summaries
+                    .iter()
+                    .find(|s| s.file.as_deref() == Some(name))
+                    .is_some_and(listed_warm_up)
+            };
+            self.device.selected = self
+                .new_on_logger()
+                .into_iter()
+                .filter(|e| !warm_up(&e.name))
+                .map(|e| e.name)
+                .collect();
+            // Its custom tracks: the ones on this computer.
+            let custom = crate::paths::data("tracks/custom")
+                .and_then(|d| std::fs::read_dir(d).ok())
+                .into_iter()
+                .flatten()
+                .flatten();
+            let names = custom
+                .filter_map(|e| aim_track::read_tkk(e.path()).ok())
+                .map(|t| (t.name, crate::device::TrackCopy::Here));
+            self.device.tracks = crate::device::MyChronTracks {
+                custom: names.collect(),
+            };
         }
+        self.device.last_scan = f64::MAX;
+    }
 
-        // Keep looking while nothing is connected; check now and then that a logger is still there.
-        let now = ctx.input(|i| i.time);
+    /// Linux: whether an AiM device is plugged in that Mychronix may not open
+    /// (checked every 2 s), and the answer to "Allow USB access".
+    fn usb_poll(&mut self, now: f64) {
         // An AiM device Linux won't let Mychronix use (no USB rule yet).
         if now - self.device.usb_checked > 2.0 {
             self.device.usb_checked = now;
@@ -233,6 +229,11 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Asks the worker to scan again: every 4 s while nothing is connected,
+    /// every 15 s to check a connected logger is still there.
+    fn scan_when_due(&mut self, now: f64) {
         let every = if self.device.logger.is_some() {
             15.0
         } else {
@@ -245,10 +246,16 @@ impl App {
         {
             self.device.last_scan = now;
             self.device.scanning = true;
-            let _ = self.device.worker.as_ref().unwrap().tx.send(Command::Scan);
+            let _ = self
+                .device
+                .worker
+                .as_ref()
+                .unwrap()
+                .tx
+                .send(crate::device::Command::Scan);
         }
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
+
     /// A scan finished: what was found, and whether to read the list again.
     fn on_scanned(
         &mut self,
@@ -827,6 +834,7 @@ impl App {
         });
     }
 
+    /// The sessions on the logger, newest first, to pick and download.
     fn device_sessions(&mut self, ui: &mut Ui) {
         let new: std::collections::BTreeSet<String> =
             self.new_on_logger().into_iter().map(|e| e.name).collect();
@@ -855,111 +863,10 @@ impl App {
             .iter()
             .find(|k| k.logger == logger_id)
             .and_then(|k| k.next_setup.clone());
-        let summary_of = |name: &str| {
-            self.device
-                .summaries
-                .iter()
-                .find(|s| s.file.as_deref() == Some(name))
-                .cloned()
-        };
+        let mut input = SessionsInput::default();
         card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("Sessions on the logger")
-                        .font(semibold(16.0))
-                        .color(TEXT),
-                );
-                ui.label(
-                    RichText::new(format!("{} total  ·  {} new", sessions.len(), new.len()))
-                        .color(SECONDARY),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let n = self.device.selected.len();
-                    let label = if n == 0 {
-                        "Download".to_string()
-                    } else {
-                        format!("Download {n}")
-                    };
-                    // Quiet until something is picked: it does nothing then.
-                    if button(ui, Some(Icon::Download), &label, n > 0).clicked()
-                        && n > 0
-                        && self.device.busy.is_none()
-                    {
-                        let id = self
-                            .device
-                            .logger
-                            .as_ref()
-                            .and_then(|b| b.logger_id)
-                            .map(|i| i.to_string())
-                            .unwrap_or_default();
-                        let p = profiles(&mut self.profiles).for_logger(&id);
-                        // The track comes from the logger: one track pre-fills the field, several defer to each session.
-                        let mut detected: Vec<String> = self
-                            .device
-                            .selected
-                            .iter()
-                            .filter_map(|n| summary_of(n))
-                            .filter_map(|s| s.track)
-                            .filter(|t| !t.is_empty())
-                            .collect();
-                        detected.sort();
-                        detected.dedup();
-                        let track = if detected.len() == 1 {
-                            detected[0].clone()
-                        } else {
-                            String::new()
-                        };
-                        self.device.dialog = Some(DownloadDialog {
-                            meta: crate::device::SessionMeta {
-                                driver: p.driver,
-                                kart: p.kart,
-                                championship: p.championship,
-                                track,
-                                ..Default::default()
-                            },
-                            detected,
-                            // A setup typed for a failed download, else the kart's next one (Garage), else what it runs.
-                            setup: self
-                                .device
-                                .unsaved_setup
-                                .clone()
-                                .or(next_setup)
-                                .unwrap_or_else(|| setup_now.clone()),
-                            setup_before: setup_now.clone(),
-                            setup_open: false,
-                            replace: true,
-                            setup_target: None,
-                            adding_driver: false,
-                        });
-                    }
-                    if chip(ui, "None", false).clicked() {
-                        self.device.selected.clear();
-                    }
-                    if chip(ui, "All new", false).clicked() {
-                        self.device.selected = new.clone();
-                    }
-                });
-            });
-            if let Some((index, count, file, done, total)) = &self.device.progress {
-                ui.add_space(8.0);
-                let frac = (*index as f32 + *done as f32 / (*total).max(1) as f32)
-                    / (*count).max(1) as f32;
-                ui.label(
-                    RichText::new(format!("Downloading {file}  ({} of {count})", index + 1))
-                        .color(SECONDARY),
-                );
-                let (bar, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-                ui.painter().rect_filled(bar, 3.0, SURFACE_ACTIVE);
-                ui.painter().rect_filled(
-                    Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())),
-                    3.0,
-                    TEXT,
-                );
-            } else if let Some(b) = &self.device.busy {
-                ui.add_space(6.0);
-                ui.label(RichText::new(b).color(SECONDARY));
-            }
+            self.device_sessions_header(ui, sessions.len(), &new, &mut input);
+            self.download_progress(ui);
             ui.add_space(8.0);
             egui::ScrollArea::vertical()
                 .id_salt("logger_sessions")
@@ -967,81 +874,165 @@ impl App {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for e in &sessions {
-                        let sum = summary_of(&e.name);
-                        let is_new = new.contains(&e.name);
-                        let mut on = self.device.selected.contains(&e.name);
-                        let response = row(ui, false, |ui| {
-                            let (cb, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                            ui.painter().rect_stroke(
-                                cb,
-                                CornerRadius::same(4),
-                                Stroke::new(1.5, if on { TEXT } else { DIM }),
-                                egui::StrokeKind::Inside,
-                            );
-                            if on {
-                                Icon::Check.image(TEXT, 14.0).paint_at(ui, cb.shrink(2.0));
-                            }
-                            ui.add_space(6.0);
-                            let number = aim_xrk::summary::session_number(&e.name)
-                                .map(|n| format!("Session {n}"))
-                                .unwrap_or(e.name.clone());
-                            ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
-                            let when = sum
-                                .as_ref()
-                                .map(|s| {
-                                    [
-                                        s.date.map(crate::dates::us_short),
-                                        s.start_time.as_deref().map(crate::dates::clock_time),
-                                    ]
-                                    .into_iter()
-                                    .flatten()
-                                    .collect::<Vec<_>>()
-                                    .join("  ·  ")
-                                })
-                                .unwrap_or(e.date.clone());
-                            ui.label(RichText::new(when).color(DIM));
-                            if let Some(t) = sum.as_ref().and_then(|s| s.track.clone()) {
-                                ui.label(RichText::new(t).color(SECONDARY));
-                            }
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if is_new {
-                                    tag(ui, "New", TEXT);
-                                    if sum.as_ref().is_some_and(listed_warm_up) {
-                                        tag(ui, "Warm-up", DIM);
-                                    }
-                                } else {
-                                    ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
-                                }
-                                ui.label(
-                                    RichText::new(format!("{:.1} MB", e.size as f64 / 1e6))
-                                        .size(12.5)
-                                        .color(DIM),
-                                );
-                                if let Some(s) = &sum {
-                                    let best = s
-                                        .best_lap_ms
-                                        .map(|b| format_lap_time(b as i64))
-                                        .unwrap_or_else(|| "—".into());
-                                    ui.label(RichText::new(best).font(medium(14.0)).color(TEXT));
-                                    let laps = s.laps.unwrap_or(0);
-                                    ui.label(
-                                        RichText::new(plural(laps as usize, "lap"))
-                                            .size(12.5)
-                                            .color(DIM),
-                                    );
-                                }
-                            });
-                        });
-                        if response.clicked() {
-                            on = !on;
-                            if on {
-                                self.device.selected.insert(e.name.clone());
-                            } else {
-                                self.device.selected.remove(&e.name);
-                            }
+                        let sum = self.listed_summary(&e.name);
+                        // Picked as of this frame's clicks so far.
+                        let on = input
+                            .select
+                            .as_ref()
+                            .unwrap_or(&self.device.selected)
+                            .contains(&e.name);
+                        if logger_session(ui, e, sum.as_ref(), new.contains(&e.name), on).clicked()
+                        {
+                            input.toggle = Some(e.name.clone());
                         }
                     }
                 });
+        });
+        self.device_sessions_apply(input, &logger_id, setup_now, next_setup);
+    }
+
+    /// The summary the logger listed for one of its files.
+    fn listed_summary(&self, name: &str) -> Option<aim_xrk::SessionSummary> {
+        self.device
+            .summaries
+            .iter()
+            .find(|s| s.file.as_deref() == Some(name))
+            .cloned()
+    }
+
+    /// The session list's heading: how many, how many new, and Download,
+    /// None and All new.
+    fn device_sessions_header(
+        &self,
+        ui: &mut Ui,
+        total: usize,
+        new: &std::collections::BTreeSet<String>,
+        input: &mut SessionsInput,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Sessions on the logger")
+                    .font(semibold(16.0))
+                    .color(TEXT),
+            );
+            ui.label(
+                RichText::new(format!("{} total  ·  {} new", total, new.len())).color(SECONDARY),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let n = self.device.selected.len();
+                let label = if n == 0 {
+                    "Download".to_string()
+                } else {
+                    format!("Download {n}")
+                };
+                // Quiet until something is picked: it does nothing then.
+                if button(ui, Some(Icon::Download), &label, n > 0).clicked()
+                    && n > 0
+                    && self.device.busy.is_none()
+                {
+                    input.download = true;
+                }
+                if chip(ui, "None", false).clicked() {
+                    input.select = Some(Default::default());
+                }
+                if chip(ui, "All new", false).clicked() {
+                    input.select = Some(new.clone());
+                }
+            });
+        });
+    }
+
+    /// A download's progress bar, or what the worker is doing.
+    fn download_progress(&self, ui: &mut Ui) {
+        if let Some((index, count, file, done, total)) = &self.device.progress {
+            ui.add_space(8.0);
+            let frac =
+                (*index as f32 + *done as f32 / (*total).max(1) as f32) / (*count).max(1) as f32;
+            ui.label(
+                RichText::new(format!("Downloading {file}  ({} of {count})", index + 1))
+                    .color(SECONDARY),
+            );
+            let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+            ui.painter().rect_filled(bar, 3.0, SURFACE_ACTIVE);
+            ui.painter().rect_filled(
+                Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())),
+                3.0,
+                TEXT,
+            );
+        } else if let Some(b) = &self.device.busy {
+            ui.add_space(6.0);
+            ui.label(RichText::new(b).color(SECONDARY));
+        }
+    }
+
+    /// What was clicked in the session list: the download window opened with
+    /// the sessions picked, then the picks changed.
+    fn device_sessions_apply(
+        &mut self,
+        input: SessionsInput,
+        logger_id: &str,
+        setup_now: crate::setup::Setup,
+        next_setup: Option<crate::setup::Setup>,
+    ) {
+        if input.download {
+            self.open_download_dialog(logger_id, setup_now, next_setup);
+        }
+        if let Some(picked) = input.select {
+            self.device.selected = picked;
+        }
+        if let Some(name) = input.toggle
+            && !self.device.selected.remove(&name)
+        {
+            self.device.selected.insert(name);
+        }
+    }
+
+    /// Opens the download window for the sessions picked, filled in with what
+    /// this MyChron had last time.
+    fn open_download_dialog(
+        &mut self,
+        logger_id: &str,
+        setup_now: crate::setup::Setup,
+        next_setup: Option<crate::setup::Setup>,
+    ) {
+        let p = profiles(&mut self.profiles).for_logger(logger_id);
+        // The track comes from the logger: one track pre-fills the field, several defer to each session.
+        let mut detected: Vec<String> = self
+            .device
+            .selected
+            .iter()
+            .filter_map(|n| self.listed_summary(n))
+            .filter_map(|s| s.track)
+            .filter(|t| !t.is_empty())
+            .collect();
+        detected.sort();
+        detected.dedup();
+        let track = if detected.len() == 1 {
+            detected[0].clone()
+        } else {
+            String::new()
+        };
+        self.device.dialog = Some(DownloadDialog {
+            meta: crate::device::SessionMeta {
+                driver: p.driver,
+                kart: p.kart,
+                championship: p.championship,
+                track,
+                ..Default::default()
+            },
+            detected,
+            // A setup typed for a failed download, else the kart's next one (Garage), else what it runs.
+            setup: self
+                .device
+                .unsaved_setup
+                .clone()
+                .or(next_setup)
+                .unwrap_or_else(|| setup_now.clone()),
+            setup_before: setup_now,
+            setup_open: false,
+            replace: true,
+            setup_target: None,
+            adding_driver: false,
         });
     }
 
@@ -1052,16 +1043,57 @@ impl App {
         let Some(mut dlg) = self.device.dialog.take() else {
             return;
         };
+        let form = self.download_form(&mut dlg);
+        let (mut go, mut cancel) = (false, false);
+        let closed = look::dialog(ctx, "download", 760.0, |ui| {
+            let n = form.n;
+            let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
+            look::header(
+                ui,
+                Icon::Download,
+                SECONDARY,
+                None,
+                &title,
+                "Who drove, in which kart, and where. These are remembered for next time.",
+            );
+            // Two steps, either one a click away: the details, then the setup.
+            if let Some(k) =
+                look::steps(ui, &["Details", "Setup"], usize::from(dlg.setup_open), true)
+            {
+                dlg.setup_open = k == 1;
+            }
+            look::body(ui, |ui| {
+                if dlg.setup_open {
+                    setup_ui::setup_fields(
+                        ui,
+                        "dl_setup",
+                        &mut dlg.setup,
+                        &form.tires,
+                        480.0,
+                        true,
+                    );
+                    setup_change_notes(ui, &dlg, &form.setup_from);
+                    return;
+                }
+                download_details(ui, &mut dlg, &form);
+            });
+            (go, cancel) = download_footer(ui, &mut dlg);
+        });
+        let open = !closed;
+        if go {
+            self.start_download(dlg, form.target, form.multiple);
+        } else if open && !cancel {
+            self.device.dialog = Some(dlg);
+        }
+    }
+
+    /// What the download window shows besides its fields.
+    fn download_form(&mut self, dlg: &mut DownloadDialog) -> DownloadForm {
         let lib = self.lib();
         let profiles = profiles(&mut self.profiles).clone();
-        let s = Suggestions::gather(&lib, &profiles);
+        let suggest = Suggestions::gather(&lib, &profiles);
         let tires = self.tire_suggestions();
         let lib = self.lib();
-        let multiple = dlg.detected.len() > 1;
-        let mut go = false;
-        let mut cancel = false;
-        let n = self.device.selected.len();
-        let field_w = 460.0;
         // Picked sessions already saved here, as "Session 10".
         let dir = self.logger_dir();
         let again: Vec<String> = self
@@ -1089,9 +1121,6 @@ impl App {
             Some((_, start)) => format!("Saved with the session that started {}. Sessions after it use it until it's changed.", crate::dates::stamp_words(*start)),
             None => "None of these sessions is newer than the ones already here, so this setup isn't saved with them. To change an earlier session's setup, open it and use Setup.".into(),
         };
-        // The Garage's drivers and karts, and what this MyChron is on now.
-        let drivers: Vec<String> = profiles.drivers.iter().map(|d| d.name.clone()).collect();
-        let karts: Vec<String> = profiles.garage_karts().map(|k| k.name.clone()).collect();
         let current = profiles.for_logger(
             &self
                 .device
@@ -1101,190 +1130,17 @@ impl App {
                 .map(|i| i.to_string())
                 .unwrap_or_default(),
         );
-        let closed = look::dialog(ctx, "download", 760.0, |ui| {
-            use look;
-            let title = format!("Download {n} session{}", if n == 1 { "" } else { "s" });
-            look::header(
-                ui,
-                Icon::Download,
-                SECONDARY,
-                None,
-                &title,
-                "Who drove, in which kart, and where. These are remembered for next time.",
-            );
-            // Two steps, either one a click away: the details, then the setup.
-            if let Some(k) =
-                look::steps(ui, &["Details", "Setup"], usize::from(dlg.setup_open), true)
-            {
-                dlg.setup_open = k == 1;
-            }
-            look::body(ui, |ui| {
-                if dlg.setup_open {
-                    setup_ui::setup_fields(ui, "dl_setup", &mut dlg.setup, &tires, 480.0, true);
-                    let changes = dlg.setup.changes_from(&dlg.setup_before);
-                    if changes.is_empty() {
-                        look::note(ui, "Same as last time.", DIM);
-                    } else {
-                        look::note(
-                            ui,
-                            &format!("Changed: {}", changes.join(", ")),
-                            theme::FAVORITE,
-                        );
-                    }
-                    // Changes and notes are both saved on one session: say which.
-                    if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
-                        look::note(ui, &setup_from, DIM);
-                    }
-                    return;
-                }
-                egui::Grid::new("download_meta").num_columns(2).spacing([20.0, 16.0]).min_col_width(120.0).show(ui, |ui| {
-                    // Driver and kart come from the Garage, so a typo can't make a new
-                    // driver or kart, or move a MyChron; a new driver is added on purpose.
-                    look::label(ui, "Driver");
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        if dlg.adding_driver || drivers.is_empty() {
-                            suggest_field(ui, "dl_driver", &mut dlg.meta.driver, "New driver's name", &[], field_w);
-                            if !drivers.is_empty() && ui.add(egui::Label::new(RichText::new("Pick from the Garage instead").size(12.5).color(SECONDARY)).sense(Sense::click())).clicked() {
-                                dlg.adding_driver = false;
-                                dlg.meta.driver = current.driver.clone();
-                            }
-                            if !dlg.meta.driver.trim().is_empty() && !drivers.iter().any(|d| d.eq_ignore_ascii_case(dlg.meta.driver.trim())) {
-                                look::note(ui, &format!("{} is added to the Garage.", dlg.meta.driver.trim()), DIM);
-                            }
-                        } else if pick_field(ui, "dl_driver", &mut dlg.meta.driver, &drivers, "Pick a driver", Some("Add a driver…"), field_w) {
-                            dlg.adding_driver = true;
-                            dlg.meta.driver.clear();
-                        }
-                    });
-                    ui.end_row();
-                    look::label(ui, "Kart");
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        if karts.is_empty() {
-                            look::note(ui, "No karts in the Garage yet. Add one there, and its MyChron's sessions become its.", DIM);
-                        } else {
-                            pick_field(ui, "dl_kart", &mut dlg.meta.kart, &karts, "No kart", None, field_w);
-                            let picked = dlg.meta.kart.trim();
-                            if !picked.is_empty() && !picked.eq_ignore_ascii_case(&current.kart) {
-                                let from = if current.kart.is_empty() { String::new() } else { format!(" from {}", current.kart) };
-                                look::note(ui, &format!("This MyChron moves to {picked}{from}: these sessions and later ones are its."), theme::FAVORITE);
-                            }
-                        }
-                    });
-                    ui.end_row();
-                    look::label(ui, "Championship");
-                    suggest_field(ui, "dl_champ", &mut dlg.meta.championship, "e.g. 2026 Club Championship", &s.championships, field_w);
-                    ui.end_row();
-                    look::label(ui, "Session type");
-                    suggest_field(ui, "dl_type", &mut dlg.meta.session_type, "Practice 1, Heat 2, Final…", &s.session_types, field_w);
-                    ui.end_row();
-                    look::label(ui, "Track");
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        if multiple {
-                            ui.label(RichText::new(format!("Several: {}", dlg.detected.join(", "))).font(regular(16.5)).color(TEXT));
-                            look::note(ui, "Each session keeps the track the MyChron recorded for it.", DIM);
-                        } else {
-                            suggest_field(ui, "dl_track", &mut dlg.meta.track, "Track", &s.tracks, field_w);
-                            let from_logger = dlg.detected.first().cloned().unwrap_or_default();
-                            let note = if !from_logger.is_empty() && dlg.meta.track == from_logger {
-                                "From the MyChron.".to_string()
-                            } else if !from_logger.is_empty() {
-                                format!("The MyChron recorded {from_logger}; these sessions will be filed under {} instead.", dlg.meta.track)
-                            } else {
-                                "The MyChron didn't recognize a track for these sessions.".into()
-                            };
-                            look::note(ui, &note, DIM);
-                        }
-                    });
-                    ui.end_row();
-                    look::label(ui, "Comment");
-                    look::text_area(ui, &mut dlg.meta.comment, "Optional: conditions, how it went", field_w, 2);
-                    ui.end_row();
-                    // Sessions picked again that are already here: replace them, or keep both.
-                    if !again.is_empty() {
-                        look::label(ui, "Already here");
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 6.0;
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                if chip(ui, "Replace", dlg.replace).clicked() {
-                                    dlg.replace = true;
-                                }
-                                if chip(ui, "Keep both", !dlg.replace).clicked() {
-                                    dlg.replace = false;
-                                }
-                            });
-                            let which = if again.len() == 1 { format!("{} is", again[0]) } else { format!("{} of these are", again.len()) };
-                            let what = if dlg.replace { "Its copy here is updated with the details filled in above; blank ones keep what it had." } else { "A second copy is saved beside it." };
-                            look::note(ui, &format!("{which} already on this computer. {what}"), DIM);
-                        });
-                        ui.end_row();
-                    }
-                    look::label(ui, "Setup");
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 6.0;
-                        let summary = dlg.setup.summary();
-                        ui.add(egui::Label::new(RichText::new(if summary.is_empty() { "None recorded yet".to_string() } else { summary }).font(regular(16.0)).color(TEXT)).wrap());
-                        let changes = dlg.setup.changes_from(&dlg.setup_before);
-                        if changes.is_empty() {
-                            look::note(ui, "Same as last time.", DIM);
-                        } else {
-                            look::note(ui, &format!("Changed: {}", changes.join(", ")), theme::FAVORITE);
-                        }
-                        // Changes and notes are both saved on one session: say which.
-                        if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
-                            look::note(ui, &setup_from, DIM);
-                        }
-                    });
-                    ui.end_row();
-                });
-            });
-            look::footer_row(ui, |ui| {
-                // Back from the setup; Cancel from the details.
-                if look::big_button(
-                    ui,
-                    if dlg.setup_open { "Back" } else { "Cancel" },
-                    None,
-                    look::Kind::Quiet,
-                    true,
-                ) {
-                    if dlg.setup_open {
-                        dlg.setup_open = false;
-                    } else {
-                        cancel = true;
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if look::big_button(
-                        ui,
-                        "Download",
-                        Some(Icon::Download),
-                        look::Kind::Primary,
-                        true,
-                    ) {
-                        go = true;
-                    }
-                    if !dlg.setup_open
-                        && look::big_button(
-                            ui,
-                            "Change setup",
-                            Some(Icon::Settings),
-                            look::Kind::Quiet,
-                            true,
-                        )
-                    {
-                        dlg.setup_open = true;
-                    }
-                });
-            });
-        });
-        let open = !closed;
-        if go {
-            self.start_download(dlg, target, multiple);
-        } else if open && !cancel {
-            self.device.dialog = Some(dlg);
+        DownloadForm {
+            n: self.device.selected.len(),
+            multiple: dlg.detected.len() > 1,
+            again,
+            target,
+            setup_from,
+            drivers: profiles.drivers.iter().map(|d| d.name.clone()).collect(),
+            karts: profiles.garage_karts().map(|k| k.name.clone()).collect(),
+            current,
+            suggest,
+            tires,
         }
     }
 
@@ -1363,7 +1219,449 @@ impl App {
     }
 }
 
+/// What the download window shows besides its fields, worked out once a frame.
+struct DownloadForm {
+    /// How many sessions are picked, and whether the logger recorded several tracks for them.
+    n: usize,
+    multiple: bool,
+    /// Picked sessions already saved here, as "Session 10".
+    again: Vec<String>,
+    /// The session a changed setup is saved on, and the note that says which.
+    target: Option<(PathBuf, crate::dates::Stamp)>,
+    setup_from: String,
+    /// The Garage's drivers and karts, and what this MyChron is on now.
+    drivers: Vec<String>,
+    karts: Vec<String>,
+    current: crate::profiles::LoggerProfile,
+    suggest: Suggestions,
+    tires: Vec<String>,
+}
+
+/// The download window's fields' width.
+const DL_FIELD_W: f32 = 460.0;
+
+/// Whether the setup changed since last time, and if it's saved, on which session.
+fn setup_change_notes(ui: &mut Ui, dlg: &DownloadDialog, setup_from: &str) {
+    let changes = dlg.setup.changes_from(&dlg.setup_before);
+    if changes.is_empty() {
+        look::note(ui, "Same as last time.", DIM);
+    } else {
+        look::note(
+            ui,
+            &format!("Changed: {}", changes.join(", ")),
+            theme::FAVORITE,
+        );
+    }
+    // Changes and notes are both saved on one session: say which.
+    if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
+        look::note(ui, setup_from, DIM);
+    }
+}
+
+/// The download window's details: driver, kart, championship, session type,
+/// track, comment, sessions already here, and the setup.
+fn download_details(ui: &mut Ui, dlg: &mut DownloadDialog, form: &DownloadForm) {
+    egui::Grid::new("download_meta")
+        .num_columns(2)
+        .spacing([20.0, 16.0])
+        .min_col_width(120.0)
+        .show(ui, |ui| {
+            look::label(ui, "Driver");
+            download_driver(ui, dlg, form);
+            ui.end_row();
+            look::label(ui, "Kart");
+            download_kart(ui, dlg, form);
+            ui.end_row();
+            look::label(ui, "Championship");
+            suggest_field(
+                ui,
+                "dl_champ",
+                &mut dlg.meta.championship,
+                "e.g. 2026 Club Championship",
+                &form.suggest.championships,
+                DL_FIELD_W,
+            );
+            ui.end_row();
+            look::label(ui, "Session type");
+            suggest_field(
+                ui,
+                "dl_type",
+                &mut dlg.meta.session_type,
+                "Practice 1, Heat 2, Final…",
+                &form.suggest.session_types,
+                DL_FIELD_W,
+            );
+            ui.end_row();
+            look::label(ui, "Track");
+            download_track(ui, dlg, form);
+            ui.end_row();
+            look::label(ui, "Comment");
+            look::text_area(
+                ui,
+                &mut dlg.meta.comment,
+                "Optional: conditions, how it went",
+                DL_FIELD_W,
+                2,
+            );
+            ui.end_row();
+            // Sessions picked again that are already here: replace them, or keep both.
+            if !form.again.is_empty() {
+                look::label(ui, "Already here");
+                download_again(ui, dlg, &form.again);
+                ui.end_row();
+            }
+            look::label(ui, "Setup");
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                let summary = dlg.setup.summary();
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(if summary.is_empty() {
+                            "None recorded yet".to_string()
+                        } else {
+                            summary
+                        })
+                        .font(regular(16.0))
+                        .color(TEXT),
+                    )
+                    .wrap(),
+                );
+                setup_change_notes(ui, dlg, &form.setup_from);
+            });
+            ui.end_row();
+        });
+}
+
+/// Who drove: picked from the Garage, so a typo can't make a new driver; a
+/// new driver is added on purpose.
+fn download_driver(ui: &mut Ui, dlg: &mut DownloadDialog, form: &DownloadForm) {
+    let drivers = &form.drivers;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        if dlg.adding_driver || drivers.is_empty() {
+            suggest_field(
+                ui,
+                "dl_driver",
+                &mut dlg.meta.driver,
+                "New driver's name",
+                &[],
+                DL_FIELD_W,
+            );
+            if !drivers.is_empty()
+                && ui
+                    .add(
+                        egui::Label::new(
+                            RichText::new("Pick from the Garage instead")
+                                .size(12.5)
+                                .color(SECONDARY),
+                        )
+                        .sense(Sense::click()),
+                    )
+                    .clicked()
+            {
+                dlg.adding_driver = false;
+                dlg.meta.driver = form.current.driver.clone();
+            }
+            if !dlg.meta.driver.trim().is_empty()
+                && !drivers
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(dlg.meta.driver.trim()))
+            {
+                look::note(
+                    ui,
+                    &format!("{} is added to the Garage.", dlg.meta.driver.trim()),
+                    DIM,
+                );
+            }
+        } else if pick_field(
+            ui,
+            "dl_driver",
+            &mut dlg.meta.driver,
+            drivers,
+            "Pick a driver",
+            Some("Add a driver…"),
+            DL_FIELD_W,
+        ) {
+            dlg.adding_driver = true;
+            dlg.meta.driver.clear();
+        }
+    });
+}
+
+/// Which kart: picked from the Garage, so a typo can't move a MyChron.
+fn download_kart(ui: &mut Ui, dlg: &mut DownloadDialog, form: &DownloadForm) {
+    let current = &form.current;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        if form.karts.is_empty() {
+            look::note(
+                ui,
+                "No karts in the Garage yet. Add one there, and its MyChron's sessions become its.",
+                DIM,
+            );
+        } else {
+            pick_field(
+                ui,
+                "dl_kart",
+                &mut dlg.meta.kart,
+                &form.karts,
+                "No kart",
+                None,
+                DL_FIELD_W,
+            );
+            let picked = dlg.meta.kart.trim();
+            if !picked.is_empty() && !picked.eq_ignore_ascii_case(&current.kart) {
+                let from = if current.kart.is_empty() {
+                    String::new()
+                } else {
+                    format!(" from {}", current.kart)
+                };
+                look::note(
+                    ui,
+                    &format!(
+                        "This MyChron moves to {picked}{from}: these sessions and later ones are its."
+                    ),
+                    theme::FAVORITE,
+                );
+            }
+        }
+    });
+}
+
+/// Where: the track the MyChron recorded, or with several, each session's own.
+fn download_track(ui: &mut Ui, dlg: &mut DownloadDialog, form: &DownloadForm) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        if form.multiple {
+            ui.label(
+                RichText::new(format!("Several: {}", dlg.detected.join(", ")))
+                    .font(regular(16.5))
+                    .color(TEXT),
+            );
+            look::note(
+                ui,
+                "Each session keeps the track the MyChron recorded for it.",
+                DIM,
+            );
+        } else {
+            suggest_field(
+                ui,
+                "dl_track",
+                &mut dlg.meta.track,
+                "Track",
+                &form.suggest.tracks,
+                DL_FIELD_W,
+            );
+            let from_logger = dlg.detected.first().cloned().unwrap_or_default();
+            let note = if !from_logger.is_empty() && dlg.meta.track == from_logger {
+                "From the MyChron.".to_string()
+            } else if !from_logger.is_empty() {
+                format!(
+                    "The MyChron recorded {from_logger}; these sessions will be filed under {} instead.",
+                    dlg.meta.track
+                )
+            } else {
+                "The MyChron didn't recognize a track for these sessions.".into()
+            };
+            look::note(ui, &note, DIM);
+        }
+    });
+}
+
+/// Sessions picked that are already on this computer: replace them, or keep both.
+fn download_again(ui: &mut Ui, dlg: &mut DownloadDialog, again: &[String]) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if chip(ui, "Replace", dlg.replace).clicked() {
+                dlg.replace = true;
+            }
+            if chip(ui, "Keep both", !dlg.replace).clicked() {
+                dlg.replace = false;
+            }
+        });
+        let which = if again.len() == 1 {
+            format!("{} is", again[0])
+        } else {
+            format!("{} of these are", again.len())
+        };
+        let what = if dlg.replace {
+            "Its copy here is updated with the details filled in above; blank ones keep what it had."
+        } else {
+            "A second copy is saved beside it."
+        };
+        look::note(
+            ui,
+            &format!("{which} already on this computer. {what}"),
+            DIM,
+        );
+    });
+}
+
+/// The download window's buttons: Back from the setup (Cancel from the
+/// details), Change setup and Download. (Download, Cancel) pressed.
+fn download_footer(ui: &mut Ui, dlg: &mut DownloadDialog) -> (bool, bool) {
+    let (mut go, mut cancel) = (false, false);
+    look::footer_row(ui, |ui| {
+        if look::big_button(
+            ui,
+            if dlg.setup_open { "Back" } else { "Cancel" },
+            None,
+            look::Kind::Quiet,
+            true,
+        ) {
+            if dlg.setup_open {
+                dlg.setup_open = false;
+            } else {
+                cancel = true;
+            }
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if look::big_button(
+                ui,
+                "Download",
+                Some(Icon::Download),
+                look::Kind::Primary,
+                true,
+            ) {
+                go = true;
+            }
+            if !dlg.setup_open
+                && look::big_button(
+                    ui,
+                    "Change setup",
+                    Some(Icon::Settings),
+                    look::Kind::Quiet,
+                    true,
+                )
+            {
+                dlg.setup_open = true;
+            }
+        });
+    });
+    (go, cancel)
+}
+
+/// What was clicked in the logger's session list this frame, applied once it's drawn.
+#[derive(Default)]
+struct SessionsInput {
+    /// Download, with something picked and nothing under way.
+    download: bool,
+    /// Picks replaced: none, or all the new ones.
+    select: Option<std::collections::BTreeSet<String>>,
+    /// A session clicked, to pick or unpick.
+    toggle: Option<String>,
+}
+
+/// One session on the logger: its checkbox, number, when and where, and
+/// whether it's new, its size, best lap and laps. The row's response.
+fn logger_session(
+    ui: &mut Ui,
+    e: &aim_link::DirEntry,
+    sum: Option<&aim_xrk::SessionSummary>,
+    is_new: bool,
+    on: bool,
+) -> egui::Response {
+    row(ui, false, |ui| {
+        let (cb, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+        ui.painter().rect_stroke(
+            cb,
+            CornerRadius::same(4),
+            Stroke::new(1.5, if on { TEXT } else { DIM }),
+            egui::StrokeKind::Inside,
+        );
+        if on {
+            Icon::Check.image(TEXT, 14.0).paint_at(ui, cb.shrink(2.0));
+        }
+        ui.add_space(6.0);
+        let number = aim_xrk::summary::session_number(&e.name)
+            .map(|n| format!("Session {n}"))
+            .unwrap_or(e.name.clone());
+        ui.label(RichText::new(number).font(medium(14.0)).color(TEXT));
+        let when = sum
+            .map(|s| {
+                [
+                    s.date.map(crate::dates::us_short),
+                    s.start_time.as_deref().map(crate::dates::clock_time),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("  ·  ")
+            })
+            .unwrap_or(e.date.clone());
+        ui.label(RichText::new(when).color(DIM));
+        if let Some(t) = sum.and_then(|s| s.track.clone()) {
+            ui.label(RichText::new(t).color(SECONDARY));
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if is_new {
+                tag(ui, "New", TEXT);
+                if sum.is_some_and(listed_warm_up) {
+                    tag(ui, "Warm-up", DIM);
+                }
+            } else {
+                ui.label(RichText::new("Downloaded").size(12.5).color(DIM));
+            }
+            ui.label(
+                RichText::new(format!("{:.1} MB", e.size as f64 / 1e6))
+                    .size(12.5)
+                    .color(DIM),
+            );
+            if let Some(s) = sum {
+                let best = s
+                    .best_lap_ms
+                    .map(|b| format_lap_time(b as i64))
+                    .unwrap_or_else(|| "—".into());
+                ui.label(RichText::new(best).font(medium(14.0)).color(TEXT));
+                let laps = s.laps.unwrap_or(0);
+                ui.label(
+                    RichText::new(plural(laps as usize, "lap"))
+                        .size(12.5)
+                        .color(DIM),
+                );
+            }
+        });
+    })
+}
+
 const AP_ADDRESS_FAKE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 1);
+
+/// The sessions downloaded into a logger's folder, as the MyChron would
+/// list them (for MYCHRONIX_FAKE_DEVICE), with the summaries saved beside them.
+fn fake_listing(dir: &std::path::Path) -> (Vec<aim_link::DirEntry>, Vec<aim_xrk::SessionSummary>) {
+    let mut files = Vec::new();
+    let mut summaries = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        if name.ends_with(".xrz") {
+            // Listed as the download noted it, so saved sessions read as downloaded.
+            let listed = crate::device::SessionMeta::load(&p)
+                .map(|m| m.listed)
+                .unwrap_or_default();
+            let (date, time) = listed
+                .split_once(' ')
+                .map(|(d, t)| (d.to_string(), t.to_string()))
+                .unwrap_or_default();
+            files.push(aim_link::DirEntry {
+                name: name.clone(),
+                size: e.metadata().map(|m| m.len()).unwrap_or(0),
+                date,
+                time,
+            });
+            if let Some(mut sum) = std::fs::read(p.with_extension("xri"))
+                .ok()
+                .and_then(|b| aim_xrk::parse_xri(&b).ok())
+            {
+                sum.file = Some(name);
+                summaries.push(sum);
+            }
+        }
+    }
+    (files, summaries)
+}
 
 /// Whether a session on the logger was an engine warm-up, by its own
 /// summary's top speed (read for new sessions only; unknown counts as not).

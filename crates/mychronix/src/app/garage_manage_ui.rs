@@ -351,7 +351,6 @@ impl App {
     }
 
     /// Setting up a MyChron: whose it is, which kart, and (if that kart has
-    /// one) whether to replace it or give this one a new kart.
     pub(super) fn mychron_setup_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut s) = self.garage.mychron_setup.take() else {
             return;
@@ -360,275 +359,72 @@ impl App {
         let model_of = |l: &str| models.get(l).cloned().unwrap_or_else(|| "MyChron".into());
         let lib = self.lib();
         let profiles = profiles(&mut self.profiles);
-        let model = s.model.clone();
-        let logger = s.logger.clone();
         let (mut cancel, mut finish) = (false, false);
-        let driver_name = |p: &Profiles, c: &Choice| match c {
-            Choice::Existing(id) => p.driver_name(Some(*id)).unwrap_or("").to_string(),
-            Choice::New(n) => n.trim().to_string(),
-            Choice::None => String::new(),
-        };
         // A kart with another MyChron on it adds a third step.
-        let occupied = |p: &Profiles, c: &Choice| match c {
-            Choice::Existing(id) => p
-                .karts
-                .iter()
-                .find(|k| k.id == *id && !k.logger.is_empty() && k.logger != logger)
-                .cloned(),
-            _ => None,
-        };
-        let steps = if s.step == Step::Replace || occupied(profiles, &s.kart).is_some() {
+        let steps = if s.step == Step::Replace || occupied(profiles, &s.kart, &s.logger).is_some() {
             3
         } else {
             2
         };
         let closed = look::dialog(ctx, "mychron_setup", look::WIDTH, |ui| match s.step {
-            Step::Driver => {
-                look::header(
-                    ui,
-                    Icon::Mychron,
-                    theme::GOOD,
-                    Some(&format!("Step 1 of {steps}")),
-                    &format!("Set up the {model}"),
-                    &format!("Whose {model} is it? (ID {logger})"),
-                );
-                look::body(ui, |ui| {
-                    for d in profiles.drivers.clone() {
-                        let karts = profiles
-                            .garage_karts()
-                            .filter(|k| k.driver == Some(d.id))
-                            .count();
-                        let sub = [d.class.trim().to_string(), plural(karts, "kart")]
-                            .into_iter()
-                            .filter(|x| !x.is_empty())
-                            .collect::<Vec<_>>()
-                            .join("  ·  ");
-                        if look::option(ui, s.driver == Choice::Existing(d.id), None, &d.name, &sub)
-                        {
-                            s.driver = Choice::Existing(d.id);
-                        }
-                    }
-                    let new = matches!(s.driver, Choice::New(_));
-                    if look::option(ui, new, Some(Icon::Plus), "A new driver", "") && !new {
-                        s.driver = Choice::New(String::new());
-                    }
-                    if let Choice::New(name) = &mut s.driver {
-                        look::field(ui, name, "Their name").request_focus();
-                    }
-                    if matches!(&s.driver, Choice::New(n) if profiles.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(n.trim())))
-                    {
-                        look::note(
-                            ui,
-                            "There's already a driver with that name: pick them above.",
-                            theme::FAVORITE,
-                        );
-                    }
-                });
-                let taken = matches!(&s.driver, Choice::New(n) if profiles.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(n.trim())));
-                let ready = !driver_name(profiles, &s.driver).is_empty() && !taken;
-                let (l, r) = look::footer(
-                    ui,
-                    "Cancel",
-                    ("Next", Some(Icon::ChevronRight), Kind::Primary, ready),
-                );
-                cancel |= l;
-                if r {
-                    // A new driver has no karts: straight to naming one.
-                    s.kart = if matches!(s.driver, Choice::New(_)) {
-                        Choice::New(String::new())
-                    } else {
-                        Choice::None
-                    };
-                    s.step = Step::Kart;
-                }
-            }
-            Step::Kart => {
-                let who = driver_name(profiles, &s.driver);
-                look::header(
-                    ui,
-                    Icon::Mychron,
-                    theme::GOOD,
-                    Some(&format!("Step 2 of {steps}")),
-                    &format!("Which of {who}'s karts?"),
-                    &format!("The kart the {model} goes on."),
-                );
-                look::body(ui, |ui| {
-                    let theirs: Vec<Kart> = match s.driver {
-                        Choice::Existing(id) => profiles
-                            .garage_karts()
-                            .filter(|k| k.driver == Some(id))
-                            .cloned()
-                            .collect(),
-                        _ => Vec::new(),
-                    };
-                    for k in &theirs {
-                        let on = if k.logger.is_empty() || k.logger == logger {
-                            "No MyChron on it".to_string()
-                        } else {
-                            format!("Has a {} (ID {})", model_of(&k.logger), k.logger)
-                        };
-                        let sub = [k.engine.trim().to_string(), on]
-                            .into_iter()
-                            .filter(|x| !x.is_empty())
-                            .collect::<Vec<_>>()
-                            .join("  ·  ");
-                        if look::option(ui, s.kart == Choice::Existing(k.id), None, &k.name, &sub) {
-                            s.kart = Choice::Existing(k.id);
-                        }
-                    }
-                    let new = matches!(s.kart, Choice::New(_));
-                    if look::option(ui, new, Some(Icon::Plus), "A new kart", "") && !new {
-                        s.kart = Choice::New(String::new());
-                    }
-                    if let Choice::New(name) = &mut s.kart {
-                        look::field(ui, name, "Kart name, e.g. Mini Swift Cadet").request_focus();
-                    }
-                    if matches!(&s.kart, Choice::New(n) if profiles.karts.iter().any(|k| k.name.eq_ignore_ascii_case(n.trim())))
-                    {
-                        look::note(
-                            ui,
-                            "There's already a kart with that name.",
-                            theme::FAVORITE,
-                        );
-                    }
-                });
-                let taken = matches!(&s.kart, Choice::New(n) if profiles.karts.iter().any(|k| k.name.eq_ignore_ascii_case(n.trim())));
-                let ready = match &s.kart {
-                    Choice::Existing(_) => true,
-                    Choice::New(n) => !n.trim().is_empty() && !taken,
-                    Choice::None => false,
-                };
-                let next = occupied(profiles, &s.kart).is_some();
-                let action = if next {
-                    ("Next", Some(Icon::ChevronRight), Kind::Primary, ready)
-                } else {
-                    ("Done", Some(Icon::Check), Kind::Primary, ready)
-                };
-                let (l, r) = look::footer(ui, "Back", action);
-                if l {
-                    s.step = Step::Driver;
-                }
-                if r {
-                    if next {
-                        s.step = Step::Replace
-                    } else {
-                        finish = true
-                    }
-                }
-            }
-            Step::Replace => {
-                let kart = occupied(profiles, &s.kart).unwrap_or_default();
-                let old = model_of(&kart.logger);
-                let who = driver_name(profiles, &s.driver);
-                look::header(
-                    ui,
-                    Icon::Mychron,
-                    theme::GOOD,
-                    Some("Step 3 of 3"),
-                    &format!("{} already has a {old}", kart.name),
-                    &format!(
-                        "Its {old} (ID {}) can make way for the {model}, or the {model} can go on a new kart.",
-                        kart.logger
-                    ),
-                );
-                look::body(ui, |ui| {
-                    if look::option(
-                        ui,
-                        s.replace,
-                        None,
-                        &format!("Replace the {old} with the {model}"),
-                        &format!("The {old}'s sessions stay {who}'s, on {}.", kart.name),
-                    ) {
-                        s.replace = true;
-                    }
-                    if look::option(
-                        ui,
-                        !s.replace,
-                        None,
-                        &format!("Put the {model} on a new kart"),
-                        &format!("{} keeps its {old}.", kart.name),
-                    ) {
-                        s.replace = false;
-                    }
-                    if !s.replace {
-                        look::field(ui, &mut s.new_kart_name, "New kart's name").request_focus();
-                        if profiles
-                            .karts
-                            .iter()
-                            .any(|k| k.name.eq_ignore_ascii_case(s.new_kart_name.trim()))
-                        {
-                            look::note(
-                                ui,
-                                "There's already a kart with that name.",
-                                theme::FAVORITE,
-                            );
-                        }
-                    }
-                });
-                let taken = !s.replace
-                    && profiles
-                        .karts
-                        .iter()
-                        .any(|k| k.name.eq_ignore_ascii_case(s.new_kart_name.trim()));
-                let ready = s.replace || (!s.new_kart_name.trim().is_empty() && !taken);
-                let (l, r) = look::footer(
-                    ui,
-                    "Back",
-                    ("Done", Some(Icon::Check), Kind::Primary, ready),
-                );
-                if l {
-                    s.step = Step::Kart;
-                }
-                finish |= r;
-            }
+            Step::Driver => cancel |= setup_driver_step(ui, &mut s, profiles, steps),
+            Step::Kart => finish |= setup_kart_step(ui, &mut s, profiles, &model_of, steps),
+            Step::Replace => finish |= setup_replace_step(ui, &mut s, profiles, &model_of),
         });
-        if finish {
-            let mut kart = None;
-            self.edit_profiles(|profiles| {
-                let driver = match &s.driver {
-                    Choice::Existing(id) => Some(*id),
-                    Choice::New(n) => Some(profiles.driver_named(n)),
-                    Choice::None => None,
-                };
-                kart = driver.and_then(|driver| {
-                    let mut new_kart = |name: &str| {
-                        let id = profiles.next_kart_id();
-                        profiles.karts.push(Kart {
-                            id,
-                            name: name.trim().into(),
-                            driver: Some(driver),
-                            ..Default::default()
-                        });
-                        id
-                    };
-                    match (&s.kart, s.step) {
-                        (Choice::Existing(_), Step::Replace) if !s.replace => {
-                            Some(new_kart(&s.new_kart_name))
-                        }
-                        (Choice::Existing(id), _) => Some(*id),
-                        (Choice::New(n), _) => Some(new_kart(n)),
-                        (Choice::None, _) => None,
-                    }
-                });
-                if let Some(kart) = kart {
-                    // The MyChron it replaces keeps its sessions so far; this one's
-                    // sessions without a kart become this kart's.
-                    profiles.mount(&s.logger, kart, &|l: &str| {
-                        crate::profiles::moved_now(lib.newest_start(l))
-                    });
-                }
-                // Saved (and its sessions worked out again) when a kart got it or a
-                // driver was added.
-                kart.is_some() || matches!(s.driver, Choice::New(_))
-            });
-            if let Some(kart) = kart {
-                log::info!("MyChron {} set up on kart {kart}", s.logger);
-                return;
-            }
+        if finish && self.mychron_setup_finish(&s, &lib) {
+            return;
         }
         if !cancel && !closed && !finish {
             self.garage.mychron_setup = Some(s);
         }
+    }
+
+    /// Done: the driver (added if new), the kart (added if new), and the
+    /// MyChron mounted on it. True when it went on a kart.
+    fn mychron_setup_finish(&mut self, s: &MyChronSetup, lib: &Library) -> bool {
+        let mut kart = None;
+        self.edit_profiles(|profiles| {
+            let driver = match &s.driver {
+                Choice::Existing(id) => Some(*id),
+                Choice::New(n) => Some(profiles.driver_named(n)),
+                Choice::None => None,
+            };
+            kart = driver.and_then(|driver| {
+                let mut new_kart = |name: &str| {
+                    let id = profiles.next_kart_id();
+                    profiles.karts.push(Kart {
+                        id,
+                        name: name.trim().into(),
+                        driver: Some(driver),
+                        ..Default::default()
+                    });
+                    id
+                };
+                match (&s.kart, s.step) {
+                    (Choice::Existing(_), Step::Replace) if !s.replace => {
+                        Some(new_kart(&s.new_kart_name))
+                    }
+                    (Choice::Existing(id), _) => Some(*id),
+                    (Choice::New(n), _) => Some(new_kart(n)),
+                    (Choice::None, _) => None,
+                }
+            });
+            if let Some(kart) = kart {
+                // The MyChron it replaces keeps its sessions so far; this one's
+                // sessions without a kart become this kart's.
+                profiles.mount(&s.logger, kart, &|l: &str| {
+                    crate::profiles::moved_now(lib.newest_start(l))
+                });
+            }
+            // Saved (and its sessions worked out again) when a kart got it or a
+            // driver was added.
+            kart.is_some() || matches!(s.driver, Choice::New(_))
+        });
+        if let Some(kart) = kart {
+            log::info!("MyChron {} set up on kart {kart}", s.logger);
+            return true;
+        }
+        false
     }
 
     /// The two steps for deleting a driver or removing a kart or MyChron.
@@ -639,308 +435,24 @@ impl App {
         let models = self.mychron_models();
         let lib = self.lib();
         let profiles = profiles(&mut self.profiles);
-        let (mut keep, mut done) = (true, false);
-        let closed = match &mut c {
+        let (closed, input) = match &mut c {
             Confirm::DeleteDriver {
                 id,
                 sure,
                 backed_up,
-            } => {
-                let name = profiles
-                    .driver_name(Some(*id))
-                    .unwrap_or("this driver")
-                    .to_string();
-                let karts: Vec<u32> = profiles
-                    .karts
-                    .iter()
-                    .filter(|k| k.driver == Some(*id))
-                    .map(|k| k.id)
-                    .collect();
-                let theirs: Vec<(String, PathBuf)> = driver_sessions(&lib, profiles, &name)
-                    .into_iter()
-                    .map(|s| (s.logger.clone(), s.path.clone()))
-                    .collect();
-                let mut mychrons: Vec<&String> = theirs.iter().map(|(l, _)| l).collect();
-                mychrons.sort();
-                mychrons.dedup();
-                look::dialog(ctx, "delete_driver", look::WIDTH, |ui| {
-                    if !*sure {
-                        look::header(
-                            ui,
-                            Icon::Trash,
-                            theme::DANGER,
-                            None,
-                            &format!("Delete {name}?"),
-                            &format!(
-                                "{name} and everything of theirs goes. Session files go to your computer's Trash."
-                            ),
-                        );
-                        look::body(ui, |ui| {
-                            Frame::new()
-                                .fill(theme::DANGER.gamma_multiply(0.08))
-                                .stroke(Stroke::new(1.0, theme::DANGER.gamma_multiply(0.35)))
-                                .corner_radius(CornerRadius::same(12))
-                                .inner_margin(Margin::same(16))
-                                .show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-                                    ui.spacing_mut().item_spacing.y = 10.0;
-                                    look::fact(
-                                        ui,
-                                        Icon::User,
-                                        theme::DANGER,
-                                        &format!("{name}'s profile"),
-                                    );
-                                    look::fact(
-                                        ui,
-                                        Icon::Flag,
-                                        theme::DANGER,
-                                        &plural(karts.len(), "kart"),
-                                    );
-                                    look::fact(
-                                        ui,
-                                        Icon::Mychron,
-                                        theme::DANGER,
-                                        &format!(
-                                            "{} recorded on {}",
-                                            plural(theirs.len(), "session"),
-                                            plural(mychrons.len(), "MyChron")
-                                        ),
-                                    );
-                                });
-                            ui.add_space(6.0);
-                            Frame::new().fill(SURFACE).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(16)).show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.vertical(|ui| {
-                                        ui.set_max_width(ui.available_width() - 170.0);
-                                        ui.label(RichText::new("Back up their sessions first").font(semibold(16.0)).color(TEXT));
-                                        ui.add(egui::Label::new(RichText::new("Copies them to a folder you pick, so you can keep them or open them later.").font(regular(13.5)).color(SECONDARY)).wrap());
-                                    });
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let back_up_clicked = look::big_button(ui, "Back up…", Some(Icon::FolderOpen), Kind::Quiet, !theirs.is_empty());
-                                        if back_up_clicked && let Some(into) = rfd::FileDialog::new().set_title("Back up sessions to…").pick_folder() {
-                                            *backed_up = Some(back_up(&name, &theirs, &into).map(|p| p.display().to_string()));
-                                        }
-                                    });
-                                });
-                                match backed_up {
-                                    Some(Ok(p)) => {
-                                        ui.add_space(8.0);
-                                        look::fact(ui, Icon::CircleCheck, theme::GOOD, &format!("Backed up to {p}"));
-                                    }
-                                    Some(Err(e)) => look::note(ui, e, theme::DANGER),
-                                    None => {}
-                                }
-                            });
-                        });
-                        let (l, r) = look::footer(
-                            ui,
-                            "Cancel",
-                            (
-                                &format!("Delete {name}…"),
-                                Some(Icon::Trash),
-                                Kind::Danger,
-                                true,
-                            ),
-                        );
-                        keep &= !l;
-                        *sure |= r;
-                    } else {
-                        look::header(
-                            ui,
-                            Icon::TriangleAlert,
-                            theme::DANGER,
-                            Some("Last step"),
-                            "Are you sure?",
-                            &format!(
-                                "{name}, their karts and MyChrons, and {} will be deleted.",
-                                plural(theirs.len(), "session")
-                            ),
-                        );
-                        look::body(ui, |ui| {
-                            look::note(
-                                ui,
-                                "You can only get the session files back from your computer's Trash.",
-                                SECONDARY,
-                            );
-                            if !matches!(backed_up, Some(Ok(_))) && !theirs.is_empty() {
-                                look::fact(
-                                    ui,
-                                    Icon::TriangleAlert,
-                                    theme::FAVORITE,
-                                    "You haven't backed up their sessions.",
-                                );
-                            }
-                        });
-                        let (l, r) = look::footer(
-                            ui,
-                            "Go back",
-                            (
-                                &format!("Yes, delete {name}"),
-                                Some(Icon::Trash),
-                                Kind::Danger,
-                                true,
-                            ),
-                        );
-                        if l {
-                            *sure = false;
-                        }
-                        done |= r;
-                    }
-                })
-            }
+            } => confirm_delete_driver(ctx, &lib, profiles, *id, sure, backed_up),
             Confirm::RemoveKart { id, sure } => {
-                let kart = profiles
-                    .karts
-                    .iter()
-                    .find(|k| k.id == *id)
-                    .cloned()
-                    .unwrap_or_default();
-                let sessions = lib.sessions.iter().filter(|s| s.kart == Some(*id)).count();
-                look::dialog(ctx, "remove_kart", look::WIDTH, |ui| {
-                    if !*sure {
-                        look::header(
-                            ui,
-                            Icon::EyeOff,
-                            SECONDARY,
-                            None,
-                            &format!("Remove {} from the Garage?", kart.name),
-                            "Nothing is deleted.",
-                        );
-                        look::body(ui, |ui| {
-                            look::fact(
-                                ui,
-                                Icon::Check,
-                                theme::GOOD,
-                                &format!(
-                                    "Its {} stay, and still show this kart and its setup",
-                                    plural(sessions, "session")
-                                ),
-                            );
-                            if !kart.logger.is_empty() {
-                                let m = models
-                                    .get(&kart.logger)
-                                    .cloned()
-                                    .unwrap_or_else(|| "MyChron".into());
-                                look::fact(
-                                    ui,
-                                    Icon::EyeOff,
-                                    SECONDARY,
-                                    &format!("The {m} on it leaves the Garage with it"),
-                                );
-                            }
-                        });
-                        let (l, r) = look::footer(
-                            ui,
-                            "Cancel",
-                            ("Remove…", Some(Icon::EyeOff), Kind::Danger, true),
-                        );
-                        keep &= !l;
-                        *sure |= r;
-                    } else {
-                        look::header(
-                            ui,
-                            Icon::TriangleAlert,
-                            theme::DANGER,
-                            Some("Last step"),
-                            "Are you sure?",
-                            &format!(
-                                "{} won't show in the Garage anymore. Its sessions stay.",
-                                kart.name
-                            ),
-                        );
-                        look::body(ui, |_| {});
-                        let (l, r) = look::footer(
-                            ui,
-                            "Go back",
-                            ("Yes, remove it", Some(Icon::EyeOff), Kind::Danger, true),
-                        );
-                        if l {
-                            *sure = false;
-                        }
-                        done |= r;
-                    }
-                })
+                confirm_remove_kart(ctx, &lib, profiles, &models, *id, sure)
             }
             Confirm::RemoveMyChron { logger, sure } => {
-                let model = models
-                    .get(logger.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| "MyChron".into());
-                let kart = profiles.kart_on(logger).map(|k| k.name.clone());
-                let sessions = lib
-                    .sessions
-                    .iter()
-                    .filter(|s| &s.logger == logger && s.kart.is_some())
-                    .count();
-                look::dialog(ctx, "remove_mychron", look::WIDTH, |ui| {
-                    if !*sure {
-                        look::header(
-                            ui,
-                            Icon::EyeOff,
-                            SECONDARY,
-                            None,
-                            &format!("Remove the {model} from the Garage?"),
-                            &format!("Nothing is deleted. (ID {logger})"),
-                        );
-                        look::body(ui, |ui| {
-                            let on = kart
-                                .as_ref()
-                                .map(|k| format!(", on {k}"))
-                                .unwrap_or_default();
-                            look::fact(
-                                ui,
-                                Icon::Check,
-                                theme::GOOD,
-                                &format!(
-                                    "Its {} stay{on}, and still show this MyChron",
-                                    plural(sessions, "session")
-                                ),
-                            );
-                            look::fact(
-                                ui,
-                                Icon::Mychron,
-                                SECONDARY,
-                                "If it records more, it's asked about again",
-                            );
-                        });
-                        let (l, r) = look::footer(
-                            ui,
-                            "Cancel",
-                            ("Remove…", Some(Icon::EyeOff), Kind::Danger, true),
-                        );
-                        keep &= !l;
-                        *sure |= r;
-                    } else {
-                        look::header(
-                            ui,
-                            Icon::TriangleAlert,
-                            theme::DANGER,
-                            Some("Last step"),
-                            "Are you sure?",
-                            &format!(
-                                "The {model} won't show in the Garage anymore. Its sessions stay."
-                            ),
-                        );
-                        look::body(ui, |_| {});
-                        let (l, r) = look::footer(
-                            ui,
-                            "Go back",
-                            ("Yes, remove it", Some(Icon::EyeOff), Kind::Danger, true),
-                        );
-                        if l {
-                            *sure = false;
-                        }
-                        done |= r;
-                    }
-                })
+                confirm_remove_mychron(ctx, &lib, profiles, &models, logger, sure)
             }
         };
-        if done {
+        if input.done {
             self.apply_confirm(c, &lib);
             return;
         }
-        if keep && !closed {
+        if !input.cancel && !closed {
             self.garage.confirm = Some(c);
         }
     }
@@ -1015,6 +527,592 @@ impl App {
             }
         }
     }
+}
+
+/// What a removal's buttons asked for this frame: Cancel, or the last step's yes.
+#[derive(Default)]
+struct ConfirmInput {
+    cancel: bool,
+    done: bool,
+}
+
+/// The last step of a removal: "Are you sure?", with `body` under it. Go back
+/// returns to the first step; true when it's confirmed.
+fn last_step(
+    ui: &mut Ui,
+    sub: &str,
+    body: impl FnOnce(&mut Ui),
+    yes: &str,
+    icon: Icon,
+    sure: &mut bool,
+) -> bool {
+    look::header(
+        ui,
+        Icon::TriangleAlert,
+        theme::DANGER,
+        Some("Last step"),
+        "Are you sure?",
+        sub,
+    );
+    look::body(ui, body);
+    let (l, r) = look::footer(ui, "Go back", (yes, Some(icon), Kind::Danger, true));
+    if l {
+        *sure = false;
+    }
+    r
+}
+
+/// Deleting a driver: what goes, a chance to back up their sessions, then
+/// "Are you sure?". (Closed, buttons.)
+fn confirm_delete_driver(
+    ctx: &egui::Context,
+    lib: &Library,
+    profiles: &Profiles,
+    id: u32,
+    sure: &mut bool,
+    backed_up: &mut Option<Result<String, String>>,
+) -> (bool, ConfirmInput) {
+    let name = profiles
+        .driver_name(Some(id))
+        .unwrap_or("this driver")
+        .to_string();
+    let karts = profiles
+        .karts
+        .iter()
+        .filter(|k| k.driver == Some(id))
+        .count();
+    let theirs: Vec<(String, PathBuf)> = driver_sessions(lib, profiles, &name)
+        .into_iter()
+        .map(|s| (s.logger.clone(), s.path.clone()))
+        .collect();
+    let mut mychrons: Vec<&String> = theirs.iter().map(|(l, _)| l).collect();
+    mychrons.sort();
+    mychrons.dedup();
+    let mut input = ConfirmInput::default();
+    let closed = look::dialog(ctx, "delete_driver", look::WIDTH, |ui| {
+        if !*sure {
+            look::header(
+                ui,
+                Icon::Trash,
+                theme::DANGER,
+                None,
+                &format!("Delete {name}?"),
+                &format!(
+                    "{name} and everything of theirs goes. Session files go to your computer's Trash."
+                ),
+            );
+            look::body(ui, |ui| {
+                driver_losses(ui, &name, karts, theirs.len(), mychrons.len());
+                ui.add_space(6.0);
+                back_up_card(ui, &name, &theirs, backed_up);
+            });
+            let (l, r) = look::footer(
+                ui,
+                "Cancel",
+                (
+                    &format!("Delete {name}…"),
+                    Some(Icon::Trash),
+                    Kind::Danger,
+                    true,
+                ),
+            );
+            input.cancel = l;
+            *sure |= r;
+        } else {
+            let sub = format!(
+                "{name}, their karts and MyChrons, and {} will be deleted.",
+                plural(theirs.len(), "session")
+            );
+            let body = |ui: &mut Ui| {
+                look::note(
+                    ui,
+                    "You can only get the session files back from your computer's Trash.",
+                    SECONDARY,
+                );
+                if !matches!(backed_up, Some(Ok(_))) && !theirs.is_empty() {
+                    look::fact(
+                        ui,
+                        Icon::TriangleAlert,
+                        theme::FAVORITE,
+                        "You haven't backed up their sessions.",
+                    );
+                }
+            };
+            let yes = format!("Yes, delete {name}");
+            input.done = last_step(ui, &sub, body, &yes, Icon::Trash, sure);
+        }
+    });
+    (closed, input)
+}
+
+/// What deleting a driver takes with it: their profile, karts and sessions.
+fn driver_losses(ui: &mut Ui, name: &str, karts: usize, sessions: usize, mychrons: usize) {
+    Frame::new()
+        .fill(theme::DANGER.gamma_multiply(0.08))
+        .stroke(Stroke::new(1.0, theme::DANGER.gamma_multiply(0.35)))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 10.0;
+            look::fact(ui, Icon::User, theme::DANGER, &format!("{name}'s profile"));
+            look::fact(ui, Icon::Flag, theme::DANGER, &plural(karts, "kart"));
+            look::fact(
+                ui,
+                Icon::Mychron,
+                theme::DANGER,
+                &format!(
+                    "{} recorded on {}",
+                    plural(sessions, "session"),
+                    plural(mychrons, "MyChron")
+                ),
+            );
+        });
+}
+
+/// "Back up their sessions first": copies them to a folder picked, and says
+/// where they went (or what went wrong).
+fn back_up_card(
+    ui: &mut Ui,
+    name: &str,
+    theirs: &[(String, PathBuf)],
+    backed_up: &mut Option<Result<String, String>>,
+) {
+    Frame::new()
+        .fill(SURFACE)
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_max_width(ui.available_width() - 170.0);
+                    ui.label(
+                        RichText::new("Back up their sessions first")
+                            .font(semibold(16.0))
+                            .color(TEXT),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "Copies them to a folder you pick, so you can keep them or open them later.",
+                            )
+                            .font(regular(13.5))
+                            .color(SECONDARY),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let back_up_clicked = look::big_button(
+                        ui,
+                        "Back up…",
+                        Some(Icon::FolderOpen),
+                        Kind::Quiet,
+                        !theirs.is_empty(),
+                    );
+                    if back_up_clicked
+                        && let Some(into) = rfd::FileDialog::new()
+                            .set_title("Back up sessions to…")
+                            .pick_folder()
+                    {
+                        *backed_up = Some(
+                            back_up(name, theirs, &into).map(|p| p.display().to_string()),
+                        );
+                    }
+                });
+            });
+            match backed_up {
+                Some(Ok(p)) => {
+                    ui.add_space(8.0);
+                    look::fact(
+                        ui,
+                        Icon::CircleCheck,
+                        theme::GOOD,
+                        &format!("Backed up to {p}"),
+                    );
+                }
+                Some(Err(e)) => look::note(ui, e, theme::DANGER),
+                None => {}
+            }
+        });
+}
+
+/// Removing a kart from the Garage: nothing is deleted. (Closed, buttons.)
+fn confirm_remove_kart(
+    ctx: &egui::Context,
+    lib: &Library,
+    profiles: &Profiles,
+    models: &BTreeMap<String, String>,
+    id: u32,
+    sure: &mut bool,
+) -> (bool, ConfirmInput) {
+    let kart = profiles
+        .karts
+        .iter()
+        .find(|k| k.id == id)
+        .cloned()
+        .unwrap_or_default();
+    let sessions = lib.sessions.iter().filter(|s| s.kart == Some(id)).count();
+    let mut input = ConfirmInput::default();
+    let closed = look::dialog(ctx, "remove_kart", look::WIDTH, |ui| {
+        if !*sure {
+            look::header(
+                ui,
+                Icon::EyeOff,
+                SECONDARY,
+                None,
+                &format!("Remove {} from the Garage?", kart.name),
+                "Nothing is deleted.",
+            );
+            look::body(ui, |ui| {
+                look::fact(
+                    ui,
+                    Icon::Check,
+                    theme::GOOD,
+                    &format!(
+                        "Its {} stay, and still show this kart and its setup",
+                        plural(sessions, "session")
+                    ),
+                );
+                if !kart.logger.is_empty() {
+                    let m = models
+                        .get(&kart.logger)
+                        .cloned()
+                        .unwrap_or_else(|| "MyChron".into());
+                    look::fact(
+                        ui,
+                        Icon::EyeOff,
+                        SECONDARY,
+                        &format!("The {m} on it leaves the Garage with it"),
+                    );
+                }
+            });
+            let (l, r) = look::footer(
+                ui,
+                "Cancel",
+                ("Remove…", Some(Icon::EyeOff), Kind::Danger, true),
+            );
+            input.cancel = l;
+            *sure |= r;
+        } else {
+            let sub = format!(
+                "{} won't show in the Garage anymore. Its sessions stay.",
+                kart.name
+            );
+            input.done = last_step(ui, &sub, |_| {}, "Yes, remove it", Icon::EyeOff, sure);
+        }
+    });
+    (closed, input)
+}
+
+/// Removing a MyChron from the Garage: nothing is deleted. (Closed, buttons.)
+fn confirm_remove_mychron(
+    ctx: &egui::Context,
+    lib: &Library,
+    profiles: &Profiles,
+    models: &BTreeMap<String, String>,
+    logger: &str,
+    sure: &mut bool,
+) -> (bool, ConfirmInput) {
+    let model = models
+        .get(logger)
+        .cloned()
+        .unwrap_or_else(|| "MyChron".into());
+    let kart = profiles.kart_on(logger).map(|k| k.name.clone());
+    let sessions = lib
+        .sessions
+        .iter()
+        .filter(|s| s.logger == logger && s.kart.is_some())
+        .count();
+    let mut input = ConfirmInput::default();
+    let closed = look::dialog(ctx, "remove_mychron", look::WIDTH, |ui| {
+        if !*sure {
+            look::header(
+                ui,
+                Icon::EyeOff,
+                SECONDARY,
+                None,
+                &format!("Remove the {model} from the Garage?"),
+                &format!("Nothing is deleted. (ID {logger})"),
+            );
+            look::body(ui, |ui| {
+                let on = kart
+                    .as_ref()
+                    .map(|k| format!(", on {k}"))
+                    .unwrap_or_default();
+                look::fact(
+                    ui,
+                    Icon::Check,
+                    theme::GOOD,
+                    &format!(
+                        "Its {} stay{on}, and still show this MyChron",
+                        plural(sessions, "session")
+                    ),
+                );
+                look::fact(
+                    ui,
+                    Icon::Mychron,
+                    SECONDARY,
+                    "If it records more, it's asked about again",
+                );
+            });
+            let (l, r) = look::footer(
+                ui,
+                "Cancel",
+                ("Remove…", Some(Icon::EyeOff), Kind::Danger, true),
+            );
+            input.cancel = l;
+            *sure |= r;
+        } else {
+            let sub = format!("The {model} won't show in the Garage anymore. Its sessions stay.");
+            input.done = last_step(ui, &sub, |_| {}, "Yes, remove it", Icon::EyeOff, sure);
+        }
+    });
+    (closed, input)
+}
+
+/// The name of the driver chosen in MyChron setup ("" for none yet).
+fn chosen_driver_name(p: &Profiles, c: &Choice) -> String {
+    match c {
+        Choice::Existing(id) => p.driver_name(Some(*id)).unwrap_or("").to_string(),
+        Choice::New(n) => n.trim().to_string(),
+        Choice::None => String::new(),
+    }
+}
+
+/// The kart chosen, when another MyChron than `logger` is on it.
+fn occupied(p: &Profiles, c: &Choice, logger: &str) -> Option<Kart> {
+    match c {
+        Choice::Existing(id) => p
+            .karts
+            .iter()
+            .find(|k| k.id == *id && !k.logger.is_empty() && k.logger != logger)
+            .cloned(),
+        _ => None,
+    }
+}
+
+/// A new driver's name that's already a driver's.
+fn driver_taken(p: &Profiles, c: &Choice) -> bool {
+    matches!(c, Choice::New(n) if p.drivers.iter().any(|d| d.name.eq_ignore_ascii_case(n.trim())))
+}
+
+/// A new kart's name that's already a kart's.
+fn kart_taken(p: &Profiles, c: &Choice) -> bool {
+    matches!(c, Choice::New(n) if p.karts.iter().any(|k| k.name.eq_ignore_ascii_case(n.trim())))
+}
+
+/// MyChron setup, step 1: whose it is, a driver or a new one. True on Cancel.
+fn setup_driver_step(ui: &mut Ui, s: &mut MyChronSetup, profiles: &Profiles, steps: usize) -> bool {
+    let (model, logger) = (s.model.clone(), s.logger.clone());
+    look::header(
+        ui,
+        Icon::Mychron,
+        theme::GOOD,
+        Some(&format!("Step 1 of {steps}")),
+        &format!("Set up the {model}"),
+        &format!("Whose {model} is it? (ID {logger})"),
+    );
+    look::body(ui, |ui| {
+        for d in profiles.drivers.clone() {
+            let karts = profiles
+                .garage_karts()
+                .filter(|k| k.driver == Some(d.id))
+                .count();
+            let sub = [d.class.trim().to_string(), plural(karts, "kart")]
+                .into_iter()
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join("  ·  ");
+            if look::option(ui, s.driver == Choice::Existing(d.id), None, &d.name, &sub) {
+                s.driver = Choice::Existing(d.id);
+            }
+        }
+        let new = matches!(s.driver, Choice::New(_));
+        if look::option(ui, new, Some(Icon::Plus), "A new driver", "") && !new {
+            s.driver = Choice::New(String::new());
+        }
+        if let Choice::New(name) = &mut s.driver {
+            look::field(ui, name, "Their name").request_focus();
+        }
+        if driver_taken(profiles, &s.driver) {
+            look::note(
+                ui,
+                "There's already a driver with that name: pick them above.",
+                theme::FAVORITE,
+            );
+        }
+    });
+    let taken = driver_taken(profiles, &s.driver);
+    let ready = !chosen_driver_name(profiles, &s.driver).is_empty() && !taken;
+    let (l, r) = look::footer(
+        ui,
+        "Cancel",
+        ("Next", Some(Icon::ChevronRight), Kind::Primary, ready),
+    );
+    if r {
+        // A new driver has no karts: straight to naming one.
+        s.kart = if matches!(s.driver, Choice::New(_)) {
+            Choice::New(String::new())
+        } else {
+            Choice::None
+        };
+        s.step = Step::Kart;
+    }
+    l
+}
+
+/// MyChron setup, step 2: which of the driver's karts it goes on, or a new
+/// one. True on Done.
+fn setup_kart_step(
+    ui: &mut Ui,
+    s: &mut MyChronSetup,
+    profiles: &Profiles,
+    model_of: &dyn Fn(&str) -> String,
+    steps: usize,
+) -> bool {
+    let (model, logger) = (s.model.clone(), s.logger.clone());
+    let who = chosen_driver_name(profiles, &s.driver);
+    look::header(
+        ui,
+        Icon::Mychron,
+        theme::GOOD,
+        Some(&format!("Step 2 of {steps}")),
+        &format!("Which of {who}'s karts?"),
+        &format!("The kart the {model} goes on."),
+    );
+    look::body(ui, |ui| {
+        let theirs: Vec<Kart> = match s.driver {
+            Choice::Existing(id) => profiles
+                .garage_karts()
+                .filter(|k| k.driver == Some(id))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        };
+        for k in &theirs {
+            let on = if k.logger.is_empty() || k.logger == logger {
+                "No MyChron on it".to_string()
+            } else {
+                format!("Has a {} (ID {})", model_of(&k.logger), k.logger)
+            };
+            let sub = [k.engine.trim().to_string(), on]
+                .into_iter()
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join("  ·  ");
+            if look::option(ui, s.kart == Choice::Existing(k.id), None, &k.name, &sub) {
+                s.kart = Choice::Existing(k.id);
+            }
+        }
+        let new = matches!(s.kart, Choice::New(_));
+        if look::option(ui, new, Some(Icon::Plus), "A new kart", "") && !new {
+            s.kart = Choice::New(String::new());
+        }
+        if let Choice::New(name) = &mut s.kart {
+            look::field(ui, name, "Kart name, e.g. Mini Swift Cadet").request_focus();
+        }
+        if kart_taken(profiles, &s.kart) {
+            look::note(
+                ui,
+                "There's already a kart with that name.",
+                theme::FAVORITE,
+            );
+        }
+    });
+    let taken = kart_taken(profiles, &s.kart);
+    let ready = match &s.kart {
+        Choice::Existing(_) => true,
+        Choice::New(n) => !n.trim().is_empty() && !taken,
+        Choice::None => false,
+    };
+    let next = occupied(profiles, &s.kart, &logger).is_some();
+    let action = if next {
+        ("Next", Some(Icon::ChevronRight), Kind::Primary, ready)
+    } else {
+        ("Done", Some(Icon::Check), Kind::Primary, ready)
+    };
+    let (l, r) = look::footer(ui, "Back", action);
+    if l {
+        s.step = Step::Driver;
+    }
+    if r && next {
+        s.step = Step::Replace;
+    }
+    r && !next
+}
+
+/// MyChron setup, step 3: the kart has another MyChron; replace it, or put
+/// this one on a new kart. True on Done.
+fn setup_replace_step(
+    ui: &mut Ui,
+    s: &mut MyChronSetup,
+    profiles: &Profiles,
+    model_of: &dyn Fn(&str) -> String,
+) -> bool {
+    let model = s.model.clone();
+    let kart = occupied(profiles, &s.kart, &s.logger).unwrap_or_default();
+    let old = model_of(&kart.logger);
+    let who = chosen_driver_name(profiles, &s.driver);
+    look::header(
+        ui,
+        Icon::Mychron,
+        theme::GOOD,
+        Some("Step 3 of 3"),
+        &format!("{} already has a {old}", kart.name),
+        &format!(
+            "Its {old} (ID {}) can make way for the {model}, or the {model} can go on a new kart.",
+            kart.logger
+        ),
+    );
+    let new_kart_taken = |s: &MyChronSetup| {
+        profiles
+            .karts
+            .iter()
+            .any(|k| k.name.eq_ignore_ascii_case(s.new_kart_name.trim()))
+    };
+    look::body(ui, |ui| {
+        if look::option(
+            ui,
+            s.replace,
+            None,
+            &format!("Replace the {old} with the {model}"),
+            &format!("The {old}'s sessions stay {who}'s, on {}.", kart.name),
+        ) {
+            s.replace = true;
+        }
+        if look::option(
+            ui,
+            !s.replace,
+            None,
+            &format!("Put the {model} on a new kart"),
+            &format!("{} keeps its {old}.", kart.name),
+        ) {
+            s.replace = false;
+        }
+        if !s.replace {
+            look::field(ui, &mut s.new_kart_name, "New kart's name").request_focus();
+            if new_kart_taken(s) {
+                look::note(
+                    ui,
+                    "There's already a kart with that name.",
+                    theme::FAVORITE,
+                );
+            }
+        }
+    });
+    let taken = !s.replace && new_kart_taken(s);
+    let ready = s.replace || (!s.new_kart_name.trim().is_empty() && !taken);
+    let (l, r) = look::footer(
+        ui,
+        "Back",
+        ("Done", Some(Icon::Check), Kind::Primary, ready),
+    );
+    if l {
+        s.step = Step::Kart;
+    }
+    r
 }
 
 #[cfg(test)]
