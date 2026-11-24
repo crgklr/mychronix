@@ -215,8 +215,8 @@ pub struct App {
     /// Tracks and sessions, shared: a page holds a clone of the `Arc` while it
     /// draws (`App::lib`), so it's never taken out of `App` and put back.
     library: Option<std::sync::Arc<Library>>,
-    map_tiles: Option<walkers::HttpTiles>,
-    sat_tiles: Option<walkers::HttpTiles>,
+    map_tiles: Option<tracks_ui::MapTiles>,
+    sat_tiles: Option<tracks_ui::MapTiles>,
     /// The Device page: the MyChron found, its sessions, downloading (see `device_page`).
     device: device_page::DeviceState,
     /// The Tracks page: the selected track, the list, the map (see `tracks_ui`).

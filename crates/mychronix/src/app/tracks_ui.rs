@@ -570,7 +570,7 @@ impl App {
             );
         }
         let satellite = self.track_page.satellite;
-        let tiles: &mut walkers::HttpTiles = if satellite {
+        let tiles: &mut MapTiles = if satellite {
             self.sat_tiles.as_mut().unwrap()
         } else {
             self.map_tiles.as_mut().unwrap()
@@ -910,7 +910,7 @@ fn fit_drawn(memory: &mut walkers::MapMemory, overlay: &TrackOverlay, size: Vec2
 /// top-right corner. True when the switch was flipped.
 fn map_frame(
     ui: &mut Ui,
-    tiles: &mut walkers::HttpTiles,
+    tiles: &mut MapTiles,
     memory: &mut walkers::MapMemory,
     center: walkers::Position,
     overlay: TrackOverlay,
@@ -1430,17 +1430,17 @@ fn split_table(ui: &mut Ui, lap: &SpeedLap, sectors: &splits::Sectors) {
 }
 
 /// `tiles` for a map, or none with MYCHRONIX_NO_TILES (see `hooks`).
-pub(super) fn shown(tiles: &mut walkers::HttpTiles) -> Option<&mut dyn walkers::Tiles> {
+pub(super) fn shown(tiles: &mut MapTiles) -> Option<&mut dyn walkers::Tiles> {
     (!crate::hooks::get().no_tiles).then_some(tiles as &mut dyn walkers::Tiles)
 }
 
 /// The map's tiles, OpenStreetMap or satellite, made on first use (shared by Tracks and Map).
 pub(super) fn tiles<'a>(
-    street: &'a mut Option<walkers::HttpTiles>,
-    imagery: &'a mut Option<walkers::HttpTiles>,
+    street: &'a mut Option<MapTiles>,
+    imagery: &'a mut Option<MapTiles>,
     ctx: &egui::Context,
     satellite: bool,
-) -> &'a mut walkers::HttpTiles {
+) -> &'a mut MapTiles {
     let options = || walkers::HttpOptions {
         cache: crate::paths::cache_dir().map(|d| d.join("tiles")),
         user_agent: Some(walkers::HeaderValue::from_static(
@@ -1449,17 +1449,53 @@ pub(super) fn tiles<'a>(
         ..Default::default()
     };
     if satellite {
-        imagery.get_or_insert_with(|| {
-            walkers::HttpTiles::with_options(EsriImagery, options(), ctx.clone())
+        imagery.get_or_insert_with(|| MapTiles {
+            http: walkers::HttpTiles::with_options(EsriImagery, options(), ctx.clone()),
+            fallbacks: &SATELLITE_FALLBACKS,
         })
     } else {
-        street.get_or_insert_with(|| {
-            walkers::HttpTiles::with_options(
+        street.get_or_insert_with(|| MapTiles {
+            http: walkers::HttpTiles::with_options(
                 walkers::sources::OpenStreetMap,
                 options(),
                 ctx.clone(),
-            )
+            ),
+            fallbacks: &[],
         })
+    }
+}
+
+/// Zooms whose satellite tiles are fetched beside closer ones: where there's
+/// no closer imagery, the map shows these enlarged (zoom 17 is about a meter
+/// a pixel, and nearly everywhere has it).
+const SATELLITE_FALLBACKS: [u8; 2] = [17, 15];
+
+/// A map's tiles, which also fetch the same place at `fallbacks` zooms: a
+/// tile that doesn't exist up close is drawn from the closest of those.
+pub(super) struct MapTiles {
+    http: walkers::HttpTiles,
+    fallbacks: &'static [u8],
+}
+
+impl walkers::Tiles for MapTiles {
+    fn at(&mut self, id: walkers::TileId) -> Option<walkers::TilePiece> {
+        for &zoom in self.fallbacks.iter().filter(|&&z| z < id.zoom) {
+            let d = id.zoom - zoom;
+            self.http.at(walkers::TileId {
+                x: id.x >> d,
+                y: id.y >> d,
+                zoom,
+            });
+        }
+        self.http.at(id)
+    }
+
+    fn attribution(&self) -> walkers::sources::Attribution {
+        self.http.attribution()
+    }
+
+    fn tile_size(&self) -> u32 {
+        self.http.tile_size()
     }
 }
 
@@ -1470,7 +1506,10 @@ struct EsriImagery;
 impl walkers::sources::TileSource for EsriImagery {
     fn tile_url(&self, id: walkers::TileId) -> String {
         format!(
-            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}",
+            // Where there's no imagery this close, "not found" (not Esri's
+            // "Map data not yet available" picture): `MapTiles` shows a
+            // farther one enlarged.
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{}/{}/{}?blankTile=false",
             id.zoom, id.y, id.x
         )
     }
