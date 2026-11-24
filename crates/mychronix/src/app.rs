@@ -251,6 +251,9 @@ struct AnalysisState {
     channel_view: ChannelView,
     /// Shared cursor, in seconds from the start of the current window.
     cursor_s: Option<f64>,
+    /// The arrow keys moved the cursor last: a mouse resting on a graph
+    /// doesn't take it back until it moves.
+    cursor_by_keys: bool,
     analysis_view: AnalysisView,
     /// The session panel (opened from the pill or the rail), and where the pill is.
     session_panel: bool,
@@ -617,6 +620,31 @@ impl eframe::App for App {
             if let Some(text) = xy.strip_prefix("type:") {
                 if f.trim().parse::<u32>().ok() == Some(self.input_frames) {
                     raw.events.push(egui::Event::Text(text.to_string()));
+                }
+                continue;
+            }
+            // "key:ArrowRight", or "key:shift+ArrowRight".
+            if let Some(name) = xy.strip_prefix("key:") {
+                let (shift, name) = match name.strip_prefix("shift+") {
+                    Some(n) => (true, n),
+                    None => (false, name),
+                };
+                if f.trim().parse::<u32>().ok() == Some(self.input_frames)
+                    && let Some(key) = egui::Key::from_name(name)
+                {
+                    // egui reads Shift from the keyboard's state, not the key's event.
+                    let modifiers = egui::Modifiers {
+                        shift,
+                        ..Default::default()
+                    };
+                    raw.events.push(egui::Event::ModifiersChanged(modifiers));
+                    raw.events.push(egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    });
                 }
                 continue;
             }

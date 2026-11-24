@@ -238,6 +238,31 @@ impl App {
             }
             AnalysisView::Session => {}
         }
+        // Up and down open the lap before or after ("All" comes first).
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        let (up, down) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp) && !typing,
+                i.key_pressed(egui::Key::ArrowDown) && !typing,
+            )
+        });
+        if up || down {
+            let n = session.laps.len();
+            let lap = match (self.analysis.lap, up) {
+                (Some(0), true) | (None, true) => None,
+                (Some(k), true) => Some(k - 1),
+                (None, false) if n > 0 => Some(0),
+                (Some(k), false) => Some((k + 1).min(n.saturating_sub(1))),
+                (None, false) => None,
+            };
+            if lap != self.analysis.lap {
+                // The same moment into the next lap; the whole session starts over.
+                if lap.is_none() || self.analysis.lap.is_none() {
+                    self.analysis.cursor_s = None;
+                }
+                self.analysis.lap = lap;
+            }
+        }
         self.lap_strip(ui, session, false);
         ui.add_space(12.0);
 
@@ -354,6 +379,50 @@ impl App {
             .map(|s| start_ms + (s * 1000.0) as i64);
         let mut hovered = None;
 
+        // Left and right move the cursor along the graphs, a small step of what's
+        // in view (Shift: ten times that); the view follows it when it leaves.
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        let step = ui.input(|i| {
+            let dir = if typing {
+                0.0
+            } else if i.key_pressed(egui::Key::ArrowRight) {
+                1.0
+            } else if i.key_pressed(egui::Key::ArrowLeft) {
+                -1.0
+            } else {
+                0.0
+            };
+            dir * if i.modifiers.shift { 0.05 } else { 0.005 }
+        });
+        let view_id = ui.id().with("graph_view");
+        let (view_lo, view_hi) = ui
+            .data(|d| d.get_temp::<(f64, f64)>(view_id))
+            .filter(|_| !window_changed)
+            .unwrap_or((0.0, x_max));
+        let mut pan = None;
+        if step != 0.0 {
+            let x = self
+                .analysis
+                .cursor_s
+                .map(|s| to_x(start_ms as f64 + s * 1000.0))
+                .unwrap_or(view_lo);
+            let x = (x + step * (view_hi - view_lo)).clamp(0.0, x_max);
+            self.analysis.cursor_s = Some(match &profile {
+                Some(p) => ((p.time_at(x) - start_ms as f64) / 1000.0).max(0.0),
+                None => x,
+            });
+            self.analysis.cursor_by_keys = true;
+            let width = view_hi - view_lo;
+            if x < view_lo || x > view_hi {
+                let lo = (x - width / 2.0).clamp(0.0, (x_max - width).max(0.0));
+                pan = Some((lo, lo + width));
+            }
+        }
+        if ui.input(|i| i.pointer.is_moving()) {
+            self.analysis.cursor_by_keys = false;
+        }
+        let mut seen_view = None;
+
         egui::ScrollArea::vertical().id_salt("graphs").show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = gap;
             for (k, &(i, slot)) in selected.iter().enumerate() {
@@ -423,12 +492,16 @@ impl App {
                         .default_x_bounds(0.0, x_max)
                         .x_axis_formatter(move |mark, _| if mark.step_size < 1.0 { format!("{:.1} {unit}", mark.value) } else { format!("{:.0} {unit}", mark.value) })
                         .show(ui, |plot| {
+                            if let Some((lo, hi)) = pan {
+                                plot.set_plot_bounds_x(lo..=hi);
+                            }
                             plot.line(Line::new(c.name.clone(), PlotPoints::from(points)).color(color).width(2.0));
                             if let Some(s) = self.analysis.cursor_s {
                                 plot.vline(VLine::new("cursor", to_x(start_ms as f64 + s * 1000.0)).color(SECONDARY).width(1.0));
                             }
                             plot.pointer_coordinate()
                         });
+                    seen_view.get_or_insert(response.transform.bounds().range_x());
                     if calculated {
                         calculated_note(ui);
                     }
@@ -496,6 +569,9 @@ impl App {
                         .x_axis_formatter(move |mark, _| if mark.step_size < 1.0 { format!("{:.1} {unit}", mark.value) } else { format!("{:.0} {unit}", mark.value) })
                         .y_axis_formatter(|mark, _| format!("{:+.1} s", mark.value))
                         .show(ui, |plot| {
+                            if let Some((lo, hi)) = pan {
+                                plot.set_plot_bounds_x(lo..=hi);
+                            }
                             plot.hline(egui_plot::HLine::new("even", 0.0).color(DIM).width(1.0));
                             plot.line(Line::new("Time compare", PlotPoints::from(points.clone())).color(SECONDARY).width(2.0));
                             if let Some(s) = self.analysis.cursor_s {
@@ -512,7 +588,10 @@ impl App {
                 });
             }
         });
-        if hovered.is_some() {
+        if let Some(r) = seen_view {
+            ui.data_mut(|d| d.insert_temp(view_id, (*r.start(), *r.end())));
+        }
+        if hovered.is_some() && !self.analysis.cursor_by_keys {
             self.analysis.cursor_s = hovered;
         }
         if let Some(i) = remove {

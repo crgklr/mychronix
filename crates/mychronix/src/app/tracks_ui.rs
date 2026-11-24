@@ -710,8 +710,10 @@ impl App {
                 } else {
                     self.map_tiles.as_mut().unwrap()
                 };
+                // The wheel scrolls the page past the map; Ctrl + wheel zooms it.
                 let map = ui.add(
                     walkers::Map::new(shown(tiles), &mut self.track_page.map_memory, center)
+                        .panning(false)
                         .with_plugin(overlay),
                 );
                 // Map / Satellite switch in the map's top-right corner.

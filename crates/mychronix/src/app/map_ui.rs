@@ -374,15 +374,21 @@ impl App {
             CornerRadius::same(theme::RADIUS),
             GROUND,
         );
+        // The wheel zooms, as on any map; dragging moves it.
         let map = if satellite {
             let tiles =
                 super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
             ui.add(
                 walkers::Map::new(super::tracks_ui::shown(tiles), &mut memory, start)
+                    .zoom_with_ctrl(false)
                     .with_plugin(overlay),
             )
         } else {
-            ui.add(walkers::Map::new(None, &mut memory, start).with_plugin(overlay))
+            ui.add(
+                walkers::Map::new(None, &mut memory, start)
+                    .zoom_with_ctrl(false)
+                    .with_plugin(overlay),
+            )
         };
         self.map_view.memory = memory;
         if let Some(k) = clicked.lock().unwrap().take() {

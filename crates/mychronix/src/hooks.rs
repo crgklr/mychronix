@@ -31,7 +31,8 @@ pub struct Hooks {
     pub splits: bool,
     pub report: bool,
     pub compare: bool,
-    /// MYCHRONIX_CLICKS="frame:x,y;…": input on those frames (see `App::raw_input_hook`).
+    /// MYCHRONIX_CLICKS="frame:x,y;…": input on those frames (see `App::raw_input_hook`;
+    /// "frame:key:ArrowRight" presses a key).
     pub clicks: Option<String>,
     /// MYCHRONIX_DROP="frame:path" drops a file on the window; `MYCHRONIX_DRAG=<frame>`
     /// holds a dragged file over it from then on.
