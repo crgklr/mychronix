@@ -420,7 +420,8 @@ impl App {
                 .show_background(false)
                 .grid_color(GRID)
                 .show_axes([x_axis, true])
-                .y_axis_min_width(46.0)
+                // As on Graphs: wide enough that stacked graphs line up.
+                .y_axis_min_width(58.0)
                 .show_x(false)
                 .show_y(false)
                 .cursor_color(DIM)

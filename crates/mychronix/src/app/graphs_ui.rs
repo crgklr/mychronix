@@ -528,7 +528,12 @@ impl App {
                         .width(1.0),
                 );
             }
-            plot.pointer_coordinate()
+            // Only over this graph: the pointer elsewhere (on the track map,
+            // say) has a coordinate too, off the graph's ends.
+            plot.response()
+                .hovered()
+                .then(|| plot.pointer_coordinate())
+                .flatten()
         });
         let seen = response.transform.bounds().range_x();
         if calculated {
@@ -610,7 +615,10 @@ impl App {
                             .width(1.0),
                     );
                 }
-                plot.pointer_coordinate()
+                plot.response()
+                    .hovered()
+                    .then(|| plot.pointer_coordinate())
+                    .flatten()
             });
         response.inner.map(|p| axis.cursor_at(p.x))
     }
@@ -717,7 +725,8 @@ impl GraphAxis {
             .show_background(false)
             .grid_color(GRID)
             .show_axes([x_axis, true])
-            .y_axis_min_width(46.0)
+            // Wide enough for six characters ("-12000"), so stacked graphs line up.
+            .y_axis_min_width(58.0)
             .show_x(false)
             .show_y(false)
             .cursor_color(DIM)
