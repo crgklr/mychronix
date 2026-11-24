@@ -181,6 +181,10 @@ fn seconds(ms: i64) -> String {
     }
 }
 
+/// What the splits table needs across: its lap and lap time columns, and each split's.
+const SPLITS_LAP_COLUMNS_W: f32 = 260.0;
+const SPLITS_COLUMN_W: f32 = 90.0;
+
 impl App {
     pub(super) fn splits_view(&mut self, ui: &mut Ui, session: &Session) {
         let Some(path) = self.path.clone() else {
@@ -319,54 +323,82 @@ impl App {
 
         let gap = 14.0;
         let height = ui.available_height();
-        let detail_w = (ui.available_width() * 0.38).clamp(320.0, 560.0);
+        // The table gets the room its columns need, the track beside it narrowing
+        // to make it; when even the narrowest track leaves too little, they stack.
+        let need = SPLITS_LAP_COLUMNS_W + SPLITS_COLUMN_W * n as f32;
+        let detail_w = (ui.available_width() * 0.38)
+            .min(ui.available_width() - gap - need)
+            .clamp(320.0, 560.0);
         let table_w = ui.available_width() - detail_w - gap;
         let mut toggle = None;
         let mut select = None;
         let mut hovered_row = None;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            let column = Layout::top_down(Align::Min);
-            ui.allocate_ui_with_layout(vec2(table_w, height), column, |ui| {
-                ui.set_width(table_w);
-                card(ui, |ui| {
-                    let clicks = SplitsTable {
-                        st,
+        let mut table = |ui: &mut Ui, height: f32| {
+            card(ui, |ui| {
+                let clicks = SplitsTable {
+                    st,
+                    c,
+                    n,
+                    included: &included,
+                    inc_rows: &inc_rows,
+                    best: &best,
+                    best_lap_row,
+                    best_lap_splits: &best_lap_splits,
+                    theoretical,
+                    rolling,
+                    rolling_cells: &rolling_cells,
+                    height,
+                }
+                .show(ui);
+                (toggle, select, hovered_row) = (clicks.toggle, clicks.select, clicks.hovered_row);
+            });
+        };
+        // Too narrow for the table's columns beside the track: the page scrolls
+        // as one, the whole table first and the track under it.
+        if table_w < need {
+            egui::ScrollArea::vertical()
+                .id_salt("splits_stacked")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    table(ui, f32::INFINITY);
+                    ui.add_space(gap);
+                    split_detail(
+                        ui,
+                        session,
                         c,
-                        n,
-                        included: &included,
-                        inc_rows: &inc_rows,
-                        best: &best,
-                        best_lap_row,
-                        best_lap_splits: &best_lap_splits,
-                        theoretical,
-                        rolling,
-                        rolling_cells: &rolling_cells,
-                        height,
-                    }
-                    .show(ui);
-                    (toggle, select, hovered_row) =
-                        (clicks.toggle, clicks.select, clicks.hovered_row);
+                        &included,
+                        st.selected,
+                        st.hovered_row,
+                        height.min(560.0),
+                    );
+                });
+        } else {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                let column = Layout::top_down(Align::Min);
+                ui.allocate_ui_with_layout(vec2(table_w, height), column, |ui| {
+                    ui.set_width(table_w);
+                    table(ui, height);
+                });
+                ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
+                    ui.set_width(detail_w);
+                    egui::ScrollArea::vertical()
+                        .id_salt("split_detail")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            split_detail(
+                                ui,
+                                session,
+                                c,
+                                &included,
+                                st.selected,
+                                st.hovered_row,
+                                height,
+                            );
+                        });
                 });
             });
-            ui.allocate_ui_with_layout(vec2(detail_w, height), column, |ui| {
-                ui.set_width(detail_w);
-                egui::ScrollArea::vertical()
-                    .id_salt("split_detail")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        split_detail(
-                            ui,
-                            session,
-                            c,
-                            &included,
-                            st.selected,
-                            st.hovered_row,
-                            height,
-                        );
-                    });
-            });
-        });
+        }
         st.hovered_row = hovered_row;
         if let Some(sel) = select {
             st.selected = sel;

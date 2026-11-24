@@ -20,8 +20,10 @@ pub struct Hooks {
     /// MYCHRONIX_NO_TILES: maps without street or satellite tiles (nothing
     /// fetched), as when offline.
     pub no_tiles: bool,
-    /// MYCHRONIX_WINDOWED: open at the normal window size, not maximized.
+    /// MYCHRONIX_WINDOWED: open at the normal window size, not maximized;
+    /// `MYCHRONIX_WINDOWED=<width>x<height>` at that size (points).
     pub windowed: bool,
+    pub window_size: Option<[f32; 2]>,
     /// `MYCHRONIX_PAGE=<page>`: start on that page.
     pub page: Option<String>,
     /// With a session to open: `MYCHRONIX_VIEW=<view>`, MYCHRONIX_DISTANCE (the
@@ -91,6 +93,10 @@ impl Hooks {
                 .unwrap_or(20),
             demo: set("MYCHRONIX_DEMO"),
             windowed: set("MYCHRONIX_WINDOWED"),
+            window_size: text("MYCHRONIX_WINDOWED").and_then(|v| {
+                let (w, h) = v.split_once('x')?;
+                Some([w.parse().ok()?, h.parse().ok()?])
+            }),
             today: text("MYCHRONIX_TODAY")
                 .and_then(|v| v.parse::<jiff::civil::Date>().ok())
                 .map(|d| d.at(18, 0, 0, 0)),

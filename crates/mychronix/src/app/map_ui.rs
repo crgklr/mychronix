@@ -33,6 +33,9 @@ pub(super) enum ColorBy {
     Gain,
 }
 
+/// Narrower than this, the Map's numbers move from the side into an overlay.
+const MAP_COMPACT_W: f32 = 1000.0;
+
 /// Map view state.
 pub(super) struct MapState {
     /// The whole track rather than one corner.
@@ -48,6 +51,8 @@ pub(super) struct MapState {
     anim: Option<((f64, f64, f64), f64)>,
     /// The key's size when last drawn, to fit it beside the lap picker.
     legend: Vec2,
+    /// In a narrow window: the numbers open over the map.
+    numbers_open: bool,
 }
 
 impl Default for MapState {
@@ -62,6 +67,7 @@ impl Default for MapState {
             shown: None,
             anim: None,
             legend: Vec2::ZERO,
+            numbers_open: false,
         }
     }
 }
@@ -342,7 +348,9 @@ impl App {
 
         // Where to look: the whole track, or the corner from its braking point to the next one's.
         let rect = ui.available_rect_before_wrap();
-        let panel_w = 300.0;
+        // In a narrow window the numbers leave the side for an overlay, opened with "i".
+        let compact = rect.width() < MAP_COMPACT_W;
+        let panel_w = if compact { 0.0 } else { 300.0 };
         let view_pts: Vec<aim_track::LatLon> = if whole {
             best_xy.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect()
         } else {
@@ -414,7 +422,7 @@ impl App {
         };
         let n = model.segments.len();
         let mut go_corner: Option<Option<usize>> = None;
-        ov(
+        let corners_row = ov(
             ui,
             Rect::from_min_size(
                 rect.left_top() + vec2(14.0, 14.0),
@@ -436,12 +444,15 @@ impl App {
         );
         let mut color = self.map_view.color;
         let mut sat = satellite;
+        // The color choice goes under the corners when they'd run into each other.
+        let color_top = if corners_row.right() + 12.0 > rect.right() - 474.0 {
+            rect.top() + 66.0
+        } else {
+            rect.top() + 14.0
+        };
         ov(
             ui,
-            Rect::from_min_size(
-                pos2(rect.right() - 474.0, rect.top() + 14.0),
-                vec2(460.0, 44.0),
-            ),
+            Rect::from_min_size(pos2(rect.right() - 474.0, color_top), vec2(460.0, 44.0)),
             &mut |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -464,29 +475,54 @@ impl App {
         );
         self.map_view.color = color;
 
-        // The numbers, on the right.
-        let side = Rect::from_min_size(
-            pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0),
-            vec2(panel_w, rect.height() - 82.0),
-        );
-        ov(ui, side, &mut |ui| {
-            ui.set_width(panel_w - 12.0);
-            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
-                if whole {
-                    whole_numbers(ui, &model, trace, &mut go_corner);
+        // The numbers: on the right, or in a narrow window behind a round "i".
+        let all_laps = self.map_view.all_laps;
+        let numbers = |ui: &mut Ui, go: &mut Option<Option<usize>>| {
+            if whole {
+                whole_numbers(ui, &model, trace, go);
+            } else {
+                corner_numbers(ui, &model, trace, corner, rpm, &session.laps, all_laps);
+            }
+        };
+        if compact {
+            let at = Rect::from_min_size(
+                pos2(rect.right() - 14.0 - 40.0, color_top + 54.0),
+                Vec2::splat(40.0),
+            );
+            let resp = ui
+                .interact(at, ui.id().with("map_numbers_open"), Sense::click())
+                .on_hover_text(if whole {
+                    "The lap's numbers"
                 } else {
-                    corner_numbers(
-                        ui,
-                        &model,
-                        trace,
-                        corner,
-                        rpm,
-                        &session.laps,
-                        self.map_view.all_laps,
-                    );
-                }
+                    "This corner's numbers"
+                });
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let p = ui.painter();
+            p.circle(at.center(), 20.0, GLASS, Stroke::new(1.0, theme::OUTLINE));
+            p.text(
+                at.center(),
+                egui::Align2::CENTER_CENTER,
+                "i",
+                semibold(17.0),
+                if resp.hovered() { TEXT } else { SECONDARY },
+            );
+            if resp.clicked() {
+                self.map_view.numbers_open = true;
+            }
+        } else {
+            let side = Rect::from_min_size(
+                pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0),
+                vec2(panel_w, rect.height() - 82.0),
+            );
+            ov(ui, side, &mut |ui| {
+                ui.set_width(panel_w - 12.0);
+                Frame::new()
+                    .inner_margin(Margin::same(8))
+                    .show(ui, |ui| numbers(ui, &mut go_corner));
             });
-        });
+        }
 
         // The lap, what it's against, and every lap's line.
         let laps_with: Vec<usize> = (0..model.traces.len()).collect();
@@ -617,6 +653,54 @@ impl App {
             });
         });
         self.map_view.satellite = sat;
+        // The numbers over the whole map, until X or Escape (or a corner picked from them).
+        if compact && self.map_view.numbers_open {
+            let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let picked_before = go_corner;
+            egui::Area::new(ui.id().with("map_numbers"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(rect.min)
+                .show(ui.ctx(), |ui| {
+                    Frame::new()
+                        .fill(SURFACE)
+                        .stroke(Stroke::new(1.0, theme::OUTLINE))
+                        .corner_radius(CornerRadius::same(theme::RADIUS))
+                        .inner_margin(Margin::same(16))
+                        .show(ui, |ui| {
+                            let inner = rect.size() - vec2(32.0, 32.0);
+                            ui.set_min_size(inner);
+                            ui.set_max_size(inner);
+                            let x = Rect::from_min_size(
+                                pos2(rect.right() - 16.0 - 24.0, rect.top() + 16.0),
+                                Vec2::splat(24.0),
+                            );
+                            let resp = ui
+                                .put(x, Icon::X.image(SECONDARY, 18.0).sense(Sense::click()))
+                                .on_hover_text("Close");
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            close |= resp.clicked();
+                            // A readable column, centered.
+                            let col_w = (inner.x - 64.0).min(520.0);
+                            let col = Rect::from_min_size(
+                                pos2(rect.center().x - col_w / 2.0, rect.top() + 16.0),
+                                vec2(col_w, inner.y),
+                            );
+                            ui.scope_builder(egui::UiBuilder::new().max_rect(col), |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("map_numbers_scroll")
+                                    .show(ui, |ui| {
+                                        ui.set_width(col_w);
+                                        numbers(ui, &mut go_corner);
+                                    });
+                            });
+                        });
+                });
+            if close || go_corner != picked_before {
+                self.map_view.numbers_open = false;
+            }
+        }
         if satellite {
             ui.painter().text(
                 switch.right_top() + vec2(-4.0, -6.0),

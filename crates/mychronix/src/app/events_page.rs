@@ -1132,13 +1132,6 @@ fn event_row(
         );
         let (l, r) = (rect.left() + 14.0, rect.right() - 14.0);
         let (top, bottom) = (rect.top() + 20.0, rect.top() + 39.0);
-        p.text(
-            pos2(l, top),
-            egui::Align2::LEFT_CENTER,
-            e.title(),
-            medium(14.5),
-            TEXT,
-        );
         let mut drivers: Vec<String> = e
             .sessions
             .iter()
@@ -1153,12 +1146,14 @@ fn event_row(
         if !drivers.is_empty() {
             line.push(drivers.join(", "));
         }
-        p.text(
+        fitted_line(
+            &p,
+            &response,
             pos2(l, bottom),
-            egui::Align2::LEFT_CENTER,
-            line.join("  ·  "),
+            &line.join("  ·  "),
             regular(12.5),
             DIM,
+            r - l,
         );
         let best = e
             .sessions
@@ -1185,12 +1180,22 @@ fn event_row(
             }
             (None, false) => (plural(e.sessions.len(), "session"), DIM),
         };
-        p.text(
+        let right = p.text(
             pos2(r, top),
             egui::Align2::RIGHT_CENTER,
             right,
             medium(14.0),
             color,
+        );
+        // The title, cut short before what's on its right.
+        fitted_line(
+            &p,
+            &response,
+            pos2(l, top),
+            &e.title(),
+            medium(14.5),
+            TEXT,
+            right.left() - 12.0 - l,
         );
     }
     response

@@ -560,3 +560,60 @@ pub(super) fn row(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui)) -> egu
     }
     response
 }
+
+/// One line of text cut to `width` with an ellipsis.
+pub(super) fn single_line(
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+    width: f32,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping {
+        max_width: width,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    job
+}
+
+/// `text` drawn on one line from `pos` (left, centered on `pos.y`), cut to
+/// `width` with "…"; resting the pointer on a cut line shows all of it.
+pub(super) fn fitted_line(
+    p: &egui::Painter,
+    response: &egui::Response,
+    pos: egui::Pos2,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+    width: f32,
+) -> Rect {
+    let galley = p.layout_job(single_line(text, font.clone(), color, width));
+    let cut = galley.size().x + 0.5 < p.layout_no_wrap(text.to_string(), font, color).size().x;
+    let rect = Rect::from_min_size(pos2(pos.x, pos.y - galley.size().y / 2.0), galley.size());
+    p.galley(rect.min, galley, color);
+    if cut
+        && let Some(at) = response.hover_pos()
+        && rect.contains(at)
+    {
+        // After the pointer has rested a moment, as tooltips do.
+        let ctx = &response.ctx;
+        let still = ctx.input(|i| i.pointer.time_since_last_movement());
+        let delay = ctx.global_style().interaction.tooltip_delay;
+        if still >= delay {
+            egui::Tooltip::always_open(
+                ctx.clone(),
+                response.layer_id,
+                response.id.with("full_line"),
+                egui::PopupAnchor::Pointer,
+            )
+            .show(|ui| {
+                ui.label(text);
+            });
+        } else {
+            ctx.request_repaint_after_secs(delay - still);
+        }
+    }
+    rect
+}

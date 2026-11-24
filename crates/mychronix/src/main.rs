@@ -176,7 +176,7 @@ fn main() -> eframe::Result {
             // Open maximized (asked again once the window exists, see App::ui); the
             // size is a fallback that fits a 1366×768 laptop screen.
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1280.0, 720.0])
+                .with_inner_size(hooks.window_size.unwrap_or([1280.0, 720.0]))
                 .with_min_inner_size([960.0, 600.0])
                 // MYCHRONIX_WINDOWED=1 opens it at its normal size (for testing the window's edges).
                 .with_maximized(!hooks.windowed)

@@ -369,6 +369,10 @@ pub(super) fn session_row(
     session_row_with(ui, lib, i, driver, day_best, setup_changed, None)
 }
 
+/// A session row's sparkline, and the least room it leaves the text beside it.
+const SPARK_W: f32 = 110.0;
+const SESSION_LINE_MIN_W: f32 = 320.0;
+
 /// [`session_row`] with a sparkline and badges.
 pub(super) fn session_row_with(
     ui: &mut Ui,
@@ -445,43 +449,6 @@ pub(super) fn session_row_with(
                 ui.label(tip);
             });
         }
-        // Lap times, first to last, left of the numbers.
-        if let Some(x) = extras {
-            let w = 110.0;
-            let spark = Rect::from_min_size(
-                pos2(r - 300.0 - w, rect.top() + 12.0),
-                vec2(w, rect.height() - 24.0),
-            );
-            if spark.left() > bx + 20.0 {
-                sparkline(p, spark, &x.laps);
-            }
-        }
-        let track = s
-            .track_name(&lib.tracks)
-            .unwrap_or_else(|| "No track".into());
-        let championship = s
-            .meta
-            .as_ref()
-            .map(|m| m.championship.clone())
-            .filter(|c| !c.is_empty());
-        let line = [
-            sum.start_time.as_deref().map(crate::dates::clock_time),
-            Some(driver.to_string()),
-            Some(track),
-            championship,
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("  ·  ");
-        p.text(
-            pos2(l, bottom),
-            egui::Align2::LEFT_CENTER,
-            line,
-            regular(12.5),
-            DIM,
-        );
-
         // Right side: best lap, then laps / time on track / max RPM.
         let is_day_best = sum.best_lap_ms.is_some() && sum.best_lap_ms == day_best;
         let best = sum
@@ -503,12 +470,59 @@ pub(super) fn session_row_with(
         if let Some(rpm) = sum.max_rpm {
             facts.push(format!("{} rpm max", group_thousands(rpm as usize)));
         }
-        p.text(
+        let facts = p.text(
             pos2(r, bottom),
             egui::Align2::RIGHT_CENTER,
             facts.join("  ·  "),
             regular(12.5),
             DIM,
+        );
+
+        // Lap times, first to last, left of the numbers: in a row wide enough
+        // to leave the text beside them its room, and clear of the title's badges.
+        let spark = Rect::from_min_size(
+            pos2(r - 300.0 - SPARK_W, rect.top() + 12.0),
+            vec2(SPARK_W, rect.height() - 24.0),
+        );
+        let with_spark = extras.is_some()
+            && spark.left() - 20.0 - l >= SESSION_LINE_MIN_W
+            && spark.left() > bx + 20.0
+            && spark.right() < facts.left() - 16.0;
+        if let (true, Some(x)) = (with_spark, extras) {
+            sparkline(p, spark, &x.laps);
+        }
+
+        // Left: when, who, where; cut short with "…" before the sparkline or the numbers.
+        let track = s
+            .track_name(&lib.tracks)
+            .unwrap_or_else(|| "No track".into());
+        let championship = s
+            .meta
+            .as_ref()
+            .map(|m| m.championship.clone())
+            .filter(|c| !c.is_empty());
+        let line = [
+            sum.start_time.as_deref().map(crate::dates::clock_time),
+            Some(driver.to_string()),
+            Some(track),
+            championship,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("  ·  ");
+        fitted_line(
+            p,
+            &response,
+            pos2(l, bottom),
+            &line,
+            regular(12.5),
+            DIM,
+            if with_spark {
+                spark.left() - 20.0 - l
+            } else {
+                facts.left() - 16.0 - l
+            },
         );
     }
     response

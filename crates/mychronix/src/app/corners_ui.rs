@@ -60,6 +60,9 @@ pub(super) struct CornersState {
     table_extra_h: Option<f32>,
 }
 
+/// The narrowest the corner table goes beside the map before the map moves under it.
+const CORNERS_TABLE_MIN_W: f32 = 740.0;
+
 impl App {
     /// The session's corners (see `corner_model`), built once per session and
     /// best lap, for Corners, Laps and Map. None without GPS or a best lap.
@@ -242,47 +245,65 @@ impl App {
             .show(ui, |ui| {
                 let gap = 14.0;
                 let side_w = (ui.available_width() * 0.34).clamp(320.0, 560.0);
-                let table_w = ui.available_width() - side_w - gap;
-                // Both cards end at the same height: the taller of the map at least
-                // square (a small track has to read too) and the table at its
-                // natural row height. The other grows to match: the table's rows,
-                // or the map. What each card adds around its content is measured
-                // on the frame before, so they match exactly.
-                let (map_extra, table_extra) = (
-                    self.corners.map_extra_h.unwrap_or(80.0),
-                    self.corners.table_extra_h.unwrap_or(178.0),
-                );
                 let n = model.segments.len() as f32;
-                let card_h = ((side_w - 32.0) + map_extra).max(table_extra + ROW_H * n);
-                let map_h = card_h - map_extra;
-                let row_h = (card_h - table_extra) / n;
-                let table_h = card_h;
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    let column = Layout::top_down(Align::Min);
-                    ui.allocate_ui_with_layout(vec2(table_w, table_h), column, |ui| {
-                        ui.set_width(table_w);
-                        let (k, card_h) =
-                            self.corners_table(ui, session, &model, trace, corner, row_h);
-                        pick = pick.or(k);
-                        measured.0 = Some(card_h - row_h * n);
+                // Too narrow for the table beside the map: the map goes under it.
+                if ui.available_width() - side_w - gap < CORNERS_TABLE_MIN_W {
+                    let (k, _) = self.corners_table(ui, session, &model, trace, corner, ROW_H);
+                    pick = pick.or(k);
+                    ui.add_space(gap);
+                    let map_h = (ui.available_width() * 0.5).clamp(260.0, 420.0);
+                    let (k, _) = corners_map(
+                        ui,
+                        &model,
+                        trace,
+                        corner,
+                        self.corners.hovered,
+                        &bumps,
+                        map_h,
+                    );
+                    pick = pick.or(k);
+                } else {
+                    let table_w = ui.available_width() - side_w - gap;
+                    // Both cards end at the same height: the taller of the map at least
+                    // square (a small track has to read too) and the table at its
+                    // natural row height. The other grows to match: the table's rows,
+                    // or the map. What each card adds around its content is measured
+                    // on the frame before, so they match exactly.
+                    let (map_extra, table_extra) = (
+                        self.corners.map_extra_h.unwrap_or(80.0),
+                        self.corners.table_extra_h.unwrap_or(178.0),
+                    );
+                    let card_h = ((side_w - 32.0) + map_extra).max(table_extra + ROW_H * n);
+                    let map_h = card_h - map_extra;
+                    let row_h = (card_h - table_extra) / n;
+                    let table_h = card_h;
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        let column = Layout::top_down(Align::Min);
+                        ui.allocate_ui_with_layout(vec2(table_w, table_h), column, |ui| {
+                            ui.set_width(table_w);
+                            let (k, card_h) =
+                                self.corners_table(ui, session, &model, trace, corner, row_h);
+                            pick = pick.or(k);
+                            measured.0 = Some(card_h - row_h * n);
+                        });
+                        // The map has the column to itself, its card as tall as the table's.
+                        ui.allocate_ui_with_layout(vec2(side_w, table_h), column, |ui| {
+                            ui.set_width(side_w);
+                            let (k, card_h) = corners_map(
+                                ui,
+                                &model,
+                                trace,
+                                corner,
+                                self.corners.hovered,
+                                &bumps,
+                                map_h,
+                            );
+                            pick = pick.or(k);
+                            measured.1 = Some(card_h - map_h);
+                        });
                     });
-                    // The map has the column to itself, its card as tall as the table's.
-                    ui.allocate_ui_with_layout(vec2(side_w, table_h), column, |ui| {
-                        ui.set_width(side_w);
-                        let (k, card_h) = corners_map(
-                            ui,
-                            &model,
-                            trace,
-                            corner,
-                            self.corners.hovered,
-                            &bumps,
-                            map_h,
-                        );
-                        pick = pick.or(k);
-                        measured.1 = Some(card_h - map_h);
-                    });
-                });
+                }
                 ui.add_space(gap);
                 up_close(ui, &model, trace, corner);
                 // Where the corners come from, and setting them for the track.

@@ -1021,23 +1021,6 @@ impl App {
     }
 }
 
-/// One line of text cut to `width` with an ellipsis.
-fn single_line(
-    text: &str,
-    font: egui::FontId,
-    color: Color32,
-    width: f32,
-) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
-    job.wrap = egui::text::TextWrapping {
-        max_width: width,
-        max_rows: 1,
-        break_anywhere: true,
-        overflow_character: Some('…'),
-    };
-    job
-}
-
 /// A small drawing of a track's outline, fitted into `rect`.
 fn outline_thumbnail(p: &egui::Painter, rect: Rect, outline: &[aim_track::LatLon], color: Color32) {
     p.rect_filled(rect, CornerRadius::same(6), WINDOW);

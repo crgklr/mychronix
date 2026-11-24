@@ -17,6 +17,9 @@ pub(super) struct ReportState {
     pub adding: Option<(String, Stat)>,
 }
 
+/// The least height the laps table gets under the chart: its summary rows and a few laps.
+const LAPS_TABLE_MIN_H: f32 = 300.0;
+
 impl App {
     pub(super) fn report_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let model = self.corner_model(session, ui.ctx());
@@ -161,7 +164,9 @@ impl App {
             .and_then(|n| laps.iter().position(|l| l.number == n))
             .and_then(|i| cells[i][k].map(|v| vec![[laps[i].number as f64, v]]))
             .unwrap_or_default();
-        graph_card(ui, 200.0, |ui| {
+        // The chart gives up height in a short window, so the table keeps room for laps.
+        let chart_h = (ui.available_height() - 12.0 - LAPS_TABLE_MIN_H).clamp(120.0, 200.0);
+        graph_card(ui, chart_h, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("{title} by lap"))

@@ -8,8 +8,11 @@ use super::*;
 /// Width of the icon rail, and of the rail once it slides out on hover.
 pub(super) const RAIL_W: f32 = 64.0;
 const RAIL_OPEN_W: f32 = 236.0;
-/// From one rail row to the next.
+/// What "Axis  Time  Distance" takes at the right of the Graphs footer.
+const AXIS_CHOICE_W: f32 = 190.0;
+/// From one rail row to the next, and the closest they get in a short window.
 const ROW_STEP: f32 = 44.0;
+const ROW_STEP_MIN: f32 = 32.0;
 
 const TOP_PAGES: [(Page, Icon, &str); 3] = [
     (Page::Garage, Icon::House, "Garage"),
@@ -99,6 +102,7 @@ fn rail_row(
     rail: Rect,
     width: f32,
     y: f32,
+    step: f32,
     icon: Icon,
     label: &str,
     selected: bool,
@@ -106,7 +110,7 @@ fn rail_row(
     off: Option<&str>,
     t: f32,
 ) -> egui::Response {
-    let row = Rect::from_min_size(pos2(rail.left() + 10.0, y), vec2(width - 20.0, 40.0));
+    let row = Rect::from_min_size(pos2(rail.left() + 10.0, y), vec2(width - 20.0, step - 4.0));
     let resp = ui.interact(
         row,
         egui::Id::new(("rail_item", label)),
@@ -233,6 +237,14 @@ impl App {
                             Stroke::new(1.0, theme::OUTLINE),
                         )
                     };
+                    // In a short window the rows close up, evenly, so the last
+                    // one stays clear of Settings at the bottom.
+                    let rows = (TOP_PAGES.len() + VIEWS.len() + BOTTOM_PAGES.len()) as f32;
+                    let card = if indicator.is_some() { 52.0 } else { 0.0 };
+                    let room = (rect.bottom() - 60.0) - (icon.bottom() + 20.0) - card;
+                    // The rows and the two separators' gaps, which close up with them.
+                    let step = (room / (rows + 28.0 / ROW_STEP)).clamp(ROW_STEP_MIN, ROW_STEP);
+                    let sep = 14.0 * step / ROW_STEP;
                     let mut y = icon.bottom() + 20.0;
                     for (page, icon, label) in TOP_PAGES {
                         if rail_row(
@@ -240,6 +252,7 @@ impl App {
                             rect,
                             width,
                             y,
+                            step,
                             icon,
                             label,
                             self.page == page,
@@ -251,10 +264,10 @@ impl App {
                         {
                             self.page = page;
                         }
-                        y += ROW_STEP;
+                        y += step;
                     }
-                    separator(y + 4.0);
-                    y += 14.0;
+                    separator(y + sep * 0.3);
+                    y += sep;
 
                     // What you're looking at: a dot, and the session as the rail opens.
                     if let Some((title, detail)) = &indicator {
@@ -323,6 +336,7 @@ impl App {
                             rect,
                             width,
                             y,
+                            step,
                             icon,
                             &label,
                             selected,
@@ -337,16 +351,17 @@ impl App {
                                 self.analysis.analysis_view = view;
                             }
                         }
-                        y += ROW_STEP;
+                        y += step;
                     }
-                    separator(y + 4.0);
-                    y += 14.0;
+                    separator(y + sep * 0.3);
+                    y += sep;
                     for (page, icon, label) in BOTTOM_PAGES {
                         if rail_row(
                             ui,
                             rect,
                             width,
                             y,
+                            step,
                             icon,
                             label,
                             self.page == page,
@@ -358,7 +373,7 @@ impl App {
                         {
                             self.page = page;
                         }
-                        y += ROW_STEP;
+                        y += step;
                     }
                     // Settings at the bottom of the rail.
                     if rail_row(
@@ -366,6 +381,7 @@ impl App {
                         rect,
                         width,
                         rect.bottom() - 56.0,
+                        ROW_STEP,
                         Icon::Settings,
                         "Settings",
                         self.page == Page::Settings,
@@ -1567,7 +1583,17 @@ impl App {
                 }
             }
             let n = self.analysis.selected.len();
-            ui.label(RichText::new(format!("{n} graphed  ·  ✕ on a graph removes it")).size(12.5).color(DIM));
+            // The hint goes first when the row is short of room, then the count.
+            let axis_w = if session.gps.is_some() { AXIS_CHOICE_W } else { 0.0 };
+            let room = ui.available_width() - axis_w;
+            let fits = |text: &str| {
+                ui.painter().layout_no_wrap(text.to_string(), regular(12.5), DIM).size().x <= room
+            };
+            let full = format!("{n} graphed  ·  ✕ on a graph removes it");
+            let short = format!("{n} graphed");
+            if let Some(text) = [full, short].into_iter().find(|t| fits(t)) {
+                ui.label(RichText::new(text).size(12.5).color(DIM));
+            }
             // Time or distance along the bottom axis (distance needs GPS).
             if session.gps.is_some() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
