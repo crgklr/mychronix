@@ -23,7 +23,8 @@ racers and families who don't use Windows. If you're on Windows, use RaceStudio.
 | MyChron | How it downloads | Status |
 |---|---|---|
 | **MyChron 6, 6T** | Over the MyChron's own WiFi, or a USB-C data cable | Works; tested on a MyChron 6, both ways |
-| **MyChron 5, 5S, 5 2T, 5S 2T** | Over WiFi, the same way | Expected to work; not yet tested on one |
+| **MyChron 5, 5S** | Over WiFi, the same way | Works; reported working by people using it |
+| **MyChron 5 2T, 5S 2T** | Over WiFi, the same way | Expected to work; not yet tested on one |
 | **MyChron 4, 4 2T, 4 660** | With AiM's USB data key | Works; tested on a MyChron 4 with the key |
 | MyChron 4 with an expansion box or CAN devices | Data key | Read the way RaceStudio 2 reads them; not yet tested on hardware |
 | MyChron 3 | Serial cable | Not supported yet |
@@ -369,7 +370,7 @@ known, where it came from and how sure we are of it is in
 
 Roughly in priority order:
 
-- [ ] Test a MyChron 5 (and a MyChron 4 with an expansion box) on real hardware.
+- [ ] Test a MyChron 5 2T or 5S 2T (and a MyChron 4 with an expansion box) on real hardware.
       [Sample sessions](#share-your-sessions) help a lot here.
 - [ ] Edit sessions' details after downloading, one or many at once.
 - [ ] Export sessions and laps to CSV.
