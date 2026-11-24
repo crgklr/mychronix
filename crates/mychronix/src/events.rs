@@ -36,10 +36,13 @@ impl EventDef {
         Some(if a <= b { (a, b) } else { (b, a) })
     }
 
+    /// Its dates and track, and its championship unless the session has none
+    /// of its own: a championship given to an event keeps the sessions it had.
     fn claims(&self, date: Date, track: &str, championship: &str) -> bool {
         self.dates().is_some_and(|(a, b)| a <= date && date <= b)
             && self.track.trim().eq_ignore_ascii_case(track.trim())
             && (self.championship.trim().is_empty()
+                || championship.trim().is_empty()
                 || self
                     .championship
                     .trim()
@@ -318,6 +321,9 @@ mod tests {
             ..def
         };
         assert!(!champ.claims(d(2026, 10, 17), "OVRP Full", "Other"));
+        assert!(champ.claims(d(2026, 10, 17), "OVRP Full", "2026 club"));
+        // Sessions without a championship stay when the event is given one.
+        assert!(champ.claims(d(2026, 10, 17), "OVRP Full", ""));
     }
 
     #[test]
