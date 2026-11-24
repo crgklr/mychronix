@@ -558,9 +558,9 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "binrw"
-version = "0.14.2"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4b52fe7fbd9e207b879c52c5af7efd861c2f4e234ab4f744b0bdc04a863623"
+checksum = "6ad120d555272286c1017d25165ab8bd74806f13fc85b258484ec7e4ce75458f"
 dependencies = [
  "array-init",
  "binrw_derive",
@@ -569,15 +569,15 @@ dependencies = [
 
 [[package]]
 name = "binrw_derive"
-version = "0.14.2"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7196f6935a944081728167ce6e3a599bd38d6d80d21afe4ca17be2097a6682f"
+checksum = "6df92e0e9baae4dc82c7bad7715ca40c0a5c71539057bf2ea04a5c29c980410b"
 dependencies = [
  "either",
  "owo-colors",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2524,7 +2524,7 @@ dependencies = [
 [[package]]
 name = "libxrk"
 version = "0.1.0"
-source = "git+https://github.com/m3rlin45/libxrk?rev=4e44d38debc9445b8e5446c9b7a241f5730ac920#4e44d38debc9445b8e5446c9b7a241f5730ac920"
+source = "git+https://github.com/crgklr/libxrk?rev=3c0d4d0306e2c054de8ded1aaf547c16e3cdf618#3c0d4d0306e2c054de8ded1aaf547c16e3cdf618"
 dependencies = [
  "binrw",
  "flate2",
@@ -3285,9 +3285,9 @@ dependencies = [
 
 [[package]]
 name = "owo-colors"
-version = "3.5.0"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
+checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "parking"
@@ -4612,17 +4612,6 @@ dependencies = [
  "regex-lite",
  "smallvec",
  "symphonia-core",
-]
-
-[[package]]
-name = "syn"
-version = "1.0.109"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
 ]
 
 [[package]]
