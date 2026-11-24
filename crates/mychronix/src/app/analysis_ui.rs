@@ -162,6 +162,64 @@ fn rail_row(
     }
 }
 
+/// Where the rail is this frame and how far it has slid open.
+#[derive(Clone, Copy)]
+struct RailFrame {
+    rect: Rect,
+    /// Its width now, from `RAIL_W` closed to `RAIL_OPEN_W` open.
+    width: f32,
+    /// How far open: 0 closed, 1 open.
+    t: f32,
+}
+
+impl RailFrame {
+    /// One of its rows (see [`rail_row`]).
+    #[allow(clippy::too_many_arguments)]
+    fn row(
+        self,
+        ui: &Ui,
+        y: f32,
+        step: f32,
+        icon: Icon,
+        label: &str,
+        selected: bool,
+        hint: Option<&str>,
+        off: Option<&str>,
+    ) -> egui::Response {
+        rail_row(
+            ui, self.rect, self.width, y, step, icon, label, selected, hint, off, self.t,
+        )
+    }
+}
+
+/// The rail's logo: the MyChron icon, then the wordmark as the rail opens.
+/// Returns the icon's rect, and true when it was clicked (it goes home, to
+/// the Garage).
+fn rail_logo(ui: &Ui, rail: RailFrame) -> (Rect, bool) {
+    let (rect, t) = (rail.rect, rail.t);
+    let icon = Rect::from_min_size(
+        rect.min + vec2((RAIL_W - 38.0) / 2.0, 18.0),
+        Vec2::splat(38.0),
+    );
+    egui::Image::new(egui::include_image!("../../assets/mychronix-icon.svg")).paint_at(ui, icon);
+    let logo = ui
+        .interact(icon.expand(4.0), egui::Id::new("rail_logo"), Sense::click())
+        .on_hover_text("Garage");
+    if logo.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if t > 0.05 {
+        let mark = Rect::from_min_size(
+            pos2(icon.right() + 10.0, icon.center().y - 11.0),
+            vec2(22.0 * 578.0 / 82.0, 22.0),
+        );
+        egui::Image::new(egui::include_image!("../../assets/mychronix.svg"))
+            .tint(Color32::from_white_alpha((255.0 * t) as u8))
+            .paint_at(ui, mark.intersect(rect));
+    }
+    (icon, logo.clicked())
+}
+
 impl App {
     /// Icons down the left edge; hovering slides the full rail, with labels,
     /// out over the page (the page itself doesn't move). The analysis views
@@ -179,7 +237,6 @@ impl App {
         let rect = Rect::from_min_size(space.min, vec2(width, space.height()));
         self.rail_rect = Some(rect);
         let indicator = session.map(|s| self.session_label(s));
-        let compare_n = self.comparison.laps.len();
         egui::Area::new(egui::Id::new("rail"))
             .order(egui::Order::Foreground)
             .fixed_pos(rect.min)
@@ -198,203 +255,181 @@ impl App {
                 Frame::new().fill(SIDEBAR).shadow(shadow).show(ui, |ui| {
                     ui.set_min_size(rect.size());
                     ui.set_max_size(rect.size());
-                    // Its empty space moves the window (no title bar on Linux); the items below take their own clicks.
-                    let empty =
-                        ui.interact(rect, egui::Id::new("rail_move"), Sense::click_and_drag());
-                    let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                    super::window_ui::move_or_maximize(ui.ctx(), &empty, maximized);
-                    let painter = ui.painter_at(rect);
-                    // Logo: the MyChron icon, then the wordmark as the rail opens.
-                    let icon = Rect::from_min_size(
-                        rect.min + vec2((RAIL_W - 38.0) / 2.0, 18.0),
-                        Vec2::splat(38.0),
-                    );
-                    egui::Image::new(egui::include_image!("../../assets/mychronix-icon.svg"))
-                        .paint_at(ui, icon);
-                    // The logo goes home, to the Garage.
-                    let logo = ui
-                        .interact(icon.expand(4.0), egui::Id::new("rail_logo"), Sense::click())
-                        .on_hover_text("Garage");
-                    if logo.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if logo.clicked() {
-                        self.page = Page::Garage;
-                    }
-                    if t > 0.05 {
-                        let mark = Rect::from_min_size(
-                            pos2(icon.right() + 10.0, icon.center().y - 11.0),
-                            vec2(22.0 * 578.0 / 82.0, 22.0),
-                        );
-                        egui::Image::new(egui::include_image!("../../assets/mychronix.svg"))
-                            .tint(Color32::from_white_alpha((255.0 * t) as u8))
-                            .paint_at(ui, mark.intersect(rect));
-                    }
-                    let separator = |y: f32| {
-                        painter.hline(
-                            rect.left() + 18.0..=rect.right() - 18.0,
-                            y,
-                            Stroke::new(1.0, theme::OUTLINE),
-                        )
-                    };
-                    // In a short window the rows close up, evenly, so the last
-                    // one stays clear of Settings at the bottom.
-                    let rows = (TOP_PAGES.len() + VIEWS.len() + BOTTOM_PAGES.len()) as f32;
-                    let card = if indicator.is_some() { 52.0 } else { 0.0 };
-                    let room = (rect.bottom() - 60.0) - (icon.bottom() + 20.0) - card;
-                    // The rows and the two separators' gaps, which close up with them.
-                    let step = (room / (rows + 28.0 / ROW_STEP)).clamp(ROW_STEP_MIN, ROW_STEP);
-                    let sep = 14.0 * step / ROW_STEP;
-                    let mut y = icon.bottom() + 20.0;
-                    for (page, icon, label) in TOP_PAGES {
-                        if rail_row(
-                            ui,
-                            rect,
-                            width,
-                            y,
-                            step,
-                            icon,
-                            label,
-                            self.page == page,
-                            None,
-                            None,
-                            t,
-                        )
-                        .clicked()
-                        {
-                            self.page = page;
-                        }
-                        y += step;
-                    }
-                    separator(y + sep * 0.3);
-                    y += sep;
-
-                    // What you're looking at: a dot, and the session as the rail opens.
-                    if let Some((title, detail)) = &indicator {
-                        let card = Rect::from_min_size(
-                            pos2(rect.left() + 10.0, y),
-                            vec2(width - 20.0, 44.0),
-                        );
-                        let resp = ui.interact(card, egui::Id::new("rail_session"), Sense::click());
-                        let lit = resp.hovered() || self.analysis.session_panel;
-                        painter.rect(
-                            card,
-                            CornerRadius::same(theme::RADIUS_SMALL + 2),
-                            SURFACE,
-                            Stroke::new(1.0, if lit { SURFACE_ACTIVE } else { theme::OUTLINE }),
-                            egui::StrokeKind::Inside,
-                        );
-                        painter.circle_filled(
-                            pos2(rect.left() + RAIL_W / 2.0, card.center().y),
-                            4.0,
-                            theme::ACCENT,
-                        );
-                        if t > 0.05 {
-                            let text = Rect::from_min_max(
-                                pos2(rect.left() + RAIL_W / 2.0 + 14.0, card.top()),
-                                card.right_bottom() - vec2(8.0, 0.0),
-                            );
-                            let p = ui.painter_at(text);
-                            p.text(
-                                pos2(text.left(), card.center().y - 8.0),
-                                egui::Align2::LEFT_CENTER,
-                                title,
-                                medium(13.0),
-                                TEXT.gamma_multiply(t),
-                            );
-                            p.text(
-                                pos2(text.left(), card.center().y + 9.0),
-                                egui::Align2::LEFT_CENTER,
-                                detail,
-                                regular(12.0),
-                                SECONDARY.gamma_multiply(t),
-                            );
-                        }
-                        if resp.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        if resp
-                            .on_hover_text("What you're looking at: click to change")
-                            .clicked()
-                        {
-                            self.analysis.session_panel = !self.analysis.session_panel;
-                            self.page = Page::Analysis;
-                        }
-                        y += 52.0;
-                    }
-                    for (view, icon, label, hint) in VIEWS {
-                        let selected = self.page == Page::Analysis
-                            && self.analysis.analysis_view.rail_item() == view;
-                        let off = session.and_then(|s| view_unavailable(s, view));
-                        let label = if view == AnalysisView::Compare && compare_n > 0 {
-                            format!("{label} ({compare_n})")
-                        } else {
-                            label.to_string()
-                        };
-                        if rail_row(
-                            ui,
-                            rect,
-                            width,
-                            y,
-                            step,
-                            icon,
-                            &label,
-                            selected,
-                            Some(hint),
-                            off,
-                            t,
-                        )
-                        .clicked()
-                        {
-                            self.page = Page::Analysis;
-                            if self.analysis.analysis_view.rail_item() != view {
-                                self.analysis.analysis_view = view;
-                            }
-                        }
-                        y += step;
-                    }
-                    separator(y + sep * 0.3);
-                    y += sep;
-                    for (page, icon, label) in BOTTOM_PAGES {
-                        if rail_row(
-                            ui,
-                            rect,
-                            width,
-                            y,
-                            step,
-                            icon,
-                            label,
-                            self.page == page,
-                            None,
-                            None,
-                            t,
-                        )
-                        .clicked()
-                        {
-                            self.page = page;
-                        }
-                        y += step;
-                    }
-                    // Settings at the bottom of the rail.
-                    if rail_row(
-                        ui,
-                        rect,
-                        width,
-                        rect.bottom() - 56.0,
-                        ROW_STEP,
-                        Icon::Settings,
-                        "Settings",
-                        self.page == Page::Settings,
-                        None,
-                        None,
-                        t,
-                    )
-                    .clicked()
-                    {
-                        self.page = Page::Settings;
-                    }
+                    let rail = RailFrame { rect, width, t };
+                    self.rail_items(ui, rail, indicator.as_ref(), session);
                 });
             });
+    }
+
+    /// Everything in the rail, top to bottom: the logo, the pages, the
+    /// session indicator and the analysis views, more pages, and Settings.
+    fn rail_items(
+        &mut self,
+        ui: &mut Ui,
+        rail: RailFrame,
+        indicator: Option<&(String, String)>,
+        session: Option<&Session>,
+    ) {
+        let rect = rail.rect;
+        // Its empty space moves the window (no title bar on Linux); the items below take their own clicks.
+        let empty = ui.interact(rect, egui::Id::new("rail_move"), Sense::click_and_drag());
+        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+        super::window_ui::move_or_maximize(ui.ctx(), &empty, maximized);
+        let painter = ui.painter_at(rect);
+        let (icon, home) = rail_logo(ui, rail);
+        if home {
+            self.page = Page::Garage;
+        }
+        let separator = |y: f32| {
+            painter.hline(
+                rect.left() + 18.0..=rect.right() - 18.0,
+                y,
+                Stroke::new(1.0, theme::OUTLINE),
+            )
+        };
+        // In a short window the rows close up, evenly, so the last
+        // one stays clear of Settings at the bottom.
+        let rows = (TOP_PAGES.len() + VIEWS.len() + BOTTOM_PAGES.len()) as f32;
+        let card = if indicator.is_some() { 52.0 } else { 0.0 };
+        let room = (rect.bottom() - 60.0) - (icon.bottom() + 20.0) - card;
+        // The rows and the two separators' gaps, which close up with them.
+        let step = (room / (rows + 28.0 / ROW_STEP)).clamp(ROW_STEP_MIN, ROW_STEP);
+        let sep = 14.0 * step / ROW_STEP;
+        let mut y = self.rail_pages(ui, rail, &TOP_PAGES, icon.bottom() + 20.0, step);
+        separator(y + sep * 0.3);
+        y += sep;
+        if let Some((title, detail)) = indicator {
+            self.rail_session_card(ui, rail, y, title, detail);
+            y += 52.0;
+        }
+        y = self.rail_views(ui, rail, y, step, session);
+        separator(y + sep * 0.3);
+        y += sep;
+        self.rail_pages(ui, rail, &BOTTOM_PAGES, y, step);
+        // Settings at the bottom of the rail.
+        if rail
+            .row(
+                ui,
+                rect.bottom() - 56.0,
+                ROW_STEP,
+                Icon::Settings,
+                "Settings",
+                self.page == Page::Settings,
+                None,
+                None,
+            )
+            .clicked()
+        {
+            self.page = Page::Settings;
+        }
+    }
+
+    /// A run of page rows from `y`, `step` apart. Returns where the next row goes.
+    fn rail_pages(
+        &mut self,
+        ui: &Ui,
+        rail: RailFrame,
+        pages: &[(Page, Icon, &str)],
+        mut y: f32,
+        step: f32,
+    ) -> f32 {
+        for &(page, icon, label) in pages {
+            if rail
+                .row(ui, y, step, icon, label, self.page == page, None, None)
+                .clicked()
+            {
+                self.page = page;
+            }
+            y += step;
+        }
+        y
+    }
+
+    /// What you're looking at: a dot, and the session as the rail opens.
+    /// A click opens (or closes) the session panel.
+    fn rail_session_card(&mut self, ui: &Ui, rail: RailFrame, y: f32, title: &str, detail: &str) {
+        let (rect, t) = (rail.rect, rail.t);
+        let painter = ui.painter_at(rect);
+        let card = Rect::from_min_size(pos2(rect.left() + 10.0, y), vec2(rail.width - 20.0, 44.0));
+        let resp = ui.interact(card, egui::Id::new("rail_session"), Sense::click());
+        let lit = resp.hovered() || self.analysis.session_panel;
+        painter.rect(
+            card,
+            CornerRadius::same(theme::RADIUS_SMALL + 2),
+            SURFACE,
+            Stroke::new(1.0, if lit { SURFACE_ACTIVE } else { theme::OUTLINE }),
+            egui::StrokeKind::Inside,
+        );
+        painter.circle_filled(
+            pos2(rect.left() + RAIL_W / 2.0, card.center().y),
+            4.0,
+            theme::ACCENT,
+        );
+        if t > 0.05 {
+            let text = Rect::from_min_max(
+                pos2(rect.left() + RAIL_W / 2.0 + 14.0, card.top()),
+                card.right_bottom() - vec2(8.0, 0.0),
+            );
+            let p = ui.painter_at(text);
+            p.text(
+                pos2(text.left(), card.center().y - 8.0),
+                egui::Align2::LEFT_CENTER,
+                title,
+                medium(13.0),
+                TEXT.gamma_multiply(t),
+            );
+            p.text(
+                pos2(text.left(), card.center().y + 9.0),
+                egui::Align2::LEFT_CENTER,
+                detail,
+                regular(12.0),
+                SECONDARY.gamma_multiply(t),
+            );
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if resp
+            .on_hover_text("What you're looking at: click to change")
+            .clicked()
+        {
+            self.analysis.session_panel = !self.analysis.session_panel;
+            self.page = Page::Analysis;
+        }
+    }
+
+    /// The analysis views' rows, dimmed when the session can't show one.
+    /// Returns where the next row goes.
+    fn rail_views(
+        &mut self,
+        ui: &Ui,
+        rail: RailFrame,
+        mut y: f32,
+        step: f32,
+        session: Option<&Session>,
+    ) -> f32 {
+        let compare_n = self.comparison.laps.len();
+        for (view, icon, label, hint) in VIEWS {
+            let selected =
+                self.page == Page::Analysis && self.analysis.analysis_view.rail_item() == view;
+            let off = session.and_then(|s| view_unavailable(s, view));
+            let label = if view == AnalysisView::Compare && compare_n > 0 {
+                format!("{label} ({compare_n})")
+            } else {
+                label.to_string()
+            };
+            if rail
+                .row(ui, y, step, icon, &label, selected, Some(hint), off)
+                .clicked()
+            {
+                self.page = Page::Analysis;
+                if self.analysis.analysis_view.rail_item() != view {
+                    self.analysis.analysis_view = view;
+                }
+            }
+            y += step;
+        }
+        y
     }
 
     /// The open session's parts: track, session number, day, driver, and the lap looked at.
@@ -694,28 +729,54 @@ impl App {
 
     /// The panel's first column: today's session header and details.
     fn panel_session(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
-        let i = &session.info;
+        self.panel_track_row(ui, session);
+        self.panel_session_line(ui, session);
+        self.panel_timing_notes(ui, session);
+        ui.add_space(14.0);
+        panel_tiles(ui, session);
+        ui.add_space(16.0);
+        self.setup_section(ui);
+        let weather = self.path.clone().and_then(|p| {
+            self.lib()
+                .sessions
+                .iter()
+                .find(|s| s.path == p)
+                .and_then(|s| s.weather)
+        });
+        if weather.is_some() {
+            panel_section(ui, "WEATHER");
+            self.weather_line(ui);
+        }
+        self.panel_stands_out(ui, session);
+        // The IMU's mounting, worked out from the session: reassurance, not a setting.
+        if let Some(m) = session.info.imu_mount {
+            ui.add_space(14.0);
+            ui.add(
+                egui::Label::new(RichText::new(format!("The MyChron leans {:.0}° on its mount. Forward g and Vertical g are corrected for it automatically.", m.tilt_deg)).size(13.0).color(DIM))
+                    .wrap(),
+            );
+        }
+        self.panel_sensor_issues(ui, session);
+        ui.add_space(16.0);
+        let open = egui::Button::new(RichText::new("Open…").size(14.0).color(TEXT))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, SURFACE_ACTIVE))
+            .corner_radius(CornerRadius::same(255))
+            .min_size(vec2(92.0, 38.0));
+        if ui.add(open).on_hover_text("Open a session file").clicked() {
+            self.analysis.session_panel = false;
+            self.open_dialog();
+        }
+    }
+
+    /// The track, big, with "Change track" beside it (and, with GPS, the
+    /// start/finish line).
+    fn panel_track_row(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let chosen = self.path.clone().and_then(|p| self.session_track_name(&p));
         let title = chosen
-            .or_else(|| i.venue.clone())
+            .or_else(|| session.info.venue.clone())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Session".into());
-        let when = match (i.date.as_deref(), i.time.as_deref()) {
-            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::dates::clock_time(t))),
-            (Some(d), None) => Some(d.to_string()),
-            _ => None,
-        };
-        let section = |ui: &mut Ui, text: &str| {
-            ui.add_space(16.0);
-            ui.label(
-                RichText::new(text)
-                    .font(semibold(11.5))
-                    .color(DIM)
-                    .extra_letter_spacing(0.8),
-            );
-            ui.add_space(4.0);
-        };
-        // The track, with "Change track" beside it.
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.label(RichText::new(title).font(semibold(26.0)).color(TEXT));
@@ -751,22 +812,38 @@ impl App {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text("Set where laps start: on one of your tracks, or as a new track")
                     .clicked()
-                    && let Some(p) = self.path.clone()
                 {
-                    let track = self
-                        .session_track_name(&p)
-                        .or_else(|| session.info.venue.clone())
-                        .unwrap_or_default();
-                    self.line_pick = line_pick_ui::LinePick::new(
-                        p.clone(),
-                        track,
-                        session.clone(),
-                        self.session_outline(&p),
-                    );
+                    self.open_line_pick(session);
                 }
             }
         });
-        // Session · when · driver · kart, the driver in bold (click to change who drove).
+    }
+
+    /// The start/finish line window, for the open session at its track.
+    fn open_line_pick(&mut self, session: &std::sync::Arc<Session>) {
+        let Some(p) = self.path.clone() else {
+            return;
+        };
+        let track = self
+            .session_track_name(&p)
+            .or_else(|| session.info.venue.clone())
+            .unwrap_or_default();
+        self.line_pick = line_pick_ui::LinePick::new(
+            p.clone(),
+            track,
+            session.clone(),
+            self.session_outline(&p),
+        );
+    }
+
+    /// Session · when · driver · kart, the driver in bold (click to change who drove).
+    fn panel_session_line(&mut self, ui: &mut Ui, session: &Session) {
+        let i = &session.info;
+        let when = match (i.date.as_deref(), i.time.as_deref()) {
+            (Some(d), Some(t)) => Some(format!("{d} at {}", crate::dates::clock_time(t))),
+            (Some(d), None) => Some(d.to_string()),
+            _ => None,
+        };
         let mut change_driver = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -809,6 +886,11 @@ impl App {
         if change_driver && let Some(p) = self.path.clone() {
             self.driver_pick = Some((p, i.driver.clone().unwrap_or_default(), false));
         }
+    }
+
+    /// How the laps were timed when not by the MyChron, a long lap with no
+    /// start/finish line to time it by, and gaps in the recording.
+    fn panel_timing_notes(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         // Laps timed from GPS, and why (see `jobs::relap`).
         let why = match session.info.laps_from_gps {
             Some(aim_xrk::relap::Retimed::Untimed) => Some(
@@ -841,105 +923,70 @@ impl App {
             if link
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
-                && let Some(p) = self.path.clone()
             {
-                let track = self
-                    .session_track_name(&p)
-                    .or_else(|| i.venue.clone())
-                    .unwrap_or_default();
-                self.line_pick = line_pick_ui::LinePick::new(
-                    p.clone(),
-                    track,
-                    session.clone(),
-                    self.session_outline(&p),
-                );
+                self.open_line_pick(session);
             }
         }
         if let Some(gaps) = recording_gaps_note(session, &self.analysis.recording_gaps) {
             ui.add_space(6.0);
             ui.add(egui::Label::new(RichText::new(gaps).size(13.0).color(DIM)).wrap());
         }
-        ui.add_space(14.0);
-        panel_tiles(ui, session);
-        ui.add_space(16.0);
-        self.setup_section(ui);
-        let weather = self.path.clone().and_then(|p| {
-            self.lib()
-                .sessions
-                .iter()
-                .find(|s| s.path == p)
-                .and_then(|s| s.weather)
-        });
-        if weather.is_some() {
-            section(ui, "WEATHER");
-            self.weather_line(ui);
-        }
-        // What stands out across the racing laps.
+    }
+
+    /// What stands out across the racing laps, each with why on hover.
+    fn panel_stands_out(&mut self, ui: &mut Ui, session: &Session) {
         let notes = self.open_session_notes(session);
-        if !notes.is_empty() {
-            section(ui, "WHAT STANDS OUT");
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for (k, (text, why, attention)) in notes.into_iter().enumerate() {
-                    if k > 0 {
-                        ui.label(RichText::new("  ·  ").size(15.0).color(DIM));
-                    }
-                    ui.label(RichText::new(text).size(15.0).color(if attention {
-                        theme::FAVORITE
-                    } else {
-                        TEXT
-                    }))
-                    .on_hover_text(why);
-                }
-            });
+        if notes.is_empty() {
+            return;
         }
-        // The IMU's mounting, worked out from the session: reassurance, not a setting.
-        if let Some(m) = session.info.imu_mount {
-            ui.add_space(14.0);
-            ui.add(
-                egui::Label::new(RichText::new(format!("The MyChron leans {:.0}° on its mount. Forward g and Vertical g are corrected for it automatically.", m.tilt_deg)).size(13.0).color(DIM))
-                    .wrap(),
+        panel_section(ui, "WHAT STANDS OUT");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (k, (text, why, attention)) in notes.into_iter().enumerate() {
+                if k > 0 {
+                    ui.label(RichText::new("  ·  ").size(15.0).color(DIM));
+                }
+                ui.label(RichText::new(text).size(15.0).color(if attention {
+                    theme::FAVORITE
+                } else {
+                    TEXT
+                }))
+                .on_hover_text(why);
+            }
+        });
+    }
+
+    /// Sensors that stopped recording, with a link to what happened.
+    fn panel_sensor_issues(&mut self, ui: &mut Ui, session: &Session) {
+        let Some(checked) = self.open_session_check(session) else {
+            return;
+        };
+        let names: Vec<&str> = checked.issues.iter().map(|i| i.channel.as_str()).collect();
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add(Icon::TriangleAlert.image(theme::FAVORITE, 14.0));
+            ui.label(
+                RichText::new(format!("{}: no data", names.join(", ")))
+                    .size(13.5)
+                    .color(theme::FAVORITE),
             );
-        }
-        // Sensors that stopped recording.
-        if let Some(checked) = self.open_session_check(session) {
-            let names: Vec<&str> = checked.issues.iter().map(|i| i.channel.as_str()).collect();
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                ui.add(Icon::TriangleAlert.image(theme::FAVORITE, 14.0));
-                ui.label(
-                    RichText::new(format!("{}: no data", names.join(", ")))
+            ui.label(RichText::new("·").size(13.5).color(DIM));
+            let link = ui.add(
+                egui::Label::new(
+                    RichText::new("what happened, and what to check")
                         .size(13.5)
-                        .color(theme::FAVORITE),
-                );
-                ui.label(RichText::new("·").size(13.5).color(DIM));
-                let link = ui.add(
-                    egui::Label::new(
-                        RichText::new("what happened, and what to check")
-                            .size(13.5)
-                            .color(theme::ACCENT),
-                    )
-                    .sense(Sense::click()),
-                );
-                if link.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if link.clicked() {
-                    self.sensors.report = Some(vec![checked.clone()]);
-                }
-            });
-        }
-        ui.add_space(16.0);
-        let open = egui::Button::new(RichText::new("Open…").size(14.0).color(TEXT))
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, SURFACE_ACTIVE))
-            .corner_radius(CornerRadius::same(255))
-            .min_size(vec2(92.0, 38.0));
-        if ui.add(open).on_hover_text("Open a session file").clicked() {
-            self.analysis.session_panel = false;
-            self.open_dialog();
-        }
+                        .color(theme::ACCENT),
+                )
+                .sense(Sense::click()),
+            );
+            if link.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if link.clicked() {
+                self.sensors.report = Some(vec![checked.clone()]);
+            }
+        });
     }
 
     /// The panel's lap picker: every lap, then the whole session. True when one was picked.
@@ -1204,6 +1251,18 @@ impl App {
     }
 }
 
+/// A small capitals heading in the session panel, with room above it.
+fn panel_section(ui: &mut Ui, text: &str) {
+    ui.add_space(16.0);
+    ui.label(
+        RichText::new(text)
+            .font(semibold(11.5))
+            .color(DIM)
+            .extra_letter_spacing(0.8),
+    );
+    ui.add_space(4.0);
+}
+
 /// The panel's four tiles: best lap, average lap, laps, time on track.
 fn panel_tiles(ui: &mut Ui, session: &Session) {
     let slow = slow_laps(session);
@@ -1307,6 +1366,210 @@ fn ui_clicked_outside(ctx: &egui::Context, panel: Rect, pill: Rect, rail: Option
         })
 }
 
+/// One lap's block in the lap strip: the lap, and how it stands.
+struct LapBlock {
+    lap: aim_xrk::Lap,
+    /// An out, in or slow lap.
+    slow: bool,
+    /// The session's best lap.
+    best: Option<aim_xrk::Lap>,
+    /// The lap being viewed (never on Compare).
+    selected: bool,
+    /// Its color, when it's in the comparison.
+    compare_slot: Option<usize>,
+    /// The strip is on Compare, where a click adds or removes the lap.
+    compare_mode: bool,
+}
+
+/// What a click on a lap block asks for.
+enum LapClick {
+    /// View the lap.
+    View,
+    /// Add it to the comparison, or take it out.
+    Toggle,
+}
+
+/// Draws a lap's block at `size`, and says what a click on it asks for.
+fn lap_block(ui: &mut Ui, b: &LapBlock, size: Vec2) -> Option<LapClick> {
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let p = ui.painter();
+    let fill = if b.selected {
+        SURFACE_ACTIVE
+    } else if resp.hovered() {
+        SURFACE_HOVER
+    } else if b.slow {
+        WINDOW
+    } else {
+        SURFACE
+    };
+    p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL), fill);
+    if b.slow && !b.selected {
+        p.rect_stroke(
+            rect,
+            CornerRadius::same(theme::RADIUS_SMALL),
+            Stroke::new(1.0, theme::OUTLINE),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if b.selected {
+        p.rect_stroke(
+            rect,
+            CornerRadius::same(theme::RADIUS_SMALL),
+            Stroke::new(1.5, TEXT),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let (true, Some(slot)) = (b.compare_mode, b.compare_slot) {
+        p.rect_stroke(
+            rect,
+            CornerRadius::same(theme::RADIUS_SMALL),
+            Stroke::new(2.0, SERIES[slot]),
+            egui::StrokeKind::Inside,
+        );
+    }
+    lap_block_text(p, rect, size.x, b);
+    let over_dot = lap_block_dot(p, rect, size.x, &resp, b);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let clicked = resp.on_hover_text(lap_block_tip(b)).clicked();
+    if clicked && (b.compare_mode || over_dot) {
+        Some(LapClick::Toggle)
+    } else if clicked {
+        Some(LapClick::View)
+    } else {
+        None
+    }
+}
+
+/// A lap block's number and time, as much as its width `w` has room for.
+fn lap_block_text(p: &egui::Painter, rect: Rect, w: f32, b: &LapBlock) {
+    let lap = b.lap;
+    let is_best = Some(lap) == b.best;
+    let time_color = if is_best {
+        theme::GOOD
+    } else if b.slow {
+        DIM
+    } else {
+        TEXT
+    };
+    if w >= 62.0 {
+        p.text(
+            pos2(rect.left() + 8.0, rect.top() + 13.0),
+            egui::Align2::LEFT_CENTER,
+            lap.number.to_string(),
+            regular(11.5),
+            DIM,
+        );
+        p.text(
+            pos2(rect.left() + 8.0, rect.top() + 31.0),
+            egui::Align2::LEFT_CENTER,
+            format_lap_time(lap.duration_ms()),
+            medium(13.0),
+            time_color,
+        );
+    } else if let (true, Some(best)) = (w >= 44.0, b.best) {
+        // Too narrow for a full time: the best keeps its time to the hundredth, the rest show their gap to it.
+        let text = if is_best {
+            let t = format_lap_time(lap.duration_ms());
+            t[..t.len() - 1].to_string()
+        } else {
+            format!(
+                "+{:.2}",
+                (lap.duration_ms() - best.duration_ms()) as f64 / 1000.0
+            )
+        };
+        p.text(
+            pos2(rect.left() + 5.0, rect.top() + 13.0),
+            egui::Align2::LEFT_CENTER,
+            lap.number.to_string(),
+            regular(11.0),
+            DIM,
+        );
+        p.text(
+            pos2(rect.left() + 5.0, rect.top() + 31.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            medium(12.0),
+            time_color,
+        );
+    } else {
+        p.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            lap.number.to_string(),
+            medium(12.5),
+            time_color,
+        );
+    }
+}
+
+/// Compare: a circle in the block's corner, filled with its color once
+/// added. True when the pointer is over it.
+fn lap_block_dot(
+    p: &egui::Painter,
+    rect: Rect,
+    w: f32,
+    resp: &egui::Response,
+    b: &LapBlock,
+) -> bool {
+    let dot = Rect::from_center_size(
+        pos2(rect.right() - 10.0, rect.top() + 10.0),
+        Vec2::splat(14.0),
+    );
+    let over_dot = resp
+        .hover_pos()
+        .is_some_and(|q| dot.expand(3.0).contains(q));
+    match b.compare_slot {
+        Some(slot) => {
+            p.circle_filled(dot.center(), 5.0, SERIES[slot]);
+        }
+        None if resp.hovered() && w >= 40.0 && !b.compare_mode => {
+            p.circle_stroke(
+                dot.center(),
+                6.0,
+                Stroke::new(1.2, if over_dot { TEXT } else { DIM }),
+            );
+            p.text(
+                dot.center() - vec2(0.0, 0.5),
+                egui::Align2::CENTER_CENTER,
+                "+",
+                medium(11.0),
+                if over_dot { TEXT } else { DIM },
+            );
+        }
+        None => {}
+    }
+    over_dot
+}
+
+/// A lap block's hover text: its time, against the best, and what a click does.
+fn lap_block_tip(b: &LapBlock) -> String {
+    let lap = b.lap;
+    let mut tip = format!(
+        "Lap {}  ·  {}",
+        lap.number,
+        format_lap_time(lap.duration_ms())
+    );
+    if Some(lap) == b.best {
+        tip.push_str("  ·  best");
+    } else if let (Some(best), false) = (b.best, b.slow) {
+        tip.push_str(&format!(
+            "  ·  {} on the best",
+            format_delta(lap.duration_ms() - best.duration_ms())
+        ));
+    } else if b.slow {
+        tip.push_str("  ·  out, in or slow lap");
+    }
+    tip.push_str(match (b.compare_mode, b.compare_slot.is_some()) {
+        (true, true) => "\nClick to remove from the comparison",
+        (true, false) => "\nClick to add to the comparison",
+        (false, true) => "\nClick to view  ·  the dot: remove from Compare",
+        (false, false) => "\nClick to view  ·  + to add to Compare",
+    });
+    tip
+}
+
 impl App {
     /// Every lap as a block, sized by its time. On Graphs a click views the
     /// lap and the small circle adds it to Compare; on Compare a click adds or
@@ -1334,226 +1597,29 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             if compare_mode {
-                // Which session these laps come from, and what a click does.
-                let (rect, _) = ui.allocate_exact_size(vec2(all_w, h), Sense::hover());
-                let number = self
-                    .path
-                    .as_ref()
-                    .and_then(|p| p.file_stem())
-                    .and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
-                let p = ui.painter();
-                p.text(
-                    pos2(rect.left() + 4.0, rect.top() + 13.0),
-                    egui::Align2::LEFT_CENTER,
-                    "Add laps",
-                    regular(11.5),
-                    DIM,
-                );
-                p.text(
-                    pos2(rect.left() + 4.0, rect.top() + 31.0),
-                    egui::Align2::LEFT_CENTER,
-                    number.map(|n| format!("Session {n}")).unwrap_or_default(),
-                    medium(12.5),
-                    SECONDARY,
-                );
-            } else {
-                // The whole session.
-                let (rect, resp) = ui.allocate_exact_size(vec2(all_w, h), Sense::click());
-                let on = self.analysis.lap.is_none();
-                let p = ui.painter();
-                p.rect_filled(
-                    rect,
-                    CornerRadius::same(theme::RADIUS_SMALL),
-                    if on {
-                        SURFACE_ACTIVE
-                    } else if resp.hovered() {
-                        SURFACE_HOVER
-                    } else {
-                        SURFACE
-                    },
-                );
-                if on {
-                    p.rect_stroke(
-                        rect,
-                        CornerRadius::same(theme::RADIUS_SMALL),
-                        Stroke::new(1.5, TEXT),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                p.text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "All",
-                    medium(13.5),
-                    if on { TEXT } else { SECONDARY },
-                );
-                if resp.on_hover_text("The whole session").clicked() {
-                    pick = Some(None);
-                }
+                self.strip_source(ui, vec2(all_w, h));
+            } else if self.strip_all(ui, vec2(all_w, h)) {
+                pick = Some(None);
             }
             for (i, lap) in laps.iter().enumerate() {
-                let (rect, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
-                // On Compare, "selected" means in the comparison.
-                let selected = if compare_mode {
-                    false
-                } else {
-                    self.analysis.lap == Some(i)
+                let block = LapBlock {
+                    lap: *lap,
+                    slow: slow[i],
+                    best,
+                    // On Compare, "selected" means in the comparison.
+                    selected: !compare_mode && self.analysis.lap == Some(i),
+                    compare_slot: self
+                        .comparison
+                        .laps
+                        .iter()
+                        .find(|c| c.lap == *lap && Some(&c.path) == self.path.as_ref())
+                        .map(|c| c.slot),
+                    compare_mode,
                 };
-                let is_best = Some(*lap) == best;
-                let compare_slot = self
-                    .comparison
-                    .laps
-                    .iter()
-                    .find(|c| c.lap == *lap && Some(&c.path) == self.path.as_ref())
-                    .map(|c| c.slot);
-                let p = ui.painter();
-                let fill = if selected {
-                    SURFACE_ACTIVE
-                } else if resp.hovered() {
-                    SURFACE_HOVER
-                } else if slow[i] {
-                    WINDOW
-                } else {
-                    SURFACE
-                };
-                p.rect_filled(rect, CornerRadius::same(theme::RADIUS_SMALL), fill);
-                if slow[i] && !selected {
-                    p.rect_stroke(
-                        rect,
-                        CornerRadius::same(theme::RADIUS_SMALL),
-                        Stroke::new(1.0, theme::OUTLINE),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if selected {
-                    p.rect_stroke(
-                        rect,
-                        CornerRadius::same(theme::RADIUS_SMALL),
-                        Stroke::new(1.5, TEXT),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if let (true, Some(slot)) = (compare_mode, compare_slot) {
-                    p.rect_stroke(
-                        rect,
-                        CornerRadius::same(theme::RADIUS_SMALL),
-                        Stroke::new(2.0, SERIES[slot]),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                let time_color = if is_best {
-                    theme::GOOD
-                } else if slow[i] {
-                    DIM
-                } else {
-                    TEXT
-                };
-                if w >= 62.0 {
-                    p.text(
-                        pos2(rect.left() + 8.0, rect.top() + 13.0),
-                        egui::Align2::LEFT_CENTER,
-                        lap.number.to_string(),
-                        regular(11.5),
-                        DIM,
-                    );
-                    p.text(
-                        pos2(rect.left() + 8.0, rect.top() + 31.0),
-                        egui::Align2::LEFT_CENTER,
-                        format_lap_time(lap.duration_ms()),
-                        medium(13.0),
-                        time_color,
-                    );
-                } else if let (true, Some(b)) = (w >= 44.0, best) {
-                    // Too narrow for a full time: the best keeps its time to the hundredth, the rest show their gap to it.
-                    let text = if is_best {
-                        let t = format_lap_time(lap.duration_ms());
-                        t[..t.len() - 1].to_string()
-                    } else {
-                        format!(
-                            "+{:.2}",
-                            (lap.duration_ms() - b.duration_ms()) as f64 / 1000.0
-                        )
-                    };
-                    p.text(
-                        pos2(rect.left() + 5.0, rect.top() + 13.0),
-                        egui::Align2::LEFT_CENTER,
-                        lap.number.to_string(),
-                        regular(11.0),
-                        DIM,
-                    );
-                    p.text(
-                        pos2(rect.left() + 5.0, rect.top() + 31.0),
-                        egui::Align2::LEFT_CENTER,
-                        text,
-                        medium(12.0),
-                        time_color,
-                    );
-                } else {
-                    p.text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        lap.number.to_string(),
-                        medium(12.5),
-                        time_color,
-                    );
-                }
-                // Compare: a circle in the corner, filled with its color once added.
-                let dot = Rect::from_center_size(
-                    pos2(rect.right() - 10.0, rect.top() + 10.0),
-                    Vec2::splat(14.0),
-                );
-                let over_dot = resp
-                    .hover_pos()
-                    .is_some_and(|q| dot.expand(3.0).contains(q));
-                match compare_slot {
-                    Some(slot) => {
-                        p.circle_filled(dot.center(), 5.0, SERIES[slot]);
-                    }
-                    None if resp.hovered() && w >= 40.0 && !compare_mode => {
-                        p.circle_stroke(
-                            dot.center(),
-                            6.0,
-                            Stroke::new(1.2, if over_dot { TEXT } else { DIM }),
-                        );
-                        p.text(
-                            dot.center() - vec2(0.0, 0.5),
-                            egui::Align2::CENTER_CENTER,
-                            "+",
-                            medium(11.0),
-                            if over_dot { TEXT } else { DIM },
-                        );
-                    }
+                match lap_block(ui, &block, vec2(w, h)) {
+                    Some(LapClick::Toggle) => toggle = Some(*lap),
+                    Some(LapClick::View) => pick = Some(Some(i)),
                     None => {}
-                }
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                let mut tip = format!(
-                    "Lap {}  ·  {}",
-                    lap.number,
-                    format_lap_time(lap.duration_ms())
-                );
-                if is_best {
-                    tip.push_str("  ·  best");
-                } else if let (Some(b), false) = (best, slow[i]) {
-                    tip.push_str(&format!(
-                        "  ·  {} on the best",
-                        format_delta(lap.duration_ms() - b.duration_ms())
-                    ));
-                } else if slow[i] {
-                    tip.push_str("  ·  out, in or slow lap");
-                }
-                tip.push_str(match (compare_mode, compare_slot.is_some()) {
-                    (true, true) => "\nClick to remove from the comparison",
-                    (true, false) => "\nClick to add to the comparison",
-                    (false, true) => "\nClick to view  ·  the dot: remove from Compare",
-                    (false, false) => "\nClick to view  ·  + to add to Compare",
-                });
-                let clicked = resp.on_hover_text(tip).clicked();
-                if clicked && (compare_mode || over_dot) {
-                    toggle = Some(*lap);
-                } else if clicked {
-                    pick = Some(Some(i));
                 }
             }
         });
@@ -1564,6 +1630,66 @@ impl App {
         if let Some(lap) = toggle {
             self.toggle_compare(session, lap);
         }
+    }
+
+    /// On Compare, the strip's first block: which session these laps come
+    /// from, and what a click does.
+    fn strip_source(&self, ui: &mut Ui, size: Vec2) {
+        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+        let number = self
+            .path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .and_then(|n| aim_xrk::summary::session_number(&n.to_string_lossy()));
+        let p = ui.painter();
+        p.text(
+            pos2(rect.left() + 4.0, rect.top() + 13.0),
+            egui::Align2::LEFT_CENTER,
+            "Add laps",
+            regular(11.5),
+            DIM,
+        );
+        p.text(
+            pos2(rect.left() + 4.0, rect.top() + 31.0),
+            egui::Align2::LEFT_CENTER,
+            number.map(|n| format!("Session {n}")).unwrap_or_default(),
+            medium(12.5),
+            SECONDARY,
+        );
+    }
+
+    /// The strip's first block elsewhere: the whole session. True when clicked.
+    fn strip_all(&self, ui: &mut Ui, size: Vec2) -> bool {
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        let on = self.analysis.lap.is_none();
+        let p = ui.painter();
+        p.rect_filled(
+            rect,
+            CornerRadius::same(theme::RADIUS_SMALL),
+            if on {
+                SURFACE_ACTIVE
+            } else if resp.hovered() {
+                SURFACE_HOVER
+            } else {
+                SURFACE
+            },
+        );
+        if on {
+            p.rect_stroke(
+                rect,
+                CornerRadius::same(theme::RADIUS_SMALL),
+                Stroke::new(1.5, TEXT),
+                egui::StrokeKind::Inside,
+            );
+        }
+        p.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "All",
+            medium(13.5),
+            if on { TEXT } else { SECONDARY },
+        );
+        resp.on_hover_text("The whole session").clicked()
     }
 
     /// "+ Add channel": the grouped channel list in a panel over the page.

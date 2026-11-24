@@ -249,59 +249,13 @@ impl App {
         let setup = self.current_setup();
         let st = &mut self.charts;
         let has = |n: &str| session.channels.iter().any(|c| c.name == n && !is_dead(c));
-        // The grip circle: cornering across, braking and speeding up up — the
-        // IMU's forward g when the session has it, else the GPS's.
-        let grip_y = ["Forward g", "GPS LonAcc"]
-            .into_iter()
-            .find(|n| has(n))
-            .filter(|_| has("GPS LatAcc"));
         if st.x.is_empty() || st.y.is_empty() {
             let (x, y, color) = charts::default_scatter(has);
             (st.x, st.y, st.color) = (x.into(), y.into(), color.map(Into::into));
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            ui.label(RichText::new("Presets").size(12.5).color(DIM));
-            if has("RPM") && has("GPS Speed") && chip(ui, "RPM vs speed", st.x == "GPS Speed" && st.y == "RPM").on_hover_text("The gearing as a line; points off it are clutch slip").clicked() {
-                st.x = "GPS Speed".into();
-                st.y = "RPM".into();
-                st.color = None;
-            }
-            if let Some(y) = grip_y {
-                let on = st.x == "GPS LatAcc" && st.y == y;
-                if chip(ui, "Grip circle", on).on_hover_text("Cornering against braking and speeding up: how much of the tires' grip each moment uses").clicked() {
-                    st.x = "GPS LatAcc".into();
-                    st.y = y.into();
-                    st.color = has("GPS Speed").then(|| "GPS Speed".into());
-                }
-            }
-        });
+        scatter_presets(ui, st, has);
         ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            ui.label(RichText::new("Across").size(12.5).color(DIM));
-            Self::channel_choice(ui, "scatter_x", session, &mut st.x, false);
-            ui.add_space(8.0);
-            ui.label(RichText::new("Up").size(12.5).color(DIM));
-            Self::channel_choice(ui, "scatter_y", session, &mut st.y, false);
-            ui.add_space(8.0);
-            ui.label(RichText::new("Color by").size(12.5).color(DIM));
-            let mut color = st.color.clone().unwrap_or_default();
-            egui::ComboBox::from_id_salt("scatter_color")
-                .selected_text(if color.is_empty() {
-                    "Nothing".to_string()
-                } else {
-                    short_name(&color).to_string()
-                })
-                .width(180.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut color, String::new(), "Nothing");
-                    for c in session.channels.iter().filter(|c| !is_dead(c)) {
-                        ui.selectable_value(&mut color, c.name.clone(), short_name(&c.name));
-                    }
-                });
-            st.color = (!color.is_empty()).then_some(color);
-        });
+        scatter_choices(ui, session, st);
         ui.add_space(12.0);
         let find = |n: &str| session.channels.iter().find(|c| c.name == n);
         let (Some(x), Some(y)) = (find(&st.x), find(&st.y)) else {
@@ -331,197 +285,316 @@ impl App {
         let (cmin, cmax) = pts
             .iter()
             .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[2]), b.max(p[2])));
-        let (xu, yu) = (
-            Shown::of(x).unit().to_string(),
-            Shown::of(y).unit().to_string(),
-        );
+        let chart = Scatter {
+            x,
+            y,
+            color,
+            pts,
+            gg,
+            limit,
+            gearing,
+            cmin,
+            cmax,
+            scope,
+        };
         graph_card(ui, (ui.available_height() - 4.0).max(300.0), |ui| {
-            ui.horizontal(|ui| {
-                if gg {
-                    ui.label(
-                        RichText::new(format!("Grip circle · {scope}"))
-                            .font(medium(14.5))
-                            .color(TEXT),
-                    );
-                    ui.label(
-                        RichText::new("down is braking, up is speeding up, sideways is cornering")
-                            .size(12.5)
-                            .color(DIM),
-                    );
-                    if let Some(l) = limit {
-                        ui.label(
-                            RichText::new(format!("·  grip reached {l:.2} g"))
-                                .size(12.5)
-                                .color(SECONDARY),
-                        );
-                    }
-                } else {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} against {} · {scope}",
-                            short_name(&y.name),
-                            short_name(&x.name)
-                        ))
-                        .font(medium(14.5))
-                        .color(TEXT),
-                    );
-                    ui.label(
-                        RichText::new(format!("{yu} up, {xu} across"))
-                            .size(12.5)
-                            .color(DIM),
-                    );
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let (Some(c), true) = (color, cmax > cmin) {
-                        let unit = Shown::of(c).unit();
-                        ui.label(
-                            RichText::new(format!("{cmax:.0} {unit}"))
-                                .size(12.0)
-                                .color(DIM),
-                        );
-                        let (bar, _) = ui.allocate_exact_size(vec2(120.0, 8.0), Sense::hover());
-                        for j in 0..30 {
-                            let r = Rect::from_min_size(
-                                pos2(bar.left() + bar.width() * j as f32 / 30.0, bar.top()),
-                                vec2(bar.width() / 30.0 + 0.5, bar.height()),
-                            );
-                            ui.painter()
-                                .rect_filled(r, 0.0, speed_color(j as f32 / 29.0));
-                        }
-                        ui.label(
-                            RichText::new(format!("{} {cmin:.0}", short_name(&c.name)))
-                                .size(12.0)
-                                .color(DIM),
-                        );
-                    } else if let Some((_, g)) = &gearing {
-                        ui.label(
-                            RichText::new(format!("Line: {g} gearing from the setup sheet"))
-                                .size(12.0)
-                                .color(DIM),
-                        );
-                    }
-                });
-            });
+            scatter_header(ui, &chart);
             if super::is_calculated(&st.x) || super::is_calculated(&st.y) {
                 super::calculated_note(ui);
             }
-            let mut plot = Plot::new(("scatter", st.x.clone(), st.y.clone()))
-                .height(ui.available_height())
-                .show_background(false)
-                .grid_color(GRID)
-                .y_axis_min_width(46.0)
-                .allow_scroll(false)
-                .show_x(false)
-                .show_y(false);
-            if gg {
-                // Square, centered, and just big enough for the grip reached.
-                let reach = limit.unwrap_or(1.0).max(0.6) * 1.3;
-                let side = ui.available_height().min(ui.available_width());
-                plot = plot
-                    .data_aspect(1.0)
-                    .width(side)
-                    .include_x(-reach)
-                    .include_x(reach)
-                    .include_y(-reach)
-                    .include_y(reach)
-                    .allow_drag(false)
-                    .allow_zoom(false);
+            scatter_plot(ui, &chart, (st.x.clone(), st.y.clone()));
+        });
+    }
+}
+
+/// A scatter chart, worked out: the channels across and up (and coloring
+/// it), its points, and what's drawn over them.
+struct Scatter<'a> {
+    x: &'a Channel,
+    y: &'a Channel,
+    color: Option<&'a Channel>,
+    /// (across, up, color value) for each sample.
+    pts: Vec<[f64; 3]>,
+    /// The grip circle: cornering across, braking and speeding up up.
+    gg: bool,
+    /// The grip the kart actually reached, on the grip circle.
+    limit: Option<f64>,
+    /// On RPM vs speed: rpm per unit of speed from the setup's gearing, and
+    /// the gearing ("10/86").
+    gearing: Option<(f64, String)>,
+    /// The range of the coloring channel's values.
+    cmin: f64,
+    cmax: f64,
+    /// The laps it covers ("Lap 6", "9 racing laps").
+    scope: String,
+}
+
+/// The scatter's presets: RPM vs speed, and the grip circle (cornering
+/// against braking and speeding up, the IMU's forward g when the session
+/// has it, else the GPS's).
+fn scatter_presets(ui: &mut Ui, st: &mut ChartsState, has: impl Fn(&str) -> bool) {
+    let grip_y = ["Forward g", "GPS LonAcc"]
+        .into_iter()
+        .find(|n| has(n))
+        .filter(|_| has("GPS LatAcc"));
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        ui.label(RichText::new("Presets").size(12.5).color(DIM));
+        if has("RPM")
+            && has("GPS Speed")
+            && chip(ui, "RPM vs speed", st.x == "GPS Speed" && st.y == "RPM")
+                .on_hover_text("The gearing as a line; points off it are clutch slip")
+                .clicked()
+        {
+            st.x = "GPS Speed".into();
+            st.y = "RPM".into();
+            st.color = None;
+        }
+        if let Some(y) = grip_y {
+            let on = st.x == "GPS LatAcc" && st.y == y;
+            if chip(ui, "Grip circle", on).on_hover_text("Cornering against braking and speeding up: how much of the tires' grip each moment uses").clicked() {
+                st.x = "GPS LatAcc".into();
+                st.y = y.into();
+                st.color = has("GPS Speed").then(|| "GPS Speed".into());
             }
-            // The grip circle sits square in the middle of the card; anything else fills it.
-            let area = ui.available_rect_before_wrap();
-            let area = if gg {
-                Rect::from_center_size(
-                    area.center(),
-                    vec2(area.height().min(area.width()), area.height()),
-                )
+        }
+    });
+}
+
+/// The channels across and up, and the one that colors the points.
+fn scatter_choices(ui: &mut Ui, session: &Session, st: &mut ChartsState) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        ui.label(RichText::new("Across").size(12.5).color(DIM));
+        App::channel_choice(ui, "scatter_x", session, &mut st.x, false);
+        ui.add_space(8.0);
+        ui.label(RichText::new("Up").size(12.5).color(DIM));
+        App::channel_choice(ui, "scatter_y", session, &mut st.y, false);
+        ui.add_space(8.0);
+        ui.label(RichText::new("Color by").size(12.5).color(DIM));
+        let mut color = st.color.clone().unwrap_or_default();
+        egui::ComboBox::from_id_salt("scatter_color")
+            .selected_text(if color.is_empty() {
+                "Nothing".to_string()
             } else {
-                area
-            };
-            let mut plot_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
-            ui.advance_cursor_after_rect(area);
-            let mut edge: Option<Vec<[f64; 2]>> = None;
-            plot.show(&mut plot_ui, |plot| {
-                if gg {
-                    // Rings at 0.5, 1 and 1.5 g, as RaceStudio's circular grid.
-                    for r in [0.5, 1.0, 1.5] {
-                        let ring: Vec<[f64; 2]> = (0..=72)
-                            .map(|k| {
-                                let a = std::f64::consts::TAU * k as f64 / 72.0;
-                                [r * a.cos(), r * a.sin()]
-                            })
-                            .collect();
-                        plot.line(
-                            Line::new(format!("{r} g"), PlotPoints::from(ring))
-                                .color(GRID)
-                                .width(1.0),
-                        );
-                    }
-                    // The grip reached, drawn over the points so it reads as the edge.
-                    if let Some(l) = limit {
-                        let ring: Vec<[f64; 2]> = (0..=96)
-                            .map(|k| {
-                                let a = std::f64::consts::TAU * k as f64 / 96.0;
-                                [l * a.cos(), l * a.sin()]
-                            })
-                            .collect();
-                        edge = Some(ring);
-                    }
-                }
-                match color {
-                    Some(_) if cmax > cmin => {
-                        // A dozen color bands, each its own set of points.
-                        const BANDS: usize = 12;
-                        let mut groups: Vec<Vec<[f64; 2]>> = vec![Vec::new(); BANDS];
-                        for p in &pts {
-                            let k = (((p[2] - cmin) / (cmax - cmin)) * (BANDS - 1) as f64).round()
-                                as usize;
-                            groups[k.min(BANDS - 1)].push([p[0], p[1]]);
-                        }
-                        for (k, g) in groups
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(_, g)| !g.is_empty())
-                        {
-                            plot.points(
-                                egui_plot::Points::new(format!("band {k}"), PlotPoints::from(g))
-                                    .color(speed_color(k as f32 / (BANDS - 1) as f32))
-                                    .radius(1.8),
-                            );
-                        }
-                    }
-                    _ => {
-                        let xy: Vec<[f64; 2]> = pts.iter().map(|p| [p[0], p[1]]).collect();
-                        plot.points(
-                            egui_plot::Points::new("samples", PlotPoints::from(xy))
-                                .color(SERIES[0].gamma_multiply(0.7))
-                                .radius(1.8),
-                        );
-                    }
-                }
-                if let Some(ring) = edge.take() {
-                    plot.line(
-                        Line::new("Grip reached", PlotPoints::from(ring))
-                            .color(TEXT.gamma_multiply(0.55))
-                            .width(1.5),
-                    );
-                }
-                if let Some((per, label)) = &gearing {
-                    // Across the data only, so the plot isn't stretched down to 0.
-                    let (lo, hi) = pts
-                        .iter()
-                        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
-                    if lo < hi {
-                        plot.line(
-                            Line::new(
-                                format!("{label} gearing"),
-                                PlotPoints::from(vec![[lo, per * lo], [hi, per * hi]]),
-                            )
-                            .color(theme::GOOD)
-                            .width(2.0),
-                        );
-                    }
+                short_name(&color).to_string()
+            })
+            .width(180.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut color, String::new(), "Nothing");
+                for c in session.channels.iter().filter(|c| !is_dead(c)) {
+                    ui.selectable_value(&mut color, c.name.clone(), short_name(&c.name));
                 }
             });
+        st.color = (!color.is_empty()).then_some(color);
+    });
+}
+
+/// The scatter card's header: what's plotted against what, and on the
+/// right the color key or the gearing line's source.
+fn scatter_header(ui: &mut Ui, chart: &Scatter) {
+    let scope = &chart.scope;
+    ui.horizontal(|ui| {
+        if chart.gg {
+            ui.label(
+                RichText::new(format!("Grip circle · {scope}"))
+                    .font(medium(14.5))
+                    .color(TEXT),
+            );
+            ui.label(
+                RichText::new("down is braking, up is speeding up, sideways is cornering")
+                    .size(12.5)
+                    .color(DIM),
+            );
+            if let Some(l) = chart.limit {
+                ui.label(
+                    RichText::new(format!("·  grip reached {l:.2} g"))
+                        .size(12.5)
+                        .color(SECONDARY),
+                );
+            }
+        } else {
+            let (xu, yu) = (Shown::of(chart.x).unit(), Shown::of(chart.y).unit());
+            ui.label(
+                RichText::new(format!(
+                    "{} against {} · {scope}",
+                    short_name(&chart.y.name),
+                    short_name(&chart.x.name)
+                ))
+                .font(medium(14.5))
+                .color(TEXT),
+            );
+            ui.label(
+                RichText::new(format!("{yu} up, {xu} across"))
+                    .size(12.5)
+                    .color(DIM),
+            );
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let (cmin, cmax) = (chart.cmin, chart.cmax);
+            if let (Some(c), true) = (chart.color, cmax > cmin) {
+                let unit = Shown::of(c).unit();
+                ui.label(
+                    RichText::new(format!("{cmax:.0} {unit}"))
+                        .size(12.0)
+                        .color(DIM),
+                );
+                let (bar, _) = ui.allocate_exact_size(vec2(120.0, 8.0), Sense::hover());
+                for j in 0..30 {
+                    let r = Rect::from_min_size(
+                        pos2(bar.left() + bar.width() * j as f32 / 30.0, bar.top()),
+                        vec2(bar.width() / 30.0 + 0.5, bar.height()),
+                    );
+                    ui.painter()
+                        .rect_filled(r, 0.0, speed_color(j as f32 / 29.0));
+                }
+                ui.label(
+                    RichText::new(format!("{} {cmin:.0}", short_name(&c.name)))
+                        .size(12.0)
+                        .color(DIM),
+                );
+            } else if let Some((_, g)) = &chart.gearing {
+                ui.label(
+                    RichText::new(format!("Line: {g} gearing from the setup sheet"))
+                        .size(12.0)
+                        .color(DIM),
+                );
+            }
         });
+    });
+}
+
+/// The scatter itself (its plot named by the channels `id`): the grip
+/// circle square in the middle of the card, anything else filling it.
+fn scatter_plot(ui: &mut Ui, chart: &Scatter, id: (String, String)) {
+    let gg = chart.gg;
+    let mut plot = Plot::new(("scatter", id.0, id.1))
+        .height(ui.available_height())
+        .show_background(false)
+        .grid_color(GRID)
+        .y_axis_min_width(46.0)
+        .allow_scroll(false)
+        .show_x(false)
+        .show_y(false);
+    if gg {
+        // Square, centered, and just big enough for the grip reached.
+        let reach = chart.limit.unwrap_or(1.0).max(0.6) * 1.3;
+        let side = ui.available_height().min(ui.available_width());
+        plot = plot
+            .data_aspect(1.0)
+            .width(side)
+            .include_x(-reach)
+            .include_x(reach)
+            .include_y(-reach)
+            .include_y(reach)
+            .allow_drag(false)
+            .allow_zoom(false);
+    }
+    // The grip circle sits square in the middle of the card; anything else fills it.
+    let area = ui.available_rect_before_wrap();
+    let area = if gg {
+        Rect::from_center_size(
+            area.center(),
+            vec2(area.height().min(area.width()), area.height()),
+        )
+    } else {
+        area
+    };
+    let mut plot_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
+    ui.advance_cursor_after_rect(area);
+    plot.show(&mut plot_ui, |plot| {
+        // The grip reached, drawn over the points so it reads as the edge.
+        let edge = if gg {
+            grip_rings(plot, chart.limit)
+        } else {
+            None
+        };
+        scatter_points(plot, chart);
+        if let Some(ring) = edge {
+            plot.line(
+                Line::new("Grip reached", PlotPoints::from(ring))
+                    .color(TEXT.gamma_multiply(0.55))
+                    .width(1.5),
+            );
+        }
+        if let Some((per, label)) = &chart.gearing {
+            // Across the data only, so the plot isn't stretched down to 0.
+            let (lo, hi) = chart
+                .pts
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
+            if lo < hi {
+                plot.line(
+                    Line::new(
+                        format!("{label} gearing"),
+                        PlotPoints::from(vec![[lo, per * lo], [hi, per * hi]]),
+                    )
+                    .color(theme::GOOD)
+                    .width(2.0),
+                );
+            }
+        }
+    });
+}
+
+/// The grip circle's rings at 0.5, 1 and 1.5 g, as RaceStudio's circular
+/// grid. Returns the ring at the grip reached, `limit`, to draw over the
+/// points.
+fn grip_rings(plot: &mut egui_plot::PlotUi, limit: Option<f64>) -> Option<Vec<[f64; 2]>> {
+    for r in [0.5, 1.0, 1.5] {
+        let ring: Vec<[f64; 2]> = (0..=72)
+            .map(|k| {
+                let a = std::f64::consts::TAU * k as f64 / 72.0;
+                [r * a.cos(), r * a.sin()]
+            })
+            .collect();
+        plot.line(
+            Line::new(format!("{r} g"), PlotPoints::from(ring))
+                .color(GRID)
+                .width(1.0),
+        );
+    }
+    limit.map(|l| {
+        (0..=96)
+            .map(|k| {
+                let a = std::f64::consts::TAU * k as f64 / 96.0;
+                [l * a.cos(), l * a.sin()]
+            })
+            .collect()
+    })
+}
+
+/// The scatter's points: in a dozen color bands when a channel colors them.
+fn scatter_points(plot: &mut egui_plot::PlotUi, chart: &Scatter) {
+    let (cmin, cmax) = (chart.cmin, chart.cmax);
+    match chart.color {
+        Some(_) if cmax > cmin => {
+            // A dozen color bands, each its own set of points.
+            const BANDS: usize = 12;
+            let mut groups: Vec<Vec<[f64; 2]>> = vec![Vec::new(); BANDS];
+            for p in &chart.pts {
+                let k = (((p[2] - cmin) / (cmax - cmin)) * (BANDS - 1) as f64).round() as usize;
+                groups[k.min(BANDS - 1)].push([p[0], p[1]]);
+            }
+            for (k, g) in groups
+                .into_iter()
+                .enumerate()
+                .filter(|(_, g)| !g.is_empty())
+            {
+                plot.points(
+                    egui_plot::Points::new(format!("band {k}"), PlotPoints::from(g))
+                        .color(speed_color(k as f32 / (BANDS - 1) as f32))
+                        .radius(1.8),
+                );
+            }
+        }
+        _ => {
+            let xy: Vec<[f64; 2]> = chart.pts.iter().map(|p| [p[0], p[1]]).collect();
+            plot.points(
+                egui_plot::Points::new("samples", PlotPoints::from(xy))
+                    .color(SERIES[0].gamma_multiply(0.7))
+                    .radius(1.8),
+            );
+        }
     }
 }

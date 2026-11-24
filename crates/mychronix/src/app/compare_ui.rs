@@ -136,7 +136,78 @@ impl App {
             self.lap_strip(ui, session, true);
             ui.add_space(12.0);
         }
-        // Lap chips: color, label, reference marker; click to make reference, × to remove.
+        self.compare_lap_chips(ui, session);
+        ui.add_space(12.0);
+        self.compare_calculated_notes(ui);
+
+        if self.comparison.laps.len() < 2 {
+            card(ui, |ui| {
+                ui.set_min_height(160.0);
+                ui.label(
+                    RichText::new("Pick laps to compare")
+                        .font(semibold(17.0))
+                        .color(TEXT),
+                );
+                ui.label(
+                    RichText::new("Click laps in the strip above to add them; pick another session from the panel at the top to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
+                        .color(SECONDARY),
+                );
+            });
+            return;
+        }
+        if self.comparison.laps.iter().any(|c| c.profile.is_none()) {
+            card(ui, |ui| {
+                ui.label(RichText::new("Some of these laps have no GPS, so they can't be lined up by distance yet.").color(SECONDARY));
+            });
+            return;
+        }
+
+        let reference = self.comparison.laps[0].profile.clone().unwrap();
+        let ref_len = reference.length();
+        // A new reference lap starts the graphs at its full length.
+        let reset = self.comparison.window != Some(ref_len.to_bits());
+        self.comparison.window = Some(ref_len.to_bits());
+        let gap = 12.0;
+        let height = ui.available_height();
+        let map_w = (ui.available_width() * 0.36).clamp(280.0, 520.0);
+        let graphs_w = ui.available_width() - map_w - gap;
+        let mut hovered = None;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            let column = Layout::top_down(Align::Min);
+            ui.allocate_ui_with_layout(vec2(graphs_w, height), column, |ui| {
+                ui.set_width(graphs_w);
+                hovered = self.compare_graphs(ui, session, &reference, reset);
+            });
+            ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
+                ui.set_width(map_w);
+                // The map needs the reference lap's GPS; without it, the lap breakdown.
+                let lap = &self.comparison.laps[0];
+                let has_map = lap.session.gps.as_ref().is_some_and(|g| {
+                    g.times_ms
+                        .iter()
+                        .filter(|&&t| t >= lap.lap.start_ms && t <= lap.lap.end_ms)
+                        .nth(2)
+                        .is_some()
+                });
+                if has_map {
+                    self.compare_map(ui, &reference);
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("compare_breakdown")
+                        .show(ui, |ui| self.compare_breakdown(ui, &reference));
+                }
+            });
+        });
+        if hovered.is_some() {
+            self.comparison.cursor_m = hovered;
+        }
+    }
+
+    /// Lap chips: color, label, reference marker; click to make reference,
+    /// × to remove. Then, comparing laps, the buttons to add the best laps
+    /// at this track and to clear them all.
+    fn compare_lap_chips(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let mut make_ref = None;
         let mut remove = None;
         ui.horizontal_wrapped(|ui| {
@@ -195,36 +266,19 @@ impl App {
         if let Some(k) = remove {
             self.comparison.laps.remove(k);
         }
-        ui.add_space(12.0);
-        self.compare_calculated_notes(ui);
+    }
 
-        if self.comparison.laps.len() < 2 {
-            card(ui, |ui| {
-                ui.set_min_height(160.0);
-                ui.label(
-                    RichText::new("Pick laps to compare")
-                        .font(semibold(17.0))
-                        .color(TEXT),
-                );
-                ui.label(
-                    RichText::new("Click laps in the strip above to add them; pick another session from the panel at the top to add its laps too. Or add your best laps at this track. The first lap is the reference the others are measured against.")
-                        .color(SECONDARY),
-                );
-            });
-            return;
-        }
-        if self.comparison.laps.iter().any(|c| c.profile.is_none()) {
-            card(ui, |ui| {
-                ui.label(RichText::new("Some of these laps have no GPS, so they can't be lined up by distance yet.").color(SECONDARY));
-            });
-            return;
-        }
-
-        let reference = self.comparison.laps[0].profile.clone().unwrap();
+    /// The compare graphs, one over the other: the time gap to the reference
+    /// lap, then each graphed channel. Returns the cursor (meters along the
+    /// reference) where the pointer is over one.
+    fn compare_graphs(
+        &self,
+        ui: &mut Ui,
+        session: &Session,
+        reference: &crate::compare::DistanceProfile,
+        reset: bool,
+    ) -> Option<f64> {
         let ref_len = reference.length();
-        // A new reference lap starts the graphs at its full length.
-        let reset = self.comparison.window != Some(ref_len.to_bits());
-        self.comparison.window = Some(ref_len.to_bits());
         let channels: Vec<String> = self
             .analysis
             .selected
@@ -232,114 +286,82 @@ impl App {
             .filter_map(|&i| session.channels.get(i))
             .map(|c| c.name.clone())
             .collect();
-        let gap = 12.0;
-        let height = ui.available_height();
-        let map_w = (ui.available_width() * 0.36).clamp(280.0, 520.0);
-        let graphs_w = ui.available_width() - map_w - gap;
         let mut hovered = None;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            let column = Layout::top_down(Align::Min);
-            ui.allocate_ui_with_layout(vec2(graphs_w, height), column, |ui| {
-                ui.set_width(graphs_w);
-                let n = (channels.len() + 1) as f32;
-                let card_h = ((ui.available_height() - 10.0 * (n - 1.0)) / n).max(150.0);
-                let link = ui.id().with("compare_x");
-                egui::ScrollArea::vertical()
-                    .id_salt("compare_graphs")
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 10.0;
-                        // Time gap to the reference.
-                        let gaps: Vec<(usize, Vec<[f64; 2]>)> = self.comparison.laps[1..]
-                            .iter()
-                            .map(|c| {
-                                (
-                                    c.slot,
-                                    crate::compare::time_gap(
-                                        c.profile.as_ref().unwrap(),
-                                        &reference,
-                                        600,
-                                    ),
-                                )
-                            })
-                            .collect();
-                        if let Some(h) = self.compare_graph(
-                            ui,
-                            "Time gap to reference",
-                            "s",
-                            card_h,
-                            link,
-                            false,
-                            &gaps,
-                            ref_len,
-                            true,
-                            reset,
-                        ) {
-                            hovered = Some(h);
-                        }
-                        for (k, name) in channels.iter().enumerate() {
-                            let lines: Vec<(usize, Vec<[f64; 2]>)> = self
-                                .comparison
-                                .laps
-                                .iter()
-                                .filter_map(|c| {
-                                    same_channel(&c.session, name).map(|ch| {
-                                        let shown = Shown::of(ch);
-                                        let mut line =
-                                            crate::compare::channel_on_distance(c, ch, ref_len);
-                                        for p in &mut line {
-                                            p[1] = shown.value(p[1]);
-                                        }
-                                        (c.slot, line)
-                                    })
-                                })
-                                .collect();
-                            let units = session
-                                .channels
-                                .iter()
-                                .find(|c| &c.name == name)
-                                .map(|c| Shown::of(c).unit().to_string())
-                                .unwrap_or_default();
-                            if let Some(h) = self.compare_graph(
-                                ui,
-                                name,
-                                &units,
-                                card_h,
-                                link,
-                                k + 1 == channels.len(),
-                                &lines,
-                                ref_len,
-                                false,
-                                reset,
-                            ) {
-                                hovered = Some(h);
-                            }
-                        }
-                    });
-            });
-            ui.allocate_ui_with_layout(vec2(map_w, height), column, |ui| {
-                ui.set_width(map_w);
-                // The map needs the reference lap's GPS; without it, the lap breakdown.
-                let lap = &self.comparison.laps[0];
-                let has_map = lap.session.gps.as_ref().is_some_and(|g| {
-                    g.times_ms
+        let n = (channels.len() + 1) as f32;
+        let card_h = ((ui.available_height() - 10.0 * (n - 1.0)) / n).max(150.0);
+        let link = ui.id().with("compare_x");
+        egui::ScrollArea::vertical()
+            .id_salt("compare_graphs")
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                // Time gap to the reference.
+                let gaps: Vec<(usize, Vec<[f64; 2]>)> = self.comparison.laps[1..]
+                    .iter()
+                    .map(|c| {
+                        (
+                            c.slot,
+                            crate::compare::time_gap(c.profile.as_ref().unwrap(), reference, 600),
+                        )
+                    })
+                    .collect();
+                if let Some(h) = self.compare_graph(
+                    ui,
+                    "Time gap to reference",
+                    "s",
+                    card_h,
+                    link,
+                    false,
+                    &gaps,
+                    ref_len,
+                    true,
+                    reset,
+                ) {
+                    hovered = Some(h);
+                }
+                for (k, name) in channels.iter().enumerate() {
+                    let lines = self.compare_channel_lines(name, ref_len);
+                    let units = session
+                        .channels
                         .iter()
-                        .filter(|&&t| t >= lap.lap.start_ms && t <= lap.lap.end_ms)
-                        .nth(2)
-                        .is_some()
-                });
-                if has_map {
-                    self.compare_map(ui, &reference);
-                } else {
-                    egui::ScrollArea::vertical()
-                        .id_salt("compare_breakdown")
-                        .show(ui, |ui| self.compare_breakdown(ui, &reference));
+                        .find(|c| &c.name == name)
+                        .map(|c| Shown::of(c).unit().to_string())
+                        .unwrap_or_default();
+                    if let Some(h) = self.compare_graph(
+                        ui,
+                        name,
+                        &units,
+                        card_h,
+                        link,
+                        k + 1 == channels.len(),
+                        &lines,
+                        ref_len,
+                        false,
+                        reset,
+                    ) {
+                        hovered = Some(h);
+                    }
                 }
             });
-        });
-        if hovered.is_some() {
-            self.comparison.cursor_m = hovered;
-        }
+        hovered
+    }
+
+    /// Each compared lap's line for the channel called `name`, by distance
+    /// along the reference lap (`ref_len` long), with its color slot.
+    fn compare_channel_lines(&self, name: &str, ref_len: f64) -> Vec<(usize, Vec<[f64; 2]>)> {
+        self.comparison
+            .laps
+            .iter()
+            .filter_map(|c| {
+                same_channel(&c.session, name).map(|ch| {
+                    let shown = Shown::of(ch);
+                    let mut line = crate::compare::channel_on_distance(c, ch, ref_len);
+                    for p in &mut line {
+                        p[1] = shown.value(p[1]);
+                    }
+                    (c.slot, line)
+                })
+            })
+            .collect()
     }
 
     /// One graph card over distance: a line per lap, readouts at the cursor in the header.
