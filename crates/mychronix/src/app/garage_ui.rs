@@ -293,6 +293,144 @@ fn hours(ms: u64) -> String {
     }
 }
 
+/// How the season's race days fit their space, most detailed first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DayLayout {
+    /// A bar a day, with its minutes above and its date below.
+    Labeled { slot: f32 },
+    /// Bars without the text, as thin as needed.
+    Bars { slot: f32 },
+    /// A dot a day, in rows; `pitch` from one dot's center to the next.
+    Dots { pitch: f32, cols: usize },
+}
+
+/// The widest slot a day's bar takes, the thinnest before bars turn to dots,
+/// and the biggest and smallest dot pitch.
+const DAY_SLOT_MAX: f32 = 70.0;
+const DAY_SLOT_MIN: f32 = 8.0;
+const DOT_PITCH_MAX: f32 = 14.0;
+const DOT_PITCH_MIN: f32 = 6.0;
+
+/// `n` days in `size`, when a day's text is `label_w` wide.
+fn day_layout(n: usize, size: Vec2, label_w: f32) -> DayLayout {
+    let slot = (size.x / n.max(1) as f32).min(DAY_SLOT_MAX);
+    if slot >= label_w + 8.0 {
+        return DayLayout::Labeled { slot };
+    }
+    if slot >= DAY_SLOT_MIN {
+        return DayLayout::Bars { slot };
+    }
+    // The biggest dots whose rows still fit the height.
+    let mut pitch = DOT_PITCH_MAX;
+    loop {
+        let cols = ((size.x / pitch) as usize).max(1);
+        if n.div_ceil(cols) as f32 * pitch <= size.y || pitch <= DOT_PITCH_MIN {
+            return DayLayout::Dots { pitch, cols };
+        }
+        pitch -= 1.0;
+    }
+}
+
+/// Seat time on each race day of the season: bars with their minutes and
+/// dates while those fit, thinner bars without them, then a dot a day.
+/// Hovering one gives its date and time.
+fn seat_days(ui: &mut Ui, rect: Rect, per_day: &[(aim_xrk::summary::Date, u64)], color: Color32) {
+    let resp = ui.interact(rect, ui.id().with("seat_days"), Sense::hover());
+    let label_w = per_day
+        .iter()
+        .map(|(date, _)| {
+            ui.painter()
+                .layout_no_wrap(crate::dates::month_day(*date), regular(11.0), DIM)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    let layout = day_layout(per_day.len(), rect.size(), label_w);
+    let max = per_day.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f32;
+    let pointer = resp.hover_pos();
+    // Each day's shape, then which one the pointer is on.
+    let shapes: Vec<Rect> = (0..per_day.len())
+        .map(|j| match layout {
+            DayLayout::Labeled { slot } | DayLayout::Bars { slot } => {
+                let label_h = if matches!(layout, DayLayout::Labeled { .. }) {
+                    16.0
+                } else {
+                    0.0
+                };
+                let room = rect.height() - label_h - if label_h > 0.0 { 16.0 } else { 4.0 };
+                let h = ((per_day[j].1 as f32 / max) * room).max(2.0);
+                let gap = (slot * 0.14).clamp(1.0, 5.0);
+                let x = rect.left() + j as f32 * slot;
+                Rect::from_min_max(
+                    pos2(x + gap, rect.bottom() - label_h - h),
+                    pos2(x + slot - gap, rect.bottom() - label_h),
+                )
+            }
+            DayLayout::Dots { pitch, cols } => Rect::from_center_size(
+                pos2(
+                    rect.left() + ((j % cols) as f32 + 0.5) * pitch,
+                    // The rows centered in the height.
+                    rect.center().y
+                        + ((j / cols) as f32 + 0.5 - per_day.len().div_ceil(cols) as f32 / 2.0)
+                            * pitch,
+                ),
+                Vec2::splat(pitch * 0.72),
+            ),
+        })
+        .collect();
+    let hovered = pointer.and_then(|p| {
+        shapes.iter().position(|r| {
+            // Over the bar's whole column, not just the bar: short ones are hard to hit.
+            let r = match layout {
+                DayLayout::Dots { pitch, .. } => r.expand((pitch - r.width()) / 2.0),
+                _ => Rect::from_x_y_ranges(r.x_range(), rect.y_range()),
+            };
+            r.contains(p)
+        })
+    });
+    for (j, (date, ms)) in per_day.iter().enumerate() {
+        let r = shapes[j];
+        let fill = match hovered {
+            Some(h) if h != j => color.gamma_multiply(0.45),
+            _ => color.gamma_multiply(0.9),
+        };
+        match layout {
+            DayLayout::Dots { .. } => {
+                ui.painter()
+                    .circle_filled(r.center(), r.width() / 2.0, fill);
+            }
+            _ => {
+                let round = (r.width() / 3.0).min(4.0) as u8;
+                ui.painter().rect_filled(r, CornerRadius::same(round), fill);
+            }
+        }
+        if matches!(layout, DayLayout::Labeled { .. }) {
+            ui.painter().text(
+                pos2(r.center().x, r.top() - 7.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{}m", ms / 60_000),
+                regular(11.0),
+                SECONDARY,
+            );
+            ui.painter().text(
+                pos2(r.center().x, rect.bottom() - 5.0),
+                egui::Align2::CENTER_CENTER,
+                crate::dates::month_day(*date),
+                regular(11.0),
+                DIM,
+            );
+        }
+    }
+    if let Some(j) = hovered {
+        let (date, ms) = per_day[j];
+        resp.on_hover_text_at_pointer(format!(
+            "{}  ·  {}",
+            crate::dates::day_month_day(date),
+            hours(ms)
+        ));
+    }
+}
+
 /// A quiet text button with an icon, for panel headings.
 fn small_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     let galley = ui
@@ -1565,36 +1703,7 @@ fn driver_column(
                 DIM,
             );
         }
-        let max = d.per_day.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f32;
-        let slot = (rect.width() / d.per_day.len().max(1) as f32).min(70.0);
-        let label_h = 16.0;
-        for (j, (date, ms)) in d.per_day.iter().enumerate() {
-            let h = ((*ms as f32 / max) * (rect.height() - label_h - 16.0)).max(2.0);
-            let x = rect.left() + j as f32 * slot;
-            let bar = Rect::from_min_max(
-                pos2(x + 5.0, rect.bottom() - label_h - h),
-                pos2(x + slot - 5.0, rect.bottom() - label_h),
-            );
-            ui.painter().rect_filled(
-                bar,
-                CornerRadius::same(4),
-                SERIES[k % SERIES.len()].gamma_multiply(0.9),
-            );
-            ui.painter().text(
-                pos2(bar.center().x, bar.top() - 7.0),
-                egui::Align2::CENTER_CENTER,
-                format!("{}m", ms / 60_000),
-                regular(11.0),
-                SECONDARY,
-            );
-            ui.painter().text(
-                pos2(bar.center().x, rect.bottom() - 5.0),
-                egui::Align2::CENTER_CENTER,
-                crate::dates::month_day(*date),
-                regular(11.0),
-                DIM,
-            );
-        }
+        seat_days(ui, rect, &d.per_day, SERIES[k % SERIES.len()]);
     });
     ui.add_space(10.0);
 
@@ -1912,5 +2021,40 @@ fn setup_last_changed(lib: &Library, resolved: &[setup::Resolved], logger: &str)
             )
         }
         None => "Unchanged since the baseline".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn race_days_go_from_labeled_bars_to_bars_to_dots() {
+        let size = vec2(450.0, 60.0);
+        // Room for the dates: labeled.
+        assert!(matches!(
+            day_layout(9, size, 36.0),
+            DayLayout::Labeled { .. }
+        ));
+        // No room for them: plain bars.
+        assert!(matches!(day_layout(15, size, 36.0), DayLayout::Bars { .. }));
+        // Bars thinner than they can be: dots, in rows that fit the height.
+        let DayLayout::Dots { pitch, cols } = day_layout(120, size, 36.0) else {
+            panic!("expected dots");
+        };
+        assert!(120usize.div_ceil(cols) as f32 * pitch <= size.y);
+        // A season too long for even the smallest dots still gets them.
+        assert!(matches!(
+            day_layout(1000, size, 36.0),
+            DayLayout::Dots {
+                pitch: DOT_PITCH_MIN,
+                ..
+            }
+        ));
+        // A slot never grows past its widest.
+        assert_eq!(
+            day_layout(1, size, 36.0),
+            DayLayout::Labeled { slot: DAY_SLOT_MAX }
+        );
     }
 }
