@@ -226,6 +226,87 @@ impl walkers::Plugin for Overlay {
     }
 }
 
+/// What the Map shows: the lap, the corner, and what they're measured against.
+struct MapPick<'a> {
+    session: &'a Session,
+    model: &'a CornerModel,
+    /// The lap looked at: the one picked, or the best standing in for it.
+    trace: usize,
+    /// Whether the lap looked at is the one picked, and whether one was.
+    picked: bool,
+    lap_asked: bool,
+    corner: usize,
+    whole: bool,
+    /// Against: the best you drove this corner, or for the whole track, the best lap.
+    reference: usize,
+    rpm: Option<&'a Channel>,
+    lap: aim_xrk::Lap,
+    /// Where the corner model's meters east and north start.
+    origin: (f64, f64),
+}
+
+impl<'a> MapPick<'a> {
+    fn new(
+        session: &'a Session,
+        model: &'a CornerModel,
+        lap: Option<usize>,
+        selected: Option<(usize, usize)>,
+        whole: bool,
+    ) -> Option<Self> {
+        let gps = session.gps.as_ref()?;
+        let picked = lap.and_then(|i| model.trace_of(i));
+        let trace = picked.unwrap_or(model.best);
+        let corner = match selected {
+            Some((t, k)) if t == trace && k < model.segments.len() => k,
+            _ => model.worst(trace),
+        };
+        Some(Self {
+            session,
+            model,
+            trace,
+            picked: picked.is_some(),
+            lap_asked: lap.is_some(),
+            corner,
+            whole,
+            reference: if whole {
+                model.best
+            } else {
+                model.best_of[corner]
+            },
+            rpm: crate::channels::find(session, crate::channels::Role::Rpm).filter(|c| !is_dead(c)),
+            lap: session.laps[model.traces[trace].lap],
+            origin: (gps.latitude[0], gps.longitude[0]),
+        })
+    }
+
+    fn lat_lon(&self, p: (f64, f64)) -> aim_track::LatLon {
+        to_lat_lon(self.origin.0, self.origin.1, p)
+    }
+
+    /// The best lap's point `m` meters in.
+    fn at(&self, m: f64) -> usize {
+        let best_xy = &self.model.traces[self.model.best].xy;
+        ((m / STEP_M).round().max(0.0) as usize).min(best_xy.len() - 1)
+    }
+}
+
+/// What was clicked or pressed on the Map this frame, applied together once it's drawn.
+#[derive(Default)]
+struct MapInput {
+    /// A corner (None: the whole track).
+    go_corner: Option<Option<usize>>,
+    /// Another lap's trace.
+    step: Option<usize>,
+    color: Option<ColorBy>,
+    all_laps: Option<bool>,
+    satellite: Option<bool>,
+    /// The numbers' overlay opened or closed.
+    numbers: Option<bool>,
+}
+
+/// The side panel's width beside the map.
+const MAP_PANEL_W: f32 = 300.0;
+
 impl App {
     pub(super) fn map_view(&mut self, ui: &mut Ui, session: &std::sync::Arc<Session>) {
         let Some(model) = self.corner_model(session, ui.ctx()) else {
@@ -237,42 +318,47 @@ impl App {
             });
             return;
         };
-        let Some(gps) = session.gps.as_ref() else {
+        let Some(pick) = MapPick::new(
+            session,
+            &model,
+            self.analysis.lap,
+            self.corners.selected,
+            self.map_view.whole,
+        ) else {
             return;
         };
-        let (lat0, lon0) = (gps.latitude[0], gps.longitude[0]);
-        // The lap looked at (the best for the whole session), and the corner, shared with Corners.
-        let picked = self.analysis.lap.and_then(|i| model.trace_of(i));
-        let trace = picked.unwrap_or(model.best);
-        let corner = match self.corners.selected {
-            Some((t, k)) if t == trace && k < model.segments.len() => k,
-            _ => model.worst(trace),
-        };
-        self.corners.selected = Some((trace, corner));
-        let whole = self.map_view.whole;
-        // Against: the best you drove this corner, or for the whole track, the best lap.
-        let reference = if whole {
-            model.best
-        } else {
-            model.best_of[corner]
-        };
-        let rpm =
-            crate::channels::find(session, crate::channels::Role::Rpm).filter(|c| !is_dead(c));
-        let lap = session.laps[model.traces[trace].lap];
+        // The corner is shared with Corners.
+        self.corners.selected = Some((pick.trace, pick.corner));
 
+        let rect = ui.available_rect_before_wrap();
+        // In a narrow window the numbers leave the side for an overlay, opened with "i".
+        let compact = rect.width() < MAP_COMPACT_W;
+        let panel_w = if compact { 0.0 } else { MAP_PANEL_W };
+        self.map_aim(&pick, rect, panel_w, ui.ctx());
+        let mut input = MapInput::default();
+        let rect = self.map_draw(ui, &pick, &mut input);
+        self.map_controls(ui, &pick, rect, compact, panel_w, &mut input);
+        map_keys(ui, &pick, &mut input);
+        self.map_apply(&pick, input);
+    }
+
+    /// The lines, corner numbers and (without imagery) the track, for the map to draw.
+    fn map_overlay(&mut self, pick: &MapPick, clicked: Arc<Mutex<Option<usize>>>) -> Overlay {
+        let model = pick.model;
+        let (trace, reference) = (pick.trace, pick.reference);
         let colors = line_colors(
-            &model,
+            model,
             trace,
             reference,
             self.map_view.color,
-            rpm,
-            lap.start_ms,
+            pick.rpm,
+            pick.lap.start_ms,
         );
         let latlon = |t: usize| -> Vec<aim_track::LatLon> {
             model.traces[t]
                 .xy
                 .iter()
-                .map(|&p| to_lat_lon(lat0, lon0, p))
+                .map(|&p| pick.lat_lon(p))
                 .collect()
         };
         let mut paths = Vec::new();
@@ -301,22 +387,20 @@ impl App {
             dashed: false,
         });
         let best_xy = &model.traces[model.best].xy;
-        let at = |m: f64| ((m / STEP_M).round().max(0.0) as usize).min(best_xy.len() - 1);
-        let corners: Vec<(usize, aim_track::LatLon, aim_track::LatLon, bool)> = model
+        let corners = model
             .segments
             .iter()
             .enumerate()
             .map(|(k, s)| {
-                let (mid, off) = corner_label(best_xy, at(s.apex));
+                let (mid, off) = corner_label(best_xy, pick.at(s.apex));
                 (
                     k,
-                    to_lat_lon(lat0, lon0, mid),
-                    to_lat_lon(lat0, lon0, off),
-                    !whole && k == corner,
+                    pick.lat_lon(mid),
+                    pick.lat_lon(off),
+                    !pick.whole && k == pick.corner,
                 )
             })
             .collect();
-        let clicked = Arc::new(Mutex::new(None));
         // Without imagery, the track itself, worked out from where the laps went.
         let width = self
             .path
@@ -332,50 +416,54 @@ impl App {
             })
             .unwrap_or(8.0);
         let track = (!self.map_view.satellite).then(|| {
-            let (middle, closed) = track_shape(&model, width);
+            let (middle, closed) = track_shape(model, width);
             (
-                middle.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect(),
+                middle.iter().map(|&p| pick.lat_lon(p)).collect(),
                 width,
                 closed,
             )
         });
-        let overlay = Overlay {
+        Overlay {
             track,
             paths,
             corners,
-            clicked: clicked.clone(),
-        };
+            clicked,
+        }
+    }
 
-        // Where to look: the whole track, or the corner from its braking point to the next one's.
-        let rect = ui.available_rect_before_wrap();
-        // In a narrow window the numbers leave the side for an overlay, opened with "i".
-        let compact = rect.width() < MAP_COMPACT_W;
-        let panel_w = if compact { 0.0 } else { 300.0 };
-        let view_pts: Vec<aim_track::LatLon> = if whole {
-            best_xy.iter().map(|&p| to_lat_lon(lat0, lon0, p)).collect()
+    /// Where to look: the whole track, or the corner from its braking point to
+    /// the next one's, clear of the panel on the right and the trace at the bottom.
+    fn map_aim(&mut self, pick: &MapPick, rect: Rect, panel_w: f32, ctx: &egui::Context) {
+        let best_xy = &pick.model.traces[pick.model.best].xy;
+        let view_pts: Vec<aim_track::LatLon> = if pick.whole {
+            best_xy.iter().map(|&p| pick.lat_lon(p)).collect()
         } else {
             // From before the braking point to a little past the apex: the corner, not the straight after it.
-            let s = model.segments[corner];
+            let s = pick.model.segments[pick.corner];
             let from = (s.from - 15.0).min(s.apex - 60.0);
-            (at(from)..=at((s.apex + 45.0).min(s.to)))
-                .map(|i| to_lat_lon(lat0, lon0, best_xy[i]))
+            (pick.at(from)..=pick.at((s.apex + 45.0).min(s.to)))
+                .map(|i| pick.lat_lon(best_xy[i]))
                 .collect()
         };
         let free = vec2(
             (rect.width() - panel_w - 40.0).max(200.0),
-            (rect.height() - if whole { 120.0 } else { 300.0 }).max(200.0),
+            (rect.height() - if pick.whole { 120.0 } else { 300.0 }).max(200.0),
         );
         if let Some((c, zoom)) = fit(&view_pts, free) {
-            // Keep the subject clear of the panel on the right and the trace at the bottom.
             let mpp = 156_543.03 * c.lat.to_radians().cos() / 2f64.powf(zoom);
             let east = (panel_w as f64 + 20.0) / 2.0 * mpp;
-            let south = if whole { 30.0 } else { 140.0 } * mpp;
+            let south = if pick.whole { 30.0 } else { 140.0 } * mpp;
             let (lat, lon) = aim_xrk::geo::from_local(c.lat, c.lon, (east, -south));
-            self.map_view_move_to((lat, lon, zoom), ui.ctx());
+            self.map_view_move_to((lat, lon, zoom), ctx);
         }
+    }
 
-        let satellite = self.map_view.satellite;
-        let start = walkers::lat_lon(lat0, lon0);
+    /// The map itself, with imagery or the track drawn in; a corner number
+    /// clicked on it goes to that corner. Gives where it was drawn.
+    fn map_draw(&mut self, ui: &mut Ui, pick: &MapPick, input: &mut MapInput) -> Rect {
+        let clicked = Arc::new(Mutex::new(None));
+        let overlay = self.map_overlay(pick, clicked.clone());
+        let start = walkers::lat_lon(pick.origin.0, pick.origin.1);
         let mut memory = std::mem::take(&mut self.map_view.memory);
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
@@ -383,7 +471,7 @@ impl App {
             GROUND,
         );
         // The wheel zooms, as on any map; dragging moves it.
-        let map = if satellite {
+        let map = if self.map_view.satellite {
             let tiles =
                 super::tracks_ui::tiles(&mut self.map_tiles, &mut self.sat_tiles, ui.ctx(), true);
             ui.add(
@@ -400,204 +488,59 @@ impl App {
         };
         self.map_view.memory = memory;
         if let Some(k) = clicked.lock().unwrap().take() {
-            self.corners.selected = Some((trace, k));
-            self.map_view.whole = false;
+            input.go_corner = Some(Some(k));
         }
-        let rect = map.rect;
+        map.rect
+    }
 
-        // Overlays: corners along the top left, color and imagery top right, the
-        // numbers on the right, the lap bottom left with the key beside it, speed above.
-        let ov = |ui: &mut Ui, at: Rect, add: &mut dyn FnMut(&mut Ui)| -> Rect {
-            ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                Frame::new()
-                    .fill(GLASS)
-                    .stroke(Stroke::new(1.0, theme::OUTLINE))
-                    .corner_radius(CornerRadius::same(12))
-                    .inner_margin(Margin::same(6))
-                    .show(ui, |ui| add(ui))
-                    .response
-                    .rect
-            })
-            .inner
-        };
-        let n = model.segments.len();
-        let mut go_corner: Option<Option<usize>> = None;
-        let corners_row = ov(
-            ui,
-            Rect::from_min_size(
-                rect.left_top() + vec2(14.0, 14.0),
-                vec2(rect.width() * 0.55, 44.0),
-            ),
-            &mut |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    if chip(ui, "Whole track", whole).clicked() {
-                        go_corner = Some(None);
-                    }
-                    for k in 0..n {
-                        if chip(ui, &(k + 1).to_string(), !whole && k == corner).clicked() {
-                            go_corner = Some(Some(k));
-                        }
-                    }
-                });
-            },
-        );
-        let mut color = self.map_view.color;
-        let mut sat = satellite;
+    /// Everything over the map: corners along the top left, the line's color
+    /// top right, the numbers on the right (or behind "i"), the lap bottom left
+    /// with the key beside it, speed above, and the imagery switch bottom right.
+    fn map_controls(
+        &mut self,
+        ui: &mut Ui,
+        pick: &MapPick,
+        rect: Rect,
+        compact: bool,
+        panel_w: f32,
+        input: &mut MapInput,
+    ) {
+        let corners_row = corner_chips(ui, rect, pick, input);
         // The color choice goes under the corners when they'd run into each other.
         let color_top = if corners_row.right() + 12.0 > rect.right() - 474.0 {
             rect.top() + 66.0
         } else {
             rect.top() + 14.0
         };
-        ov(
-            ui,
-            Rect::from_min_size(pos2(rect.right() - 474.0, color_top), vec2(460.0, 44.0)),
-            &mut |ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (c, label) in [
-                        (ColorBy::Gain, "Gain / lose"),
-                        (ColorBy::Rpm, "RPM"),
-                        (ColorBy::Speed, "Speed"),
-                        (ColorBy::Slowing, "Braking · trail · lift"),
-                    ] {
-                        if c == ColorBy::Rpm && rpm.is_none() {
-                            continue;
-                        }
-                        if chip(ui, label, color == c).clicked() {
-                            color = c;
-                        }
-                    }
-                    ui.label(RichText::new("Color the line by").size(12.5).color(DIM));
-                });
-            },
-        );
-        self.map_view.color = color;
+        color_chips(ui, rect, color_top, pick, self.map_view.color, input);
+        let color = input.color.unwrap_or(self.map_view.color);
 
-        // The numbers: on the right, or in a narrow window behind a round "i".
         let all_laps = self.map_view.all_laps;
-        let numbers = |ui: &mut Ui, go: &mut Option<Option<usize>>| {
-            if whole {
-                whole_numbers(ui, &model, trace, go);
-            } else {
-                corner_numbers(ui, &model, trace, corner, rpm, &session.laps, all_laps);
-            }
-        };
         if compact {
             let at = Rect::from_min_size(
                 pos2(rect.right() - 14.0 - 40.0, color_top + 54.0),
                 Vec2::splat(40.0),
             );
-            let resp = ui
-                .interact(at, ui.id().with("map_numbers_open"), Sense::click())
-                .on_hover_text(if whole {
-                    "The lap's numbers"
-                } else {
-                    "This corner's numbers"
-                });
-            if resp.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            let p = ui.painter();
-            p.circle(at.center(), 20.0, GLASS, Stroke::new(1.0, theme::OUTLINE));
-            p.text(
-                at.center(),
-                egui::Align2::CENTER_CENTER,
-                "i",
-                semibold(17.0),
-                if resp.hovered() { TEXT } else { SECONDARY },
-            );
-            if resp.clicked() {
-                self.map_view.numbers_open = true;
+            if numbers_button(ui, at, pick.whole) {
+                input.numbers = Some(true);
             }
         } else {
             let side = Rect::from_min_size(
                 pos2(rect.right() - panel_w - 14.0, rect.top() + 68.0),
                 vec2(panel_w, rect.height() - 82.0),
             );
-            ov(ui, side, &mut |ui| {
+            glass(ui, side, &mut |ui| {
                 ui.set_width(panel_w - 12.0);
                 Frame::new()
                     .inner_margin(Margin::same(8))
-                    .show(ui, |ui| numbers(ui, &mut go_corner));
+                    .show(ui, |ui| numbers(ui, pick, all_laps, &mut input.go_corner));
             });
         }
 
-        // The lap, what it's against, and every lap's line.
-        let laps_with: Vec<usize> = (0..model.traces.len()).collect();
-        let pos = laps_with.iter().position(|&t| t == trace).unwrap_or(0);
-        let mut step: Option<usize> = None;
-        let mut all = self.map_view.all_laps;
-        let picker = ov(
-            ui,
-            Rect::from_min_size(
-                pos2(rect.left() + 14.0, rect.bottom() - 58.0),
-                vec2(rect.width() - panel_w - 60.0, 44.0),
-            ),
-            &mut |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if chip(ui, "‹", false).on_hover_text("Previous lap").clicked() && pos > 0 {
-                        step = Some(laps_with[pos - 1]);
-                    }
-                    let tr = &model.traces[trace];
-                    ui.label(
-                        RichText::new(format!("Lap {}", tr.number))
-                            .font(semibold(14.0))
-                            .color(TEXT),
-                    );
-                    ui.label(
-                        RichText::new(format_lap_time(lap.duration_ms()))
-                            .size(13.5)
-                            .color(SECONDARY),
-                    );
-                    if chip(ui, "›", false).on_hover_text("Next lap").clicked()
-                        && pos + 1 < laps_with.len()
-                    {
-                        step = Some(laps_with[pos + 1]);
-                    }
-                    ui.label(RichText::new("against").size(13.0).color(DIM));
-                    let against = if reference == trace && whole {
-                        "the best of every corner (this is the best lap)".to_string()
-                    } else if reference == trace {
-                        "nothing: it's your best here".to_string()
-                    } else if whole {
-                        format!("lap {} (the best lap)", model.traces[reference].number)
-                    } else {
-                        format!(
-                            "lap {} (your best corner {})",
-                            model.traces[reference].number,
-                            corner + 1
-                        )
-                    };
-                    ui.label(RichText::new(against).size(13.5).color(SECONDARY))
-                        .on_hover_text("The dashed line");
-                    ui.add_space(6.0);
-                    if chip(ui, "All laps", all)
-                        .on_hover_text("Every lap that counts, faint: how repeatable the line is")
-                        .clicked()
-                    {
-                        all = !all;
-                    }
-                    if picked.is_none() {
-                        ui.label(
-                            RichText::new(if self.analysis.lap.is_some() {
-                                "(that lap doesn't go all the way round: showing the best)"
-                            } else {
-                                ""
-                            })
-                            .size(12.0)
-                            .color(DIM),
-                        );
-                    }
-                });
-            },
-        );
-        self.map_view.all_laps = all;
+        let picker = lap_picker(ui, rect, panel_w, pick, all_laps, input);
         // What the colors mean: on the bottom row, centered in the room between
         // the lap picker and the satellite switch, or above the lap picker when
-        // that room is too narrow.
+        // that room is too narrow. Its size is measured as it's drawn, for the next frame.
         let switch = Rect::from_min_size(
             rect.right_bottom() - vec2(14.0 + 150.0, 14.0 + 44.0),
             vec2(150.0, 44.0),
@@ -619,89 +562,40 @@ impl App {
                 vec2(rect.width() - panel_w - 60.0, 36.0),
             )
         };
-        self.map_view.legend = ov(ui, at, &mut |ui| {
-            legend(ui, color, &model, trace, rpm, lap.start_ms)
+        self.map_view.legend = glass(ui, at, &mut |ui| {
+            legend(
+                ui,
+                color,
+                pick.model,
+                pick.trace,
+                pick.rpm,
+                pick.lap.start_ms,
+            )
         })
         .size();
         // Speed through the corner, this lap against the best of it, with how the kart slowed underneath.
-        if !whole {
+        if !pick.whole {
             let above = if beside { 58.0 } else { 100.0 };
             let at_rect = Rect::from_min_size(
                 pos2(rect.left() + 14.0, rect.bottom() - above - 10.0 - 150.0),
                 vec2((rect.width() - panel_w - 60.0).min(620.0), 150.0),
             );
-            ov(ui, at_rect, &mut |ui| {
-                speed_trace(ui, &model, trace, reference, corner)
+            glass(ui, at_rect, &mut |ui| {
+                speed_trace(ui, pick.model, pick.trace, pick.reference, pick.corner)
             });
         }
-        // Satellite imagery under the track, on or off, in the lower right.
-        ov(ui, switch, &mut |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add_space(4.0);
-                ui.label(RichText::new("Satellite").size(13.5).color(if sat {
-                    TEXT
-                } else {
-                    SECONDARY
-                }));
-                if toggle(ui, sat)
-                    .on_hover_text("Satellite imagery under the track")
-                    .clicked()
-                {
-                    sat = !sat;
-                }
-            });
-        });
-        self.map_view.satellite = sat;
+        satellite_switch(ui, switch, self.map_view.satellite, input);
         // The numbers over the whole map, until X or Escape (or a corner picked from them).
-        if compact && self.map_view.numbers_open {
-            let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
-            let picked_before = go_corner;
-            egui::Area::new(ui.id().with("map_numbers"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(rect.min)
-                .show(ui.ctx(), |ui| {
-                    Frame::new()
-                        .fill(SURFACE)
-                        .stroke(Stroke::new(1.0, theme::OUTLINE))
-                        .corner_radius(CornerRadius::same(theme::RADIUS))
-                        .inner_margin(Margin::same(16))
-                        .show(ui, |ui| {
-                            let inner = rect.size() - vec2(32.0, 32.0);
-                            ui.set_min_size(inner);
-                            ui.set_max_size(inner);
-                            let x = Rect::from_min_size(
-                                pos2(rect.right() - 16.0 - 24.0, rect.top() + 16.0),
-                                Vec2::splat(24.0),
-                            );
-                            let resp = ui
-                                .put(x, Icon::X.image(SECONDARY, 18.0).sense(Sense::click()))
-                                .on_hover_text("Close");
-                            if resp.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-                            close |= resp.clicked();
-                            // A readable column, centered.
-                            let col_w = (inner.x - 64.0).min(520.0);
-                            let col = Rect::from_min_size(
-                                pos2(rect.center().x - col_w / 2.0, rect.top() + 16.0),
-                                vec2(col_w, inner.y),
-                            );
-                            ui.scope_builder(egui::UiBuilder::new().max_rect(col), |ui| {
-                                egui::ScrollArea::vertical()
-                                    .id_salt("map_numbers_scroll")
-                                    .show(ui, |ui| {
-                                        ui.set_width(col_w);
-                                        numbers(ui, &mut go_corner);
-                                    });
-                            });
-                        });
-                });
-            if close || go_corner != picked_before {
-                self.map_view.numbers_open = false;
+        if compact && input.numbers.unwrap_or(self.map_view.numbers_open) {
+            let (close, go) = numbers_overlay(ui, rect, pick, all_laps);
+            if go.is_some() {
+                input.go_corner = go;
+            }
+            if close || go.is_some() {
+                input.numbers = Some(false);
             }
         }
-        if satellite {
+        if self.map_view.satellite {
             ui.painter().text(
                 switch.right_top() + vec2(-4.0, -6.0),
                 egui::Align2::RIGHT_BOTTOM,
@@ -710,31 +604,34 @@ impl App {
                 Color32::from_white_alpha(150),
             );
         }
+    }
 
-        // The arrow keys step through the corners (unless they're moving a text cursor).
-        let typing = ui.ctx().egui_wants_keyboard_input();
-        let (left, right) = ui.input(|i| {
-            (
-                i.key_pressed(egui::Key::ArrowLeft) && !typing,
-                i.key_pressed(egui::Key::ArrowRight) && !typing,
-            )
-        });
-        if right {
-            go_corner = Some(Some(if whole { 0 } else { (corner + 1) % n }));
-        } else if left {
-            go_corner = Some(Some(if whole { n - 1 } else { (corner + n - 1) % n }));
+    /// What was clicked or pressed this frame, now that the Map is drawn.
+    fn map_apply(&mut self, pick: &MapPick, input: MapInput) {
+        let st = &mut self.map_view;
+        if let Some(c) = input.color {
+            st.color = c;
         }
-        match go_corner {
-            Some(None) => self.map_view.whole = true,
+        if let Some(a) = input.all_laps {
+            st.all_laps = a;
+        }
+        if let Some(s) = input.satellite {
+            st.satellite = s;
+        }
+        if let Some(open) = input.numbers {
+            st.numbers_open = open;
+        }
+        match input.go_corner {
+            Some(None) => st.whole = true,
             Some(Some(k)) => {
-                self.map_view.whole = false;
-                self.corners.selected = Some((trace, k));
+                st.whole = false;
+                self.corners.selected = Some((pick.trace, k));
             }
             None => {}
         }
-        if let Some(t) = step {
-            self.analysis.lap = Some(model.traces[t].lap);
-            self.corners.selected = Some((t, corner));
+        if let Some(t) = input.step {
+            self.analysis.lap = Some(pick.model.traces[t].lap);
+            self.corners.selected = Some((t, pick.corner));
             self.analysis.cursor_s = None;
         }
     }
@@ -773,6 +670,282 @@ impl App {
                 st.anim = None;
             }
         }
+    }
+}
+
+/// A control over the map, on frosted glass, within `at`; gives the rect it took.
+fn glass(ui: &mut Ui, at: Rect, add: &mut dyn FnMut(&mut Ui)) -> Rect {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
+        Frame::new()
+            .fill(GLASS)
+            .stroke(Stroke::new(1.0, theme::OUTLINE))
+            .corner_radius(CornerRadius::same(12))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| add(ui))
+            .response
+            .rect
+    })
+    .inner
+}
+
+/// "Whole track" and each corner's number, top left.
+fn corner_chips(ui: &mut Ui, rect: Rect, pick: &MapPick, input: &mut MapInput) -> Rect {
+    let at = Rect::from_min_size(
+        rect.left_top() + vec2(14.0, 14.0),
+        vec2(rect.width() * 0.55, 44.0),
+    );
+    glass(ui, at, &mut |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if chip(ui, "Whole track", pick.whole).clicked() {
+                input.go_corner = Some(None);
+            }
+            for k in 0..pick.model.segments.len() {
+                if chip(ui, &(k + 1).to_string(), !pick.whole && k == pick.corner).clicked() {
+                    input.go_corner = Some(Some(k));
+                }
+            }
+        });
+    })
+}
+
+/// What colors the lap's line, top right (from `top`).
+fn color_chips(
+    ui: &mut Ui,
+    rect: Rect,
+    top: f32,
+    pick: &MapPick,
+    current: ColorBy,
+    input: &mut MapInput,
+) {
+    let at = Rect::from_min_size(pos2(rect.right() - 474.0, top), vec2(460.0, 44.0));
+    glass(ui, at, &mut |ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (c, label) in [
+                (ColorBy::Gain, "Gain / lose"),
+                (ColorBy::Rpm, "RPM"),
+                (ColorBy::Speed, "Speed"),
+                (ColorBy::Slowing, "Braking · trail · lift"),
+            ] {
+                if c == ColorBy::Rpm && pick.rpm.is_none() {
+                    continue;
+                }
+                if chip(ui, label, input.color.unwrap_or(current) == c).clicked() {
+                    input.color = Some(c);
+                }
+            }
+            ui.label(RichText::new("Color the line by").size(12.5).color(DIM));
+        });
+    });
+}
+
+/// The numbers: the whole lap's, or the corner's against the best of it.
+fn numbers(ui: &mut Ui, pick: &MapPick, all_laps: bool, go: &mut Option<Option<usize>>) {
+    if pick.whole {
+        whole_numbers(ui, pick.model, pick.trace, go);
+    } else {
+        corner_numbers(
+            ui,
+            pick.model,
+            pick.trace,
+            pick.corner,
+            pick.rpm,
+            &pick.session.laps,
+            all_laps,
+        );
+    }
+}
+
+/// The round "i" that opens the numbers in a narrow window; true when clicked.
+fn numbers_button(ui: &mut Ui, at: Rect, whole: bool) -> bool {
+    let resp = ui
+        .interact(at, ui.id().with("map_numbers_open"), Sense::click())
+        .on_hover_text(if whole {
+            "The lap's numbers"
+        } else {
+            "This corner's numbers"
+        });
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let p = ui.painter();
+    p.circle(at.center(), 20.0, GLASS, Stroke::new(1.0, theme::OUTLINE));
+    p.text(
+        at.center(),
+        egui::Align2::CENTER_CENTER,
+        "i",
+        semibold(17.0),
+        if resp.hovered() { TEXT } else { SECONDARY },
+    );
+    resp.clicked()
+}
+
+/// The lap, what it's against, and every lap's line, bottom left; gives the rect it took.
+fn lap_picker(
+    ui: &mut Ui,
+    rect: Rect,
+    panel_w: f32,
+    pick: &MapPick,
+    all_laps: bool,
+    input: &mut MapInput,
+) -> Rect {
+    let model = pick.model;
+    let (trace, reference) = (pick.trace, pick.reference);
+    let n = model.traces.len();
+    let at = Rect::from_min_size(
+        pos2(rect.left() + 14.0, rect.bottom() - 58.0),
+        vec2(rect.width() - panel_w - 60.0, 44.0),
+    );
+    glass(ui, at, &mut |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if chip(ui, "‹", false).on_hover_text("Previous lap").clicked() && trace > 0 {
+                input.step = Some(trace - 1);
+            }
+            ui.label(
+                RichText::new(format!("Lap {}", model.traces[trace].number))
+                    .font(semibold(14.0))
+                    .color(TEXT),
+            );
+            ui.label(
+                RichText::new(format_lap_time(pick.lap.duration_ms()))
+                    .size(13.5)
+                    .color(SECONDARY),
+            );
+            if chip(ui, "›", false).on_hover_text("Next lap").clicked() && trace + 1 < n {
+                input.step = Some(trace + 1);
+            }
+            ui.label(RichText::new("against").size(13.0).color(DIM));
+            let against = if reference == trace && pick.whole {
+                "the best of every corner (this is the best lap)".to_string()
+            } else if reference == trace {
+                "nothing: it's your best here".to_string()
+            } else if pick.whole {
+                format!("lap {} (the best lap)", model.traces[reference].number)
+            } else {
+                format!(
+                    "lap {} (your best corner {})",
+                    model.traces[reference].number,
+                    pick.corner + 1
+                )
+            };
+            ui.label(RichText::new(against).size(13.5).color(SECONDARY))
+                .on_hover_text("The dashed line");
+            ui.add_space(6.0);
+            if chip(ui, "All laps", all_laps)
+                .on_hover_text("Every lap that counts, faint: how repeatable the line is")
+                .clicked()
+            {
+                input.all_laps = Some(!all_laps);
+            }
+            if !pick.picked {
+                ui.label(
+                    RichText::new(if pick.lap_asked {
+                        "(that lap doesn't go all the way round: showing the best)"
+                    } else {
+                        ""
+                    })
+                    .size(12.0)
+                    .color(DIM),
+                );
+            }
+        });
+    })
+}
+
+/// Satellite imagery under the track, on or off, in `at`.
+fn satellite_switch(ui: &mut Ui, at: Rect, on: bool, input: &mut MapInput) {
+    glass(ui, at, &mut |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.add_space(4.0);
+            ui.label(RichText::new("Satellite").size(13.5).color(if on {
+                TEXT
+            } else {
+                SECONDARY
+            }));
+            if toggle(ui, on)
+                .on_hover_text("Satellite imagery under the track")
+                .clicked()
+            {
+                input.satellite = Some(!on);
+            }
+        });
+    });
+}
+
+/// The numbers over the whole map, with an X. Gives whether to close it (X
+/// or Escape) and a corner picked from it.
+fn numbers_overlay(
+    ui: &mut Ui,
+    rect: Rect,
+    pick: &MapPick,
+    all_laps: bool,
+) -> (bool, Option<Option<usize>>) {
+    let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let mut go = None;
+    egui::Area::new(ui.id().with("map_numbers"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ui.ctx(), |ui| {
+            Frame::new()
+                .fill(SURFACE)
+                .stroke(Stroke::new(1.0, theme::OUTLINE))
+                .corner_radius(CornerRadius::same(theme::RADIUS))
+                .inner_margin(Margin::same(16))
+                .show(ui, |ui| {
+                    let inner = rect.size() - vec2(32.0, 32.0);
+                    ui.set_min_size(inner);
+                    ui.set_max_size(inner);
+                    let x = Rect::from_min_size(
+                        pos2(rect.right() - 16.0 - 24.0, rect.top() + 16.0),
+                        Vec2::splat(24.0),
+                    );
+                    let resp = ui
+                        .put(x, Icon::X.image(SECONDARY, 18.0).sense(Sense::click()))
+                        .on_hover_text("Close");
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    close |= resp.clicked();
+                    // A readable column, centered.
+                    let col_w = (inner.x - 64.0).min(520.0);
+                    let col = Rect::from_min_size(
+                        pos2(rect.center().x - col_w / 2.0, rect.top() + 16.0),
+                        vec2(col_w, inner.y),
+                    );
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(col), |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("map_numbers_scroll")
+                            .show(ui, |ui| {
+                                ui.set_width(col_w);
+                                numbers(ui, pick, all_laps, &mut go);
+                            });
+                    });
+                });
+        });
+    (close, go)
+}
+
+/// The arrow keys step through the corners (unless they're moving a text cursor).
+fn map_keys(ui: &Ui, pick: &MapPick, input: &mut MapInput) {
+    let n = pick.model.segments.len();
+    let typing = ui.ctx().egui_wants_keyboard_input();
+    let (left, right) = ui.input(|i| {
+        (
+            i.key_pressed(egui::Key::ArrowLeft) && !typing,
+            i.key_pressed(egui::Key::ArrowRight) && !typing,
+        )
+    });
+    if right {
+        input.go_corner = Some(Some(if pick.whole { 0 } else { (pick.corner + 1) % n }));
+    } else if left {
+        input.go_corner = Some(Some(if pick.whole {
+            n - 1
+        } else {
+            (pick.corner + n - 1) % n
+        }));
     }
 }
 
