@@ -148,6 +148,16 @@ pub fn is_present() -> bool {
         .unwrap_or(false)
 }
 
+/// Waits for USB devices being plugged in or unplugged: each item is one
+/// such change (any device; check [`is_present`] after it). `None` where
+/// the system can't report them, and callers check on a timer instead.
+pub fn usb_changes() -> Option<impl Iterator<Item = ()>> {
+    let watch = nusb::watch_devices()
+        .map_err(|e| log::warn!("can't watch for USB devices: {e}"))
+        .ok()?;
+    Some(futures_lite::stream::block_on(watch).map(|_| ()))
+}
+
 fn u16_at(b: &[u8], o: usize) -> Option<u16> {
     b.get(o..o + 2).map(|x| u16::from_le_bytes([x[0], x[1]]))
 }

@@ -9,5 +9,6 @@ repository.workspace = true
 
 [dependencies]
 log.workspace = true
+futures-lite = "2"
 nusb = "0.2"
 thiserror.workspace = true

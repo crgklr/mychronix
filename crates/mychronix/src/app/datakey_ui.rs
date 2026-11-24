@@ -28,12 +28,51 @@ pub(super) enum KeyEvent {
 pub(super) struct KeyState {
     /// Plugged in, as of the last check.
     pub present: bool,
-    last_check: Option<std::time::Instant>,
+    /// Plugged in or not, each time that changes (from [`watch_key`]).
+    plugged: Option<std::sync::mpsc::Receiver<bool>>,
     rx: Option<std::sync::mpsc::Receiver<KeyEvent>>,
     /// What the last listing found: (logger serial, runs on the key, new runs).
     pub listing: Option<(String, usize, Vec<RunInfo>)>,
     pub busy: Option<String>,
     pub progress: Option<(usize, usize)>,
+}
+
+/// Watches in the background for a data key being plugged in or unplugged,
+/// checking when any USB device comes or goes (every second where the
+/// system can't say), and sends whether it's there each time that changes.
+fn watch_key(ctx: &egui::Context) -> std::sync::mpsc::Receiver<bool> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
+    crate::jobs::spawn_worker("data-key-watch", move || {
+        let mut was = None;
+        // False once the window has gone and nobody's listening.
+        let mut check = || {
+            let present = aim_link::datakey::is_present();
+            if was != Some(present) {
+                was = Some(present);
+                if tx.send(present).is_err() {
+                    return false;
+                }
+                ctx.request_repaint();
+            }
+            true
+        };
+        // Watching starts before the first look, so a key plugged in between isn't missed.
+        if let Some(changes) = aim_link::datakey::usb_changes() {
+            if check() {
+                for () in changes {
+                    if !check() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            while check() {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+    });
+    rx
 }
 
 /// Runs already saved for a logger, by start time ("MM/DD/YYYY", "HH:MM:SS").
@@ -134,15 +173,14 @@ impl App {
             k.progress = None;
             self.notices.error("Reading the data key stopped unexpectedly. Unplug it, plug it back in, and try again.");
         }
-        if k.busy.is_some()
-            || k.last_check
-                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
-        {
+        if k.busy.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
             return;
         }
-        k.last_check = Some(std::time::Instant::now());
-        let present = aim_link::datakey::is_present();
+        let plugged = k.plugged.get_or_insert_with(|| watch_key(ctx));
+        let Some(present) = plugged.try_iter().last() else {
+            return;
+        };
         if present && !k.present {
             log::info!("data key plugged in");
             self.key_list(ctx);
@@ -151,7 +189,6 @@ impl App {
             self.key.listing = None;
         }
         self.key.present = present;
-        ctx.request_repaint_after(std::time::Duration::from_secs(1));
     }
 
     /// Lists the key's runs in the background.
