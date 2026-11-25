@@ -126,7 +126,7 @@ fn lap_crossings(all: &[Crossing]) -> Vec<Crossing> {
     out
 }
 
-/// The passes that make laps (see [`lap_crossings`]), each timed against
+/// The passes that make laps (see `lap_crossings`), each timed against
 /// one line for the whole session: through `start_finish`, at right angles
 /// to the way the kart goes across it on average. [`crossings`] finds each
 /// pass with a line square to the kart's own direction then, which turns

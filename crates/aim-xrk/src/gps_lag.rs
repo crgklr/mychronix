@@ -68,7 +68,7 @@ pub struct Lag {
 /// Why a lag wasn't measured (for the log).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NoLag {
-    /// Less than [`MIN_MOVING_MS`] of driving.
+    /// Less than `MIN_MOVING_MS` of driving.
     TooLittleDriving,
     /// The best match is too poor (its correlation).
     Weak(f64),
