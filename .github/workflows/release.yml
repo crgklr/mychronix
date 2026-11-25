@@ -45,6 +45,11 @@ jobs:
 
       - name: Package
         run: scripts/package-linux.sh
+        # Keys for national aerial photos (crates/mychronix/src/imagery.rs).
+        # Without them the build just leaves those countries to Esri.
+        env:
+          MYCHRONIX_KEY_FI: ${{ secrets.MYCHRONIX_KEY_FI }}
+          MYCHRONIX_KEY_DK: ${{ secrets.MYCHRONIX_KEY_DK }}
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -70,6 +75,11 @@ jobs:
 
       - name: Package
         run: scripts/package-macos.sh
+        # Keys for national aerial photos (crates/mychronix/src/imagery.rs).
+        # Without them the build just leaves those countries to Esri.
+        env:
+          MYCHRONIX_KEY_FI: ${{ secrets.MYCHRONIX_KEY_FI }}
+          MYCHRONIX_KEY_DK: ${{ secrets.MYCHRONIX_KEY_DK }}
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:

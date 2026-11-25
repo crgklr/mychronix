@@ -5,6 +5,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
+# Keys for national aerial photos, if you have them (see imagery-keys.env).
+if [ -f imagery-keys.env ]; then
+    set -a
+    . ./imagery-keys.env
+    set +a
+fi
 
 cargo build --release -p mychronix -p mychronix-cli
 install -Dm755 target/release/mychronix "$HOME/.local/bin/mychronix"

@@ -10,6 +10,9 @@ use std::sync::LazyLock;
 pub struct Source {
     /// The area it covers: an ISO 3166-1 or 3166-2 code in the borders file.
     pub area: &'static str,
+    /// The area's name, and the license the photos are under (for Settings).
+    pub place: &'static str,
+    pub license: &'static str,
     /// The tile address, with `{z}`, `{x}` and `{y}`; `{z-5:02}` for a
     /// service that counts zooms from 5, two digits; or, for a map service
     /// that draws any rectangle, `{bbox}` (the tile's corners in web
@@ -19,12 +22,22 @@ pub struct Source {
     pub max_zoom: u8,
     /// Whose photos they are, as the agency asks to be credited.
     pub credit: &'static str,
+    /// For a service that needs one, the key Mychronix was built with (an
+    /// environment variable at build time, never in the code); `{key}` in
+    /// `url`. Built without it, the source isn't used.
+    pub key: Option<&'static str>,
 }
 
 impl Source {
+    /// False for a source that needs a key Mychronix was built without.
+    pub fn usable(&self) -> bool {
+        !self.url.contains("{key}") || self.key.is_some_and(|k| !k.is_empty())
+    }
+
     pub fn tile_url(&self, z: u8, x: u32, y: u32) -> String {
         let mut url = self
             .url
+            .replace("{key}", self.key.unwrap_or_default())
             .replace("{z}", &z.to_string())
             .replace("{x}", &x.to_string())
             .replace("{y}", &y.to_string());
@@ -56,183 +69,291 @@ impl Source {
 pub const SOURCES: &[Source] = &[
     Source {
         area: "CH",
+        place: "Switzerland",
+        license: "Swiss Open Government Data",
         url: "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg",
         max_zoom: 20,
         credit: "swisstopo",
+        key: None,
     },
     Source {
         area: "NL",
+        place: "Netherlands",
+        license: "CC BY 4.0",
         url: "https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg",
         max_zoom: 20,
         credit: "Beeldmateriaal.nl (PDOK)",
+        key: None,
     },
     Source {
         area: "ES",
+        place: "Spain",
+        license: "CC BY 4.0",
         url: "https://www.ign.es/wmts/pnoa-ma?request=GetTile&service=WMTS&VERSION=1.0.0&Layer=OI.OrthoimageCoverage&Style=default&Format=image/jpeg&TileMatrixSet=GoogleMapsCompatible&TileMatrix={z}&TileRow={y}&TileCol={x}",
         max_zoom: 20,
         credit: "PNOA © Instituto Geográfico Nacional de España",
+        key: None,
     },
     Source {
         area: "FR",
+        place: "France",
+        license: "Licence Ouverte 2.0",
         url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
         max_zoom: 19,
         credit: "IGN-F / Géoportail",
+        key: None,
     },
     Source {
         area: "LU",
+        place: "Luxembourg",
+        license: "CC0 1.0",
         url: "https://wmts1.geoportail.lu/opendata/wmts/ortho_latest/GLOBAL_WEBMERCATOR_4_V3/{z}/{x}/{y}.jpeg",
         max_zoom: 20,
         credit: "ACT Luxembourg",
+        key: None,
     },
     Source {
         area: "AT",
+        place: "Austria",
+        license: "CC BY 4.0",
         url: "https://mapsneu.wien.gv.at/basemap/bmaporthofoto30cm/normal/google3857/{z}/{y}/{x}.jpeg",
         max_zoom: 20,
         credit: "basemap.at",
+        key: None,
     },
     Source {
         area: "BE-BRU",
+        place: "Brussels, Belgium",
+        license: "CC0",
         url: "https://geoservices-grid.irisnet.be/geowebcache/service/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Ortho&STYLE=&TILEMATRIXSET=EPSG:900913&TILEMATRIX=EPSG:900913:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg",
         max_zoom: 21,
         credit: "UrbIS",
+        key: None,
     },
     Source {
         area: "BE-VLG",
+        place: "Flanders, Belgium",
+        license: "Modellicentie Gratis Hergebruik",
         url: "https://geo.api.vlaanderen.be/OMWRGBMRVL/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=omwrgbmrvl&STYLE=&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png",
         max_zoom: 21,
         credit: "Digitaal Vlaanderen",
+        key: None,
     },
     Source {
         area: "BE-WAL",
+        place: "Wallonia, Belgium",
+        license: "CC BY 4.0",
         url: "https://geoservices.wallonie.be/arcgis/rest/services/IMAGERIE/ORTHO_LAST/MapServer/export?bbox={bbox}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image",
         max_zoom: 20,
         credit: "SPW",
+        key: None,
     },
     Source {
         area: "DE-NW",
+        place: "North Rhine-Westphalia, Germany",
+        license: "Datenlizenz Deutschland – Zero 2.0",
         url: "https://www.wmts.nrw.de/geobasis/wmts_nw_dop/tiles/nw_dop/EPSG_3857_16/{z-5:02}/{x}/{y}",
         max_zoom: 20,
         credit: "GeoBasis-DE / NRW",
+        key: None,
     },
     Source {
         area: "DE-BY",
+        place: "Bavaria, Germany",
+        license: "Free use with credit",
         url: "https://wmtsod1.bayernwolke.de/wmts/by_dop/smerc/{z}/{x}/{y}",
         max_zoom: 19,
         credit: "Datenquellen: Bayerische Vermessungsverwaltung, Europäische Union, enthält Copernicus Sentinel-2 Daten 2018, verarbeitet durch das Bundesamt für Kartographie und Geodäsie (BKG)",
+        key: None,
     },
     Source {
         area: "DE-BW",
+        place: "Baden-Württemberg, Germany",
+        license: "Datenlizenz Deutschland – Namensnennung 2.0",
         url: "https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C?LAYERS=IMAGES_DOP_20_RGB&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "LGL-BW, dl-de/by-2.0",
+        credit: "LGL-BW",
+        key: None,
     },
     Source {
         area: "DE-HE",
+        place: "Hesse, Germany",
+        license: "Free use (§18 HVGG)",
         url: "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows?LAYERS=he_dop20_rgb&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
         credit: "HVBG Hessen",
+        key: None,
     },
     Source {
         area: "DE-NI",
+        place: "Lower Saxony, Germany",
+        license: "CC BY 4.0",
         url: "https://opendata.lgln.niedersachsen.de/doorman/noauth/dop_wms?LAYERS=ni_dop20&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "LGLN, CC BY 4.0",
+        credit: "LGLN",
+        key: None,
     },
     Source {
         area: "DE-SN",
+        place: "Saxony, Germany",
+        license: "Datenlizenz Deutschland – Namensnennung 2.0",
         url: "https://geodienste.sachsen.de/wms_geosn_dop-rgb/guest?LAYERS=sn_dop_020&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "GeoSN, dl-de/by-2.0",
+        credit: "GeoSN",
+        key: None,
     },
     Source {
         area: "DE-TH",
+        place: "Thuringia, Germany",
+        license: "CC BY 4.0",
         url: "https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP?LAYERS=th_dop&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
         credit: "GDI-Th",
+        key: None,
     },
     Source {
         area: "DE-BB",
+        place: "Brandenburg, Germany",
+        license: "Datenlizenz Deutschland – Namensnennung 2.0",
         url: "https://isk.geobasis-bb.de/mapproxy/dop20c/service/wms?LAYERS=bebb_dop20c&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "GeoBasis-DE/LGB, dl-de/by-2-0",
+        credit: "GeoBasis-DE/LGB",
+        key: None,
     },
     Source {
         area: "DE-BE",
+        place: "Berlin, Germany",
+        license: "Datenlizenz Deutschland – Zero 2.0",
         url: "https://gdi.berlin.de/services/wms/truedop_2025_sommer?LAYERS=truedop_2025_sommer_rgb&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
         credit: "Geoportal Berlin",
+        key: None,
     },
     Source {
         area: "DE-RP",
+        place: "Rhineland-Palatinate, Germany",
+        license: "Datenlizenz Deutschland – Namensnennung 2.0",
         url: "https://geo4.service24.rlp.de/wms/rp_dop20.fcgi?LAYERS=rp_dop20&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "GeoBasis-DE / LVermGeoRP, dl-de/by-2-0",
+        credit: "GeoBasis-DE / LVermGeoRP",
+        key: None,
     },
     Source {
         area: "DE-SH",
+        place: "Schleswig-Holstein, Germany",
+        license: "CC BY 4.0",
         url: "https://dienste.gdi-sh.de/WMS_SH_DOP20col_OpenGBD?LAYERS=sh_dop20_rgb&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
-        credit: "GeoBasis-DE/LVermGeo SH/CC BY 4.0",
+        credit: "GeoBasis-DE/LVermGeo SH",
+        key: None,
     },
     Source {
         area: "DE-HB",
+        place: "Bremen, Germany",
+        license: "CC BY 4.0",
         url: "https://geodienste.bremen.de/wms_dop_lb?LAYERS=dop10_2025_HB&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&STYLES=&FORMAT=image/jpeg",
         max_zoom: 19,
         credit: "Landesamt GeoInformation Bremen",
+        key: None,
     },
     Source {
         area: "CA-QC",
+        place: "Quebec, Canada",
+        license: "CC BY 4.0",
         url: "https://servicesmatriciels.mern.gouv.qc.ca/erdas-iws/ogc/wmts/Imagerie_Continue/Imagerie_GQ/default/GoogleMapsCompatibleExt2:epsg:3857/{z}/{y}/{x}.jpg",
         max_zoom: 20,
         credit: "Gouvernement du Québec",
+        key: None,
     },
     Source {
         area: "AU-QLD",
+        place: "Queensland, Australia",
+        license: "CC BY 4.0; Planet imagery under licence",
         url: "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/ImageServer/tile/{z}/{y}/{x}",
         max_zoom: 20,
         credit: "State of Queensland; Planet Labs Netherlands B.V., reproduced under licence from Planet and Geoplex",
+        key: None,
     },
     Source {
         area: "CZ",
+        place: "Czechia",
+        license: "Open data, free use",
         url: "https://ags.cuzk.gov.cz/arcgis1/rest/services/ORTOFOTO_WM/MapServer/tile/{z}/{y}/{x}",
         max_zoom: 20,
         credit: "ČÚZK",
+        key: None,
     },
     Source {
         area: "PL",
+        place: "Poland",
+        license: "Free use with credit",
         url: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMTS/StandardResolution?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTOFOTOMAPA&STYLE=default&FORMAT=image/jpeg&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}",
         max_zoom: 19,
         credit: "GUGiK, geoportal.gov.pl",
+        key: None,
     },
     Source {
         area: "EE",
+        place: "Estonia",
+        license: "Land Board open data licence",
         url: "https://tiles.maaamet.ee/tm/wmts/1.0.0/foto/default/GMC/{z}/{y}/{x}.jpg",
         max_zoom: 18,
         credit: "Republic of Estonia Land and Spatial Development Board",
+        key: None,
     },
     Source {
         area: "IT-BZ",
+        place: "South Tyrol, Italy",
+        license: "CC BY 4.0",
         url: "https://geoservices.buergernetz.bz.it/mapproxy/root/wmts/p_bz-Orthoimagery:Aerial-2023-RGB/EPSG_3857/{z}/{x}/{y}.png",
         max_zoom: 20,
         credit: "Provincia autonoma di Bolzano – Alto Adige",
+        key: None,
     },
     Source {
         area: "SI",
+        place: "Slovenia",
+        license: "CC BY 4.0",
         url: "https://ipi.eprostor.gov.si/wms-si-gurs-dts/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=SI.GURS.ZPDZ:DOF025&STYLES=&SRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg",
         max_zoom: 20,
         credit: "GURS",
+        key: None,
     },
     Source {
         area: "PT",
+        place: "Portugal",
+        license: "Open data, free use",
         url: "https://ortos.dgterritorio.gov.pt/wms/ortosat2023?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ortoSat2023-CorVerdadeira&STYLES=&CRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg",
         max_zoom: 19,
         credit: "DGT",
+        key: None,
     },
     Source {
         area: "US-OH",
+        place: "Ohio, USA",
+        license: "Public use, as is",
         url: "https://maps.ohio.gov/image/rest/services/osip_most_current_cache/MapServer/tile/{z}/{y}/{x}",
         max_zoom: 20,
         credit: "State of Ohio (OGRIP)",
+        key: None,
+    },
+    Source {
+        area: "FI",
+        place: "Finland",
+        license: "CC BY 4.0",
+        url: "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/ortokuva/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.jpg?api-key={key}",
+        max_zoom: 18,
+        credit: "National Land Survey of Finland",
+        key: option_env!("MYCHRONIX_KEY_FI"),
+    },
+    Source {
+        area: "DK",
+        place: "Denmark",
+        license: "Free use with credit",
+        url: "https://api.dataforsyningen.dk/orto_foraar_webm_DAF?service=WMTS&request=GetTile&version=1.0.0&layer=orto_foraar_webm&style=default&format=image/jpeg&TileMatrixSet=DFD_GoogleMapsCompatible&TileMatrix={z}&TileRow={y}&TileCol={x}&token={key}",
+        max_zoom: 20,
+        credit: "Klimadatastyrelsen, GeoDanmark",
+        key: option_env!("MYCHRONIX_KEY_DK"),
     },
 ];
 
@@ -322,7 +443,7 @@ pub fn source_for(x: u32, y: u32, zoom: u8) -> Option<&'static Source> {
         corner(x, y + 1, zoom),
         corner(x + 1, y + 1, zoom),
     ];
-    SOURCES.iter().find(|s| {
+    SOURCES.iter().filter(|s| s.usable()).find(|s| {
         AREAS
             .get(s.area)
             .is_some_and(|a| corners.iter().all(|&(lon, lat)| a.contains(lon, lat)))
@@ -350,11 +471,18 @@ mod tests {
     fn addresses_fill_in_the_tile() {
         let source = |url| Source {
             area: "",
+            place: "",
+            license: "",
             url,
             max_zoom: 20,
             credit: "",
+            key: Some("k"),
         };
         assert_eq!(source("t/{z}/{x}/{y}").tile_url(18, 5, 7), "t/18/5/7");
+        assert_eq!(
+            source("t/{z}/{x}/{y}?k={key}").tile_url(18, 5, 7),
+            "t/18/5/7?k=k"
+        );
         assert_eq!(source("t/{z-5:02}/{x}/{y}").tile_url(9, 1, 2), "t/04/1/2");
         assert_eq!(source("t/{z-5:02}/{x}/{y}").tile_url(21, 1, 2), "t/16/1/2");
         // Zoom 1, tile (1, 0): the north-east quarter of the world.
@@ -392,6 +520,22 @@ mod tests {
         assert_eq!(area_at(50.09, 14.42, 18), Some("CZ")); // Prague
         assert_eq!(area_at(46.50, 11.35, 18), Some("IT-BZ")); // Bolzano
         assert_eq!(area_at(39.45, -83.83, 18), Some("US-OH")); // Wilmington, Ohio
+    }
+
+    #[test]
+    fn a_source_needing_a_key_is_used_only_when_built_with_one() {
+        let keyed = |key| Source {
+            area: "FI",
+            place: "",
+            license: "",
+            url: "t/{z}/{x}/{y}?k={key}",
+            max_zoom: 18,
+            credit: "",
+            key,
+        };
+        assert!(!keyed(None).usable());
+        assert!(!keyed(Some("")).usable());
+        assert!(keyed(Some("k")).usable());
     }
 
     #[test]

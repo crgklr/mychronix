@@ -1,6 +1,7 @@
 //! The Settings page: units, clock, what Mychronix fetches from the internet,
 //! the Mychronix Performance Engineer (the MCP server an AI assistant on
-//! this computer can use), and video sync. Changes are saved to
+//! this computer can use), video sync, and what Mychronix is built from.
+//! Changes are saved to
 //! `~/Mychronix/settings.json` and take effect at once.
 
 use super::sessions_filter_ui::{section, segments_in, switch_row};
@@ -100,6 +101,9 @@ impl App {
 
                 // Video sync
                 video_sync_section(ui, s.video_sync, &mut change);
+
+                // About: what Mychronix is, and whose data and parts it uses.
+                about_section(ui);
             });
         });
 
@@ -194,6 +198,109 @@ impl App {
             },
         );
     }
+}
+
+/// Who made what Mychronix shows and is built from, with their licenses.
+fn about_section(ui: &mut Ui) {
+    let summary = concat!(
+        "Mychronix ",
+        env!("CARGO_PKG_VERSION"),
+        " · free and open source, MIT or Apache-2.0"
+    );
+    section(ui, Icon::Mychron, "About", summary, false, |ui| {
+        let text = |ui: &mut Ui, t: &str| {
+            ui.add(egui::Label::new(RichText::new(t).size(13.5).color(SECONDARY)).wrap());
+        };
+        let heading = |ui: &mut Ui, t: &str| {
+            ui.add_space(8.0);
+            ui.label(RichText::new(t).font(semibold(14.0)).color(TEXT));
+        };
+        let link = |ui: &mut Ui, name: &str, what: &str, url: &str| {
+            ui.scope(|ui| {
+                // As tall as a line of text, like the lines around it.
+                ui.spacing_mut().interact_size.y = 0.0;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.hyperlink_to(RichText::new(name).size(13.5).color(SERIES[0]), url);
+                    ui.label(RichText::new(what).size(13.5).color(SECONDARY));
+                });
+            });
+        };
+        text(
+            ui,
+            "An independent project, not affiliated with, endorsed by or supported by AiM Tech Srl. MyChron and RaceStudio are trademarks of AiM Tech Srl.",
+        );
+        link(
+            ui,
+            "github.com/crgklr/mychronix",
+            "Source, issues and releases",
+            "https://github.com/crgklr/mychronix",
+        );
+
+        heading(ui, "Data and maps");
+        text(
+            ui,
+            "Track database: AiM Tech, from the server RaceStudio 3 uses.",
+        );
+        link(
+            ui,
+            "Open-Meteo",
+            "Weather, CC BY 4.0",
+            "https://open-meteo.com",
+        );
+        link(
+            ui,
+            "OpenStreetMap contributors",
+            "Map data, ODbL",
+            "https://www.openstreetmap.org/copyright",
+        );
+        link(
+            ui,
+            "Esri",
+            "Satellite imagery: Esri, Maxar, Earthstar Geographics",
+            "https://www.esri.com/",
+        );
+        link(
+            ui,
+            "Natural Earth",
+            "Country and state borders, public domain",
+            "https://www.naturalearthdata.com/",
+        );
+
+        heading(ui, "Aerial photos");
+        text(
+            ui,
+            "Where a national mapping agency shares its photos, the satellite map uses them:",
+        );
+        for s in crate::imagery::SOURCES.iter().filter(|s| s.usable()) {
+            text(ui, &format!("{}: {} · {}", s.place, s.credit, s.license));
+        }
+
+        heading(ui, "Built with");
+        link(
+            ui,
+            "egui",
+            "and eframe, MIT or Apache-2.0",
+            "https://github.com/emilk/egui",
+        );
+        link(
+            ui,
+            "walkers",
+            "Maps, MIT",
+            "https://github.com/podusowski/walkers",
+        );
+        link(
+            ui,
+            "libxrk",
+            "Reading MyChron 5 and 6 sessions, MIT",
+            "https://github.com/m3rlin45/libxrk",
+        );
+        link(ui, "Lucide", "Icons, ISC", "https://lucide.dev");
+        text(
+            ui,
+            "The Inter typeface (SIL Open Font License), and other Rust libraries under MIT, Apache-2.0 and similar licenses.",
+        );
+    });
 }
 
 fn video_sync_section(ui: &mut Ui, on: bool, change: &mut Change) {
