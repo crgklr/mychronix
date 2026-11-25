@@ -239,8 +239,14 @@ pub fn kart_channels(accel: [&Channel; 3], mount: &Mount) -> Vec<Channel> {
 }
 
 /// GPS heading lags the IMU by about this much (ms), found by lining up the
-/// gyro's turn rate with the GPS's on a MyChron 6 (Oct 2026).
-const GPS_LAG_MS: i64 = 60;
+/// gyro's turn rate with the GPS's on a MyChron 6 (Oct 2026): what's left
+/// when the session's own lag couldn't be measured (see [`crate::gps_lag`]).
+pub const GPS_HEADING_LAG_MS: i64 = 60;
+/// What's left of it once the GPS's turn rate has been moved onto its
+/// positions' time (see [`crate::gps_lag`]): the gyro itself runs a little
+/// late. MyChron 6 sessions' turn rates are moved about 80 ms, so 60 becomes
+/// −20, which also fits the steering best (by up to 0.02 R², Nov 2026).
+pub const GPS_HEADING_LAG_ALIGNED_MS: i64 = -20;
 /// The steering estimate must explain this much of how tightly the kart
 /// turns (R²); a MyChron 6 on the steering wheel scores 0.65–0.76.
 const MIN_STEER_FIT: f64 = 0.5;
@@ -250,9 +256,15 @@ const MIN_STEER_FIT: f64 = 0.5;
 /// the gyro: its rotation, less the kart's own turning (from the GPS), is the
 /// wheel turning; the column's direction is the one whose added-up rotation
 /// best follows how tightly the kart turns, and the angle is set back to zero
-/// on every straight so it can't drift. None when the logger doesn't turn
-/// with the wheel (a fixed bracket) or the result doesn't check out.
-pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Channel> {
+/// on every straight so it can't drift. `heading_lag_ms` is how far the GPS's
+/// turn rate still trails the gyro. None when the logger doesn't turn with the
+/// wheel (a fixed bracket) or the result doesn't check out.
+pub fn steering(
+    gyro: [&Channel; 3],
+    mount: &Mount,
+    gps: &GpsTrack,
+    heading_lag_ms: i64,
+) -> Option<Channel> {
     let [x, y, z] = gyro;
     let n = x.values.len().min(y.values.len()).min(z.values.len());
     if n < 500 || gps.len() < 100 {
@@ -266,7 +278,7 @@ pub fn steering(gyro: [&Channel; 3], mount: &Mount, gps: &GpsTrack) -> Option<Ch
     let speed: Vec<f64> = t.iter().map(|&ms| gps_at(&gps.speed_kmh, ms)).collect();
     let yaw: Vec<f64> = t
         .iter()
-        .map(|&ms| gps_at(&gps.yaw_rate_dps, ms + GPS_LAG_MS))
+        .map(|&ms| gps_at(&gps.yaw_rate_dps, ms + heading_lag_ms))
         .collect();
     let w = |i: usize| [x.values[i], y.values[i], z.values[i]];
     // The gyro's zero, while the kart sits still.

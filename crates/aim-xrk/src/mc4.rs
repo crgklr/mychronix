@@ -469,6 +469,7 @@ fn from_parts(p: Parts<'_>) -> Result<Session> {
         imu_mount: None,
         laps_from_gps: None,
         logger_splits: Vec::new(),
+        gps_lag_ms: None,
     };
     if channels.iter().all(|c| c.values.is_empty()) && laps.is_empty() {
         return Err(Error::Parse("the downloaded run holds no data".into()));

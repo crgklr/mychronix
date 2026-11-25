@@ -259,6 +259,52 @@ logger, to see whether the 70 ms is fixed or varies; (2) trace how
 placed. Until then Mychronix uses libxrk's timestamps unchanged; this only
 matters for loggers that stamp GPS on arrival (not the MyChron 6).
 
+**Receiver speed against positions (Nov 24 2026; `aim_xrk::gps_lag`).** The
+speed and heading a receiver reports trail the ones its own positions show.
+Lining up the speed worked out from successive positions (centered
+differences) with the receiver's, sessions that drove at least a minute:
+
+| Logger | Sessions | Speed lag (ms) | Match |
+|---|---|---|---|
+| MyChron 6, 25 Hz | 38 | 63–148, median 79 (p10–p90 69–92) | 0.97–1.00 |
+| AiM model 548 (kart), 25 Hz | 20 | 72–117, median 102 | 0.99+ |
+| Other AiM loggers, 25 Hz (public samples) | 9 | 79–102 | 0.95–1.00 |
+| AiM car logger, 10 Hz (public sample) | 1 | 93 | 1.00 |
+| Early MyChron 5 (`test.xrk`), 8 Hz | 1 | 130 | 1.00 |
+| AiM logger, 4 Hz (`badGPSdata.xrk`) | 1 | 161 | 1.00 |
+
+The turn rate trails by about as much (libxrk differences headings backward,
+which adds half a sample). A session's two halves typically agree to within 10 ms, so
+the lag is measured per session and the receiver's speed and turn rate are
+moved earlier by it as the session is read; positions (and laps timed from
+them) don't move. Short runs (under a minute of driving) and one damaged
+track were left as recorded. RaceStudio 3 doesn't do this: its GPS Speed
+matches ours as recorded.
+
+Not applied to RaceStudio 2 `.drk` sessions: their positions are RaceStudio 2's
+smoothed `.gpk` track and the same match there ranges 42–194 ms across AiM's
+five sample sessions, too varied to trust.
+
+**Positions against the logger's channels.** Cross-correlating in 10 ms steps
+over the same sessions:
+- MyChron 6 gyro turn rate vs the turn rate from positions: −8 ms median on
+  wheel-mounted loggers, +13 ms on fixed brackets, but ±30–50 ms session to
+  session (the steering's own turning gets into a wheel-mounted gyro). So
+  positions sit on the gyro's time as near as this can tell.
+- IMU "Forward g" vs acceleration from positions: positions 50 ms earlier
+  (median; −26 to −71 ms p10–p90). Against the receiver's speed instead, 33 ms
+  the other way. The accelerometers evidently run later than the gyro.
+- RPM's rate of change vs GPS: 110 ms later still (45–400 ms, correlation
+  0.4–0.9; gearing, clutch and the logger's RPM filtering). Not a usable clock
+  reference.
+- Early MyChron 5 (`test.xrk`): positions 85 ms behind the gyro, in line with
+  its stamping GPS on arrival and RaceStudio's 70 ms.
+
+So a single shift of all GPS against "the logger's clock" has no one right
+value: the logger's own channels disagree with each other by more than the
+lag. Mychronix leaves positions on the logger's time (right for the gyro on
+the MyChron 6); the 70 ms on loggers that stamp GPS on arrival stays open.
+
 ## MyChron 4 data key (USB 11cc:0101) — static findings, Oct 15, 2026
 
 From RaceStudio 2 (`RaceStudio2.exe`, `Download.exe`, driver

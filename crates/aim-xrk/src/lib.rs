@@ -9,6 +9,7 @@ use std::path::Path;
 pub mod checks;
 pub mod drk;
 pub mod geo;
+pub mod gps_lag;
 pub mod imu;
 pub mod laps;
 pub mod mc4;
@@ -138,6 +139,11 @@ pub struct SessionInfo {
     /// The logger's own split times, for the laps it has them for (see
     /// [`splits`]); read them with [`Session::logger_splits`].
     pub logger_splits: Vec<splits::LapSplits>,
+    /// How late the GPS receiver's speed ran behind its positions (ms),
+    /// measured and taken out as the session was read, so speed, the GPS
+    /// accelerations and the turn rate line up with where the kart was (see
+    /// [`gps_lag`]). None when it couldn't be measured: they're as recorded.
+    pub gps_lag_ms: Option<i64>,
 }
 
 /// A recorded channel. `times_ms` and `values` have the same length.
@@ -281,6 +287,7 @@ impl From<libxrk::XrkFile> for Session {
             imu_mount: None,
             laps_from_gps: None,
             logger_splits: Vec::new(),
+            gps_lag_ms: None,
         };
         let lap_records: Vec<&[u8]> = file
             .raw
@@ -310,9 +317,32 @@ impl From<libxrk::XrkFile> for Session {
                 }
             })
             .collect();
-        let gps = file.gps.as_ref().and_then(GpsTrack::from_libxrk);
+        let mut gps = file.gps.as_ref().and_then(GpsTrack::from_libxrk);
         let mut channels = channels;
         let mut info = info;
+        // The receiver's speed and turn rate onto its positions' time, once,
+        // before anything is worked out from them.
+        let aligned = gps.as_mut().map(gps_lag::align);
+        match aligned {
+            Some(Ok(a)) => {
+                log::info!(
+                    "GPS: speed {} ms and turn rate {} ms behind the positions (match {:.3}); moved earlier",
+                    a.speed.ms,
+                    a.yaw_ms,
+                    a.speed.correlation
+                );
+                info.gps_lag_ms = Some(a.speed.ms);
+            }
+            Some(Err(why)) => {
+                log::info!("GPS: speed's lag not measured ({why:?}); left as recorded")
+            }
+            None => {}
+        }
+        let heading_lag_ms = if info.gps_lag_ms.is_some() {
+            imu::GPS_HEADING_LAG_ALIGNED_MS
+        } else {
+            imu::GPS_HEADING_LAG_MS
+        };
         if let Some(g) = &gps {
             let lon_g = longitudinal_g(&g.times_ms, &g.speed_kmh);
             let lat_g = lateral_g(&g.times_ms, &g.speed_kmh, &g.yaw_rate_dps);
@@ -380,7 +410,7 @@ impl From<libxrk::XrkFile> for Session {
                         if let (None, Some(gx), Some(gy), Some(gz)) =
                             (steer, find("GyroX"), find("GyroY"), find("GyroZ"))
                         {
-                            extra.extend(imu::steering([gx, gy, gz], &mount, g));
+                            extra.extend(imu::steering([gx, gy, gz], &mount, g, heading_lag_ms));
                         }
                         info.imu_mount = Some(mount);
                         channels.extend(extra);
