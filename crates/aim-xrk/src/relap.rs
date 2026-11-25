@@ -48,6 +48,7 @@ pub struct Crossing {
 /// Each pass across the line through `start_finish`, at right angles to the
 /// kart's direction of travel there: within `RADIUS_M` of the point, at
 /// speed, timed where the path crosses the line (interpolated between fixes).
+/// The line turns with the kart; [`lap_passes`] times laps against one.
 pub fn crossings(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
     let (lat0, lon0) = start_finish;
     let xy: Vec<(f64, f64)> = gps
@@ -125,6 +126,62 @@ fn lap_crossings(all: &[Crossing]) -> Vec<Crossing> {
     out
 }
 
+/// The passes that make laps (see [`lap_crossings`]), each timed against
+/// one line for the whole session: through `start_finish`, at right angles
+/// to the way the kart goes across it on average. [`crossings`] finds each
+/// pass with a line square to the kart's own direction then, which turns
+/// with it: a pass a little to one side and at a slight angle is timed
+/// against a slightly different line from the next, enough to put
+/// milliseconds between laps that weren't there. Every lap timed from one
+/// line, as the logger's own start/finish does, covers the same ground.
+/// (A track gives its start/finish as a point, not a direction, so the
+/// direction comes from the passes.)
+pub fn lap_passes(gps: &GpsTrack, start_finish: (f64, f64)) -> Vec<Crossing> {
+    let passes = lap_crossings(&crossings(gps, start_finish));
+    // The direction across the line: the average of the passes' (they all
+    // go the same way, within 45° of each other).
+    let (hy, hx) = passes.iter().fold((0.0, 0.0), |(s, c), p| {
+        (s + p.heading.sin(), c + p.heading.cos())
+    });
+    let len = (hx * hx + hy * hy).sqrt();
+    if len == 0.0 {
+        return passes;
+    }
+    let (lat0, lon0) = start_finish;
+    let along = |k: usize| {
+        let (x, y) = local(lat0, lon0, gps.latitude[k], gps.longitude[k]);
+        (x * hx + y * hy) / len
+    };
+    let t = &gps.times_ms;
+    passes
+        .iter()
+        .map(|p| {
+            // Where the path crosses the session's line, among the fixes
+            // around where it crossed the pass's own (both lines go through
+            // the point, and the kart passed within a few meters of it).
+            let i = t.partition_point(|&x| x <= p.time_ms);
+            let lo = i.saturating_sub(4);
+            let hi = (i + 3).min(t.len().saturating_sub(1));
+            let k = (lo..hi)
+                .filter(|&k| along(k) <= 0.0 && along(k + 1) > 0.0)
+                .min_by_key(|&k| (t[k] - p.time_ms).abs());
+            match k {
+                Some(k) => {
+                    let (s0, s1) = (along(k), along(k + 1));
+                    let f = -s0 / (s1 - s0);
+                    let at = t[k] as f64 + f * (t[k + 1] - t[k]) as f64;
+                    Crossing {
+                        time_ms: at.round() as i64,
+                        ..*p
+                    }
+                }
+                // Not crossed near there (a GPS jump): as the pass found it.
+                None => *p,
+            }
+        })
+        .collect()
+}
+
 /// Whether the logger's laps look untimed: one long lap, or a lap that's
 /// two or more of the others run together. Measured by distance, not time:
 /// a lap with a stop in it (a red flag, a stop on track) is long, not two laps.
@@ -185,7 +242,7 @@ pub fn retime(session: &Session, candidates: &[(f64, f64)]) -> Option<(usize, Ve
     // (candidate, crossings, laps of a typical length, how near the kart passes).
     let mut best: Option<(usize, Vec<Crossing>, usize, f64)> = None;
     for (k, &sf) in candidates.iter().enumerate() {
-        let passes = lap_crossings(&crossings(gps, sf));
+        let passes = lap_passes(gps, sf);
         if passes.len() < 3 {
             continue;
         }
@@ -408,6 +465,56 @@ mod tests {
                 .all(|l| (l.duration_ms() - 20_000).abs() <= 100),
             "{times:?}"
         );
+    }
+
+    #[test]
+    fn every_lap_is_timed_against_the_same_line() {
+        // A lap every 30 s, the kart crossing the line (north–south through
+        // the point) at 20 m/s, some laps 8° off square and 4 m to one side.
+        // Across each pass a straight run, 10 fixes a second at a different
+        // phase each lap; between passes, out on the track far away.
+        let (lat0, lon0) = (41.0, -73.0);
+        let passes = [
+            (0.0, 0.0),
+            (8.0, 4.0),
+            (8.0, -4.0),
+            (-8.0, 4.0),
+            (-8.0, -4.0),
+            (0.0, 0.0),
+        ];
+        let mut g = GpsTrack::default();
+        let mut fix = |t: i64, (x, y): (f64, f64)| {
+            let (la, lo) = crate::geo::from_local(lat0, lon0, (x, y));
+            g.times_ms.push(t);
+            g.latitude.push(la);
+            g.longitude.push(lo);
+            g.speed_kmh.push(72.0);
+            g.yaw_rate_dps.push(0.0);
+        };
+        for (lap, &(deg, side)) in passes.iter().enumerate() {
+            let at = 10_000 + lap as i64 * 30_000;
+            let a = f64::to_radians(deg);
+            // At `at` the kart is at (0, side), on the line.
+            let first = at - 3_000 + 17 + 23 * lap as i64;
+            for k in 0..60 {
+                let t = first + k * 100;
+                let s = 20.0 * (t - at) as f64 / 1000.0;
+                fix(t, (s * a.cos(), side + s * a.sin()));
+            }
+            fix(at + 15_000, (0.0, 500.0));
+        }
+        let times = |c: &[Crossing]| -> Vec<i64> {
+            c.windows(2).map(|w| w[1].time_ms - w[0].time_ms).collect()
+        };
+        let spread = |t: &[i64]| t.iter().max().unwrap() - t.iter().min().unwrap();
+        // A line square to each pass: laps off by tens of milliseconds.
+        let turning = times(&lap_crossings(&crossings(&g, (lat0, lon0))));
+        assert_eq!(turning.len(), 5, "{turning:?}");
+        assert!(spread(&turning) >= 40, "{turning:?}");
+        // One line for them all: every lap its true 30 s.
+        let fixed = times(&lap_passes(&g, (lat0, lon0)));
+        assert_eq!(fixed.len(), 5, "{fixed:?}");
+        assert!(fixed.iter().all(|&t| (t - 30_000).abs() <= 1), "{fixed:?}");
     }
 
     #[test]
