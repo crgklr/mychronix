@@ -374,6 +374,11 @@ Roughly in priority order:
       [Sample sessions](#share-your-sessions) help a lot here.
 - [ ] Edit sessions' details after downloading, one or many at once.
 - [ ] Export sessions and laps to CSV.
+- [ ] Math channels: your own channels from formulas (RaceStudio 3's syntax, so
+      formulas from RaceStudio work here) or simple recipes, saved once for
+      every session.
+- [ ] Compare three or more drivers or karts at once, across Laps, Corners, the
+      Map and Graphs.
 - [ ] Drag and drop on Linux under Wayland (waiting on the windowing library).
 - [ ] Import and export `.tkk` files, and check tracks made in Mychronix in RaceStudio 3.
 - [ ] Device information: firmware version and odometers (read-only).
