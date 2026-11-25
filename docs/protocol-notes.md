@@ -266,7 +266,7 @@ differences) with the receiver's, sessions that drove at least a minute:
 
 | Logger | Sessions | Speed lag (ms) | Match |
 |---|---|---|---|
-| MyChron 6, 25 Hz | 38 | 63–148, median 79 (p10–p90 69–92) | 0.97–1.00 |
+| MyChron 6, 25 Hz | 38 | 63–92, median 79 (p10–p90 69–92); one short run 148 | 0.97–1.00 |
 | AiM model 548 (kart), 25 Hz | 20 | 72–117, median 102 | 0.99+ |
 | Other AiM loggers, 25 Hz (public samples) | 9 | 79–102 | 0.95–1.00 |
 | AiM car logger, 10 Hz (public sample) | 1 | 93 | 1.00 |
@@ -277,20 +277,36 @@ The turn rate trails by about as much (libxrk differences headings backward,
 which adds half a sample). A session's two halves typically agree to within 10 ms, so
 the lag is measured per session and the receiver's speed and turn rate are
 moved earlier by it as the session is read; positions (and laps timed from
-them) don't move. Short runs (under a minute of driving) and one damaged
-track were left as recorded. RaceStudio 3 doesn't do this: its GPS Speed
-matches ours as recorded.
+them) don't move. Short runs (under a minute of driving), one damaged track,
+and lags a 20 Hz-or-faster receiver doesn't show (outside 40–130 ms: the 148
+above) are left as recorded. RaceStudio 3 doesn't do this: its GPS Speed,
+LonAcc and LatAcc sit about 80 ms later than ours on a MyChron 6.
+
+The receiver's speed is filtered rather than simply late: the measured lag
+grows with the smoothing applied to both signals and levels off (MyChron 6
+median 62, 74, 79, 80, 80 ms with no, ±50, ±100, ±200, ±400 ms smoothing).
+Mychronix measures with ±100 ms, which is what "the lag" means here. One shift
+puts slow features right and sharp ones (the onset of braking) about 15–20 ms
+(0.3 m) early: an approximation, much closer than the 80 ms before.
 
 Not applied to RaceStudio 2 `.drk` sessions: their positions are RaceStudio 2's
 smoothed `.gpk` track and the same match there ranges 42–194 ms across AiM's
 five sample sessions, too varied to trust.
 
+**Positions are where the kart was.** For laps a logger timed, the position
+stored at the lap's time sits on the track's start/finish line to within 4 cm
+on six loggers' files (AiM's samples and GitHub users' sessions): whatever
+timed those laps treats positions as the kart's place at that moment, the
+frame Mychronix now puts speed in too (independent review, Nov 24 2026).
+
 **Positions against the logger's channels.** Cross-correlating in 10 ms steps
 over the same sessions:
-- MyChron 6 gyro turn rate vs the turn rate from positions: −8 ms median on
-  wheel-mounted loggers, +13 ms on fixed brackets, but ±30–50 ms session to
-  session (the steering's own turning gets into a wheel-mounted gyro). So
-  positions sit on the gyro's time as near as this can tell.
+- MyChron 6 gyro turn rate vs the turn rate from positions: inconclusive.
+  One method gave −8 ms median (wheel-mounted) and +13 ms (fixed brackets);
+  another (the gyro about gravity) gave positions 108 ms late. A gyro on the
+  steering wheel turns ahead of the kart by a driver-dependent amount, so it
+  can't settle this; nor could the Oct 2026 60 ms steering figure, found the
+  same way.
 - IMU "Forward g" vs acceleration from positions: positions 50 ms earlier
   (median; −26 to −71 ms p10–p90). Against the receiver's speed instead, 33 ms
   the other way. The accelerometers evidently run later than the gyro.
@@ -302,8 +318,12 @@ over the same sessions:
 
 So a single shift of all GPS against "the logger's clock" has no one right
 value: the logger's own channels disagree with each other by more than the
-lag. Mychronix leaves positions on the logger's time (right for the gyro on
-the MyChron 6); the 70 ms on loggers that stamp GPS on arrival stays open.
+lag. Mychronix leaves positions where they are (a receiver can't report a
+position before the kart gets there, and laps are timed by them) and moves
+only the filtered speed and turn rate onto their time. The IMU sits between
+the two GPS clocks: Forward g ran a little ahead of GPS acceleration before
+and a little behind it now. The 70 ms on loggers that stamp GPS on arrival
+stays open.
 
 ## MyChron 4 data key (USB 11cc:0101) — static findings, Oct 15, 2026
 

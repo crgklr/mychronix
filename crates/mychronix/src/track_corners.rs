@@ -14,8 +14,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// The file's format version; bump it when a field changes meaning.
-const VERSION: u32 = 1;
+/// The file's format version; bump it when a field changes meaning. 2: GPS
+/// speed is moved onto its positions' time (`aim_xrk::gps_lag`), so braking
+/// points, and the corners found from them, sit 1.5–2 m earlier than in 1.
+const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackCorners {
@@ -78,6 +80,14 @@ fn path(track_id: &str) -> Option<PathBuf> {
 pub fn load(track_id: &str) -> Option<TrackCorners> {
     let saved: TrackCorners = crate::storage::load(&path(track_id)?)?;
     (saved.version == VERSION && saved.line.len() > 1).then_some(saved)
+}
+
+/// The session an older version's corners were found in (its file name), to
+/// find them there again: it may be one picked with "Use this session's
+/// corners".
+pub fn outdated_session(track_id: &str) -> Option<String> {
+    let saved: TrackCorners = crate::storage::load(&path(track_id)?)?;
+    (saved.version != VERSION).then_some(saved.session)
 }
 
 pub fn save(track_id: &str, corners: &TrackCorners) -> std::io::Result<()> {

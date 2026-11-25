@@ -243,9 +243,10 @@ pub fn kart_channels(accel: [&Channel; 3], mount: &Mount) -> Vec<Channel> {
 /// when the session's own lag couldn't be measured (see [`crate::gps_lag`]).
 pub const GPS_HEADING_LAG_MS: i64 = 60;
 /// What's left of it once the GPS's turn rate has been moved onto its
-/// positions' time (see [`crate::gps_lag`]): the gyro itself runs a little
-/// late. MyChron 6 sessions' turn rates are moved about 80 ms, so 60 becomes
-/// −20, which also fits the steering best (by up to 0.02 R², Nov 2026).
+/// positions' time (see [`crate::gps_lag`]): MyChron 6 sessions' turn rates
+/// are moved about 80 ms, so 60 becomes −20, keeping October's timing. The
+/// steering fit barely changes across this range, so the data can't pin it
+/// down more finely (a wheel-mounted gyro turns ahead of the kart).
 pub const GPS_HEADING_LAG_ALIGNED_MS: i64 = -20;
 /// The steering estimate must explain this much of how tightly the kart
 /// turns (R²); a MyChron 6 on the steering wheel scores 0.65–0.76.

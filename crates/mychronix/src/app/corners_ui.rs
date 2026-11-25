@@ -157,8 +157,19 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.corners.choosing = Some(rx);
         let (id, ctx) = (id.clone(), ctx.clone());
+        // Corners saved by an older version are found again in the same
+        // session; otherwise from all of the track's sessions.
+        let again = crate::track_corners::outdated_session(&id).and_then(|name| {
+            paths
+                .iter()
+                .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy() == name))
+                .cloned()
+        });
         crate::jobs::spawn("track-corners", move || {
-            if let Some(corners) = crate::track_corners::choose(&paths)
+            let corners = again
+                .and_then(|p| crate::track_corners::choose(&[p]))
+                .or_else(|| crate::track_corners::choose(&paths));
+            if let Some(corners) = corners
                 && let Err(e) = crate::track_corners::save(&id, &corners)
             {
                 log::warn!("couldn't save the corners for track {id}: {e}");

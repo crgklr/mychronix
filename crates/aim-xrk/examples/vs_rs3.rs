@@ -138,8 +138,10 @@ fn main() {
     }
     println!("  largest difference on a racing lap: {worst_lap:.3} s\n");
 
-    // Line the clocks up on a channel both have, by its best match over ±3 s.
-    let key = ["GPS Speed", "RPM", "Engine RPM"]
+    // Line the clocks up on a channel both have, by its best match over ±3 s:
+    // the logger's own first, as our GPS speed is moved onto the positions'
+    // time and RaceStudio's isn't (see `gps_lag`).
+    let key = ["RPM", "Engine RPM", "GPS Speed"]
         .iter()
         .find(|k| head.iter().any(|h| h == *k) && s.channel(k).is_some());
     let t0 = s
@@ -189,10 +191,16 @@ fn main() {
             .map(|r| (r[0] - rows[0][0]) * 1000.0)
             .unwrap_or(50.0);
         let fast = ch.times_ms.len() as f64 > rows.len() as f64 * 1.5;
+        // Our GPS channels run this much earlier than RaceStudio's.
+        let gps_lag = if name.starts_with("GPS ") {
+            s.info.gps_lag_ms.unwrap_or(0) as f64
+        } else {
+            0.0
+        };
         let pairs: Vec<(f64, f64)> = rows
             .iter()
             .map(|r| {
-                let t = t0 + r[0] * 1000.0 + offset;
+                let t = t0 + r[0] * 1000.0 + offset - gps_lag;
                 (
                     r[k],
                     if fast {

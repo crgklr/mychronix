@@ -42,6 +42,38 @@ fn reads_sample_sessions() {
     }
 }
 
+/// The GPS lag measured on two public sessions (when they're among the
+/// samples): a change to parsing or to the measurement that moves it shows
+/// here. Recorded Nov 24, 2026.
+#[test]
+fn gps_lag_on_known_sessions() {
+    let Some(dir) = std::env::var_os("MYCHRONIX_SAMPLES") else {
+        eprintln!("MYCHRONIX_SAMPLES not set; skipping");
+        return;
+    };
+    let mut files = Vec::new();
+    sample_files(Path::new(&dir), &mut files);
+    // A 25 Hz logger, and AiM's early MyChron 5 sample at 8 Hz.
+    for (name, lag_ms) in [("Test-Lawrence.xrk", 79), ("test.xrk", 130)] {
+        let Some(path) = files
+            .iter()
+            .find(|p| p.file_name().is_some_and(|n| n == name))
+        else {
+            eprintln!("{name} not among the samples; skipping it");
+            continue;
+        };
+        let session = aim_xrk::Session::open(path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let found = session
+            .info
+            .gps_lag_ms
+            .unwrap_or_else(|| panic!("{name}: no lag"));
+        assert!(
+            (found - lag_ms).abs() <= 5,
+            "{name}: {found} ms, was {lag_ms}"
+        );
+    }
+}
+
 /// Session summaries and session files: junk must give errors, never panics.
 #[test]
 fn summaries_and_sessions_survive_junk() {

@@ -34,6 +34,10 @@ const STEP_MS: i64 = 10;
 const SEARCH_MS: (i64, i64) = (-50, 300);
 /// The lags accepted (ms).
 pub const ACCEPTED_MS: (i64, i64) = (0, 250);
+/// The lags believable from a receiver giving 20 or more fixes a second
+/// (ms): real ones measure 69–117 (MyChron 6 and others at 25 Hz). One short
+/// run measured 148 cleanly but alone, and is left as recorded.
+pub const FAST_RECEIVER_MS: (i64, i64) = (40, 130);
 /// Both signals are smoothed alike, this much either side (ms), so the
 /// position-derived one's jitter doesn't decide the match. The same smoothing
 /// on both can't move the match.
@@ -272,7 +276,8 @@ fn from_positions(g: &GpsTrack) -> (Vec<f64>, Vec<f64>) {
 fn moved_earlier(times_ms: &[i64], values: &[f64], lag_ms: i64) -> Vec<f64> {
     times_ms
         .iter()
-        .map(|&t| {
+        .enumerate()
+        .map(|(k, &t)| {
             let t = t + lag_ms;
             let i = times_ms.partition_point(|&x| x < t);
             if i >= times_ms.len() {
@@ -280,6 +285,10 @@ fn moved_earlier(times_ms: &[i64], values: &[f64], lag_ms: i64) -> Vec<f64> {
             }
             if i == 0 || times_ms[i] == t {
                 return values[i];
+            }
+            // Not across a stretch the receiver didn't record: as it was.
+            if times_ms[i] - times_ms[i - 1] > 1000 {
+                return values[k];
             }
             let (t0, t1) = (times_ms[i - 1] as f64, times_ms[i] as f64);
             let f = (t as f64 - t0) / (t1 - t0);
@@ -304,6 +313,14 @@ pub struct Aligned {
 pub fn align(track: &mut GpsTrack) -> Result<Aligned, NoLag> {
     let (speed, yaw) = from_positions(track);
     let lag = estimate(&track.times_ms, &speed, &track.speed_kmh, &track.speed_kmh)?;
+    // A fast receiver's lag outside what such receivers show is a one-off,
+    // however clean the match: leave that session alone.
+    let mut steps: Vec<i64> = track.times_ms.windows(2).map(|w| w[1] - w[0]).collect();
+    steps.sort_unstable();
+    let fast = steps.get(steps.len() / 2).is_some_and(|&s| s <= 50);
+    if fast && !(FAST_RECEIVER_MS.0..=FAST_RECEIVER_MS.1).contains(&lag.ms) {
+        return Err(NoLag::OutOfRange(lag.ms));
+    }
     let yaw_ms = match estimate(&track.times_ms, &yaw, &track.yaw_rate_dps, &track.speed_kmh) {
         Ok(y) => y.ms,
         Err(why) => {
@@ -371,8 +388,16 @@ mod tests {
                 "{hz} Hz: {lag} ms read as {found:?}"
             );
             assert!(found.correlation > 0.95);
-            let a = align(&mut g).expect("aligned");
-            assert!((a.speed.ms - lag).abs() <= 10 && (a.yaw_ms - lag).abs() <= 10);
+            // Moved only when believable for the receiver's rate.
+            let believable = hz < 20 || (FAST_RECEIVER_MS.0..=FAST_RECEIVER_MS.1).contains(&lag);
+            match align(&mut g) {
+                Ok(a) => {
+                    assert!(believable, "{hz} Hz, {lag} ms moved");
+                    assert!((a.speed.ms - lag).abs() <= 10 && (a.yaw_ms - lag).abs() <= 10);
+                }
+                Err(NoLag::OutOfRange(_)) => assert!(!believable, "{hz} Hz, {lag} ms left"),
+                Err(e) => panic!("{hz} Hz, {lag} ms: {e:?}"),
+            }
         }
     }
 
