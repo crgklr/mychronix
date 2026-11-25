@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use aim_xrk::summary::{Date, SessionSummary};
 use serde::{Deserialize, Serialize};
 
-use crate::dates::{parse_date, week_start};
+use crate::dates::{parse_saved, week_start};
 use crate::tracks::Library;
 
 /// Sessions slower than this flat out never left the stand: engine warm-ups.
@@ -32,7 +32,7 @@ pub struct EventDef {
 
 impl EventDef {
     pub fn dates(&self) -> Option<(Date, Date)> {
-        let (a, b) = (parse_date(&self.start)?, parse_date(&self.end)?);
+        let (a, b) = (parse_saved(&self.start)?, parse_saved(&self.end)?);
         Some(if a <= b { (a, b) } else { (b, a) })
     }
 

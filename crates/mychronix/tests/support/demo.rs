@@ -300,7 +300,7 @@ pub fn write_library(home: &Path) {
     };
     write(
         "settings.json",
-        br#"{"units": "imperial", "clock": "12", "weather": false, "update_check": false, "aim_tracks": false, "mcp": false}"#,
+        br#"{"units": "imperial", "clock": "12", "date": "month", "weather": false, "update_check": false, "aim_tracks": false, "mcp": false}"#,
     );
 
     let line = center_line();

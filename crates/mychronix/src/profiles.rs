@@ -39,7 +39,8 @@ pub struct Driver {
     pub name: String,
     /// Racing class, e.g. "Mini Swift".
     pub class: String,
-    /// Birthday as typed ("2017-03-14" or "3/14/2017"), so the age stays right.
+    /// Birthday: "2017-03-14" (or "3/14/2017", as typed before dates could be
+    /// shown day first), so the age stays right.
     pub born: String,
     /// In race gear, as typed: lb, or kg when `weight_kg`.
     pub weight_lb: String,
@@ -51,19 +52,23 @@ pub struct Driver {
 impl Driver {
     /// Age in whole years on `today`, if the birthday reads as a date.
     pub fn age(&self, today: aim_xrk::summary::Date) -> Option<u32> {
-        let b = parse_birthday(&self.born)?;
-        let mut age = today.year as i32 - b.year as i32;
-        if (today.month, today.day) < (b.month, b.day) {
-            age -= 1;
-        }
-        u32::try_from(age).ok()
+        age_on(parse_birthday(&self.born)?, today)
     }
 }
 
-/// "2017-03-14", or "3/14/2017" as written in the US.
+/// Age in whole years on `today` of someone born on `born`.
+pub fn age_on(born: aim_xrk::summary::Date, today: aim_xrk::summary::Date) -> Option<u32> {
+    let mut age = today.year as i32 - born.year as i32;
+    if (today.month, today.day) < (born.month, born.day) {
+        age -= 1;
+    }
+    u32::try_from(age).ok()
+}
+
+/// A saved birthday: "2017-03-14", or "3/14/2017" as typed before.
 pub fn parse_birthday(s: &str) -> Option<aim_xrk::summary::Date> {
     let s = s.trim();
-    if let Some(d) = crate::dates::parse_date(s) {
+    if let Some(d) = crate::dates::parse_saved(s) {
         return Some(d);
     }
     let mut parts = s.split('/').map(|p| p.trim().parse::<u32>().ok());

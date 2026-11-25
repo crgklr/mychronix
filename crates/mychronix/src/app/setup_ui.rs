@@ -27,10 +27,10 @@ pub(super) fn session_title(s: &crate::tracks::LocalSession) -> String {
     match (s.summary.date, s.summary.start_time.as_deref()) {
         (Some(d), Some(t)) => format!(
             "{n}, {} at {}",
-            crate::dates::us_short(d),
+            crate::dates::short(d),
             crate::dates::clock_time(t)
         ),
-        (Some(d), None) => format!("{n}, {}", crate::dates::us_short(d)),
+        (Some(d), None) => format!("{n}, {}", crate::dates::short(d)),
         _ => n,
     }
 }
@@ -57,7 +57,7 @@ impl App {
                     "Same as session {}{}",
                     s.number.unwrap_or(0),
                     s.date
-                        .map(|d| format!(" ({} {})", crate::dates::short_month(d.month), d.day))
+                        .map(|d| format!(" ({})", crate::dates::month_day(d)))
                         .unwrap_or_default()
                 )
             }

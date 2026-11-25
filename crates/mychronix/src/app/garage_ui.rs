@@ -690,6 +690,10 @@ impl App {
         for f in [&mut d.name, &mut d.class, &mut d.born, &mut d.weight_lb] {
             *f = f.trim().to_string();
         }
+        // Saved year first, so it reads the same whichever way dates are shown.
+        if let Some(b) = crate::dates::parse_date(&d.born) {
+            d.born = crate::dates::iso(b);
+        }
         if input.delete {
             // Deleting asks twice, in its own window.
             self.garage.confirm = Some(garage_manage_ui::Confirm::DeleteDriver {
@@ -1059,11 +1063,19 @@ fn driver_fields(ui: &mut Ui, edit: &mut DriverEdit, existing: bool, classes: &[
             ui.end_row();
             label(ui, "Birthday");
             ui.horizontal(|ui| {
-                look::text(ui, &mut edit.driver.born, "3/14/2017", Some(180.0));
-                let note = match (edit.driver.born.trim().is_empty(), edit.driver.age(today)) {
+                let example = crate::dates::numeric(aim_xrk::summary::Date {
+                    year: 2017,
+                    month: 3,
+                    day: 14,
+                });
+                look::text(ui, &mut edit.driver.born, &example, Some(180.0));
+                let born = crate::dates::parse_date(&edit.driver.born);
+                let note = match (edit.driver.born.trim().is_empty(), born) {
                     (true, _) => String::new(),
-                    (false, Some(a)) => format!("age {a}"),
-                    (false, None) => "month/day/year".to_string(),
+                    (false, Some(b)) => crate::profiles::age_on(b, today)
+                        .map(|a| format!("age {a}"))
+                        .unwrap_or_default(),
+                    (false, None) => crate::dates::field_hint().to_string(),
                 };
                 ui.label(RichText::new(note).font(regular(14.5)).color(DIM));
             });
@@ -2039,11 +2051,14 @@ fn driver_tile(
         && !lap_hovered
         && let Some(id) = d.id
     {
-        act.edit_driver = profiles
-            .drivers
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| DriverEdit { driver: p.clone() });
+        act.edit_driver = profiles.drivers.iter().find(|p| p.id == id).map(|p| {
+            // The birthday as dates are shown (it's saved year first).
+            let mut driver = p.clone();
+            if let Some(b) = crate::profiles::parse_birthday(&driver.born) {
+                driver.born = crate::dates::numeric(b);
+            }
+            DriverEdit { driver }
+        });
     }
 }
 

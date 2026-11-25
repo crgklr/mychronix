@@ -1,6 +1,8 @@
-//! Dates and times as Mychronix shows them: US style, month first (`Oct 17,
-//! 2026`), with the clock in 12 hours unless Settings says 24. Every page
-//! formats dates through these, so they read the same everywhere.
+//! Dates and times as Mychronix shows them: month first (`Oct 17, 2026`) or
+//! day first (`17 Oct 2026`), and the clock in 12 or 24 hours, as the
+//! computer's region writes them unless Settings says. Every page formats
+//! dates through these, so they read the same everywhere. Dates are saved
+//! year first (`2026-10-17`) whatever the order shown.
 
 use aim_xrk::summary::Date;
 
@@ -146,30 +148,67 @@ fn weekday(d: Date) -> usize {
     (days(d) + 4).rem_euclid(7) as usize
 }
 
-/// "Oct 17".
+/// Day first, as Settings or the region has it.
+fn day_first() -> bool {
+    crate::settings::day_first()
+}
+
+/// "Oct 17" (or "17 Oct", day first).
 pub fn month_day(d: Date) -> String {
-    format!("{} {}", short_month(d.month), d.day)
+    month_day_in(d, day_first())
 }
 
-/// "Sat, Oct 17".
+fn month_day_in(d: Date, day_first: bool) -> String {
+    if day_first {
+        format!("{} {}", d.day, short_month(d.month))
+    } else {
+        format!("{} {}", short_month(d.month), d.day)
+    }
+}
+
+/// "Sat, Oct 17" (or "Sat 17 Oct").
 pub fn day_month_day(d: Date) -> String {
-    format!("{}, {}", &DAYS[weekday(d)][..3], month_day(d))
+    day_month_day_in(d, day_first())
 }
 
-/// "Sat 10/17".
+fn day_month_day_in(d: Date, day_first: bool) -> String {
+    let day = &DAYS[weekday(d)][..3];
+    if day_first {
+        format!("{day} {}", month_day_in(d, true))
+    } else {
+        format!("{day}, {}", month_day_in(d, false))
+    }
+}
+
+/// "Sat 10/17" (or "Sat 17/10").
 pub fn day_numeric(d: Date) -> String {
-    format!("{} {}/{}", &DAYS[weekday(d)][..3], d.month, d.day)
+    day_numeric_in(d, day_first())
 }
 
-/// "Saturday, October 17, 2026".
+fn day_numeric_in(d: Date, day_first: bool) -> String {
+    let day = &DAYS[weekday(d)][..3];
+    if day_first {
+        format!("{day} {}/{}", d.day, d.month)
+    } else {
+        format!("{day} {}/{}", d.month, d.day)
+    }
+}
+
+/// "Saturday, October 17, 2026" (or "Saturday 17 October 2026").
 pub fn long(d: Date) -> String {
-    format!(
-        "{}, {} {}, {}",
+    long_in(d, day_first())
+}
+
+fn long_in(d: Date, day_first: bool) -> String {
+    let (day, month) = (
         DAYS[weekday(d)],
         MONTHS[(d.month.clamp(1, 12) - 1) as usize],
-        d.day,
-        d.year
-    )
+    );
+    if day_first {
+        format!("{day} {} {month} {}", d.day, d.year)
+    } else {
+        format!("{day}, {month} {}, {}", d.day, d.year)
+    }
 }
 
 /// "Oct 17": the day of a session start.
@@ -179,11 +218,7 @@ pub fn stamp_month_day(stamp: Stamp) -> String {
 
 /// "Oct 17, 2026 at 2:19 PM": a session start.
 pub fn stamp_words(stamp: Stamp) -> String {
-    format!(
-        "{} at {}",
-        us_short(stamp.date()),
-        clock_time(&stamp.time())
-    )
+    format!("{} at {}", short(stamp.date()), clock_time(&stamp.time()))
 }
 
 /// Days since 1970-01-01 (Howard Hinnant's days_from_civil).
@@ -230,17 +265,30 @@ pub fn today() -> Date {
     }
 }
 
-/// "10/17/2026" as written in the US, or "2026-10-17" (also "2026-10-7").
+/// A date as typed: "10/17/2026" month first or "17/10/2026" day first (as
+/// dates are shown, see `day_first`), "17.10.2026" (always day first), or
+/// "2026-10-17" (also "2026-10-7").
 pub fn parse_date(s: &str) -> Option<Date> {
+    parse_in(s, day_first())
+}
+
+/// A date as Mychronix saved it: "2026-10-17", or "10/17/2026" from before
+/// dates could be shown day first (always month first).
+pub fn parse_saved(s: &str) -> Option<Date> {
+    parse_in(s, false)
+}
+
+fn parse_in(s: &str, day_first: bool) -> Option<Date> {
     let s = s.trim();
-    let (sep, us) = if s.contains('/') {
-        ('/', true)
-    } else {
-        ('-', false)
-    };
+    let sep = ['/', '.', '-'].into_iter().find(|c| s.contains(*c))?;
     let mut p = s.split(sep).map(|x| x.trim().parse::<u16>().ok());
     let (a, b, c) = (p.next()??, p.next()??, p.next()??);
-    let (year, month, day) = if us { (c, a, b) } else { (a, b, c) };
+    let (year, month, day) = match sep {
+        '-' => (a, b, c),
+        '.' => (c, b, a),
+        _ if day_first => (c, b, a),
+        _ => (c, a, b),
+    };
     if p.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1990 {
         return None;
     }
@@ -253,14 +301,49 @@ pub fn parse_date(s: &str) -> Option<Date> {
     (from_days(days(d)) == d).then_some(d)
 }
 
-/// "10/17/2026", for date fields.
-pub fn us_numeric(d: Date) -> String {
-    format!("{}/{}/{}", d.month, d.day, d.year)
+/// "10/17/2026" (or "17/10/2026"), for date fields.
+pub fn numeric(d: Date) -> String {
+    numeric_in(d, day_first())
 }
 
-/// "Oct 17, 2026".
-pub fn us_short(d: Date) -> String {
-    format!("{}, {}", month_day(d), d.year)
+fn numeric_in(d: Date, day_first: bool) -> String {
+    if day_first {
+        format!("{}/{}/{}", d.day, d.month, d.year)
+    } else {
+        format!("{}/{}/{}", d.month, d.day, d.year)
+    }
+}
+
+/// What a date field takes: "month/day/year" (or "day/month/year").
+pub fn field_hint() -> &'static str {
+    if day_first() {
+        "day/month/year"
+    } else {
+        "month/day/year"
+    }
+}
+
+/// `text` (a date without its year) with `year`: "Sat, Oct 17, 2026" (or
+/// "Sat 17 Oct 2026").
+pub fn with_year(text: &str, year: u16) -> String {
+    if day_first() {
+        format!("{text} {year}")
+    } else {
+        format!("{text}, {year}")
+    }
+}
+
+/// "Oct 17, 2026" (or "17 Oct 2026").
+pub fn short(d: Date) -> String {
+    short_in(d, day_first())
+}
+
+fn short_in(d: Date, day_first: bool) -> String {
+    if day_first {
+        format!("{} {}", month_day_in(d, true), d.year)
+    } else {
+        format!("{}, {}", month_day_in(d, false), d.year)
+    }
 }
 
 /// "2:19 PM" (or "14:19" on a 24-hour clock, see Settings) from the logger's "14:19:05".
@@ -325,10 +408,18 @@ mod tests {
         assert_eq!(parse_date("2026-10-17"), Some(d(2026, 10, 17)));
         assert_eq!(parse_date(" 2026-1-7 "), Some(d(2026, 1, 7)));
         assert_eq!(parse_date("2026-09-31"), None);
-        assert_eq!(parse_date("17/10/2026"), None);
-        assert_eq!(parse_date("10/17/2026"), Some(d(2026, 10, 17)));
-        assert_eq!(us_numeric(d(2026, 1, 7)), "1/7/2026");
-        assert_eq!(us_short(d(2026, 10, 17)), "Oct 17, 2026");
+        assert_eq!(parse_in("17/10/2026", false), None);
+        assert_eq!(parse_in("10/17/2026", false), Some(d(2026, 10, 17)));
+        assert_eq!(parse_in("17/10/2026", true), Some(d(2026, 10, 17)));
+        assert_eq!(parse_in("10/17/2026", true), None);
+        assert_eq!(parse_in("17.10.2026", false), Some(d(2026, 10, 17)));
+        assert_eq!(parse_in("2026-10-17", true), Some(d(2026, 10, 17)));
+        // Saved dates: year first, or month first from before.
+        assert_eq!(parse_saved("3/4/2017"), Some(d(2017, 3, 4)));
+        assert_eq!(numeric_in(d(2026, 1, 7), false), "1/7/2026");
+        assert_eq!(numeric_in(d(2026, 1, 7), true), "7/1/2026");
+        assert_eq!(short_in(d(2026, 10, 17), false), "Oct 17, 2026");
+        assert_eq!(short_in(d(2026, 10, 17), true), "17 Oct 2026");
         assert_eq!(format_time("14:19:05", false), "2:19 PM");
         assert_eq!(format_time("14:19:05", true), "14:19");
         assert_eq!(format_time("09:05", true), "09:05");
@@ -343,29 +434,41 @@ mod tests {
             month: 10,
             day: 31,
         };
-        assert_eq!(long(d), "Saturday, October 31, 2026");
-        assert_eq!(us_short(d), "Oct 31, 2026");
-        assert_eq!(month_day(d), "Oct 31");
-        assert_eq!(day_month_day(d), "Sat, Oct 31");
-        assert_eq!(day_numeric(d), "Sat 10/31");
+        assert_eq!(long_in(d, false), "Saturday, October 31, 2026");
+        assert_eq!(short_in(d, false), "Oct 31, 2026");
+        assert_eq!(month_day_in(d, false), "Oct 31");
+        assert_eq!(day_month_day_in(d, false), "Sat, Oct 31");
+        assert_eq!(day_numeric_in(d, false), "Sat 10/31");
+        // Day first.
+        assert_eq!(long_in(d, true), "Saturday 31 October 2026");
+        assert_eq!(short_in(d, true), "31 Oct 2026");
+        assert_eq!(month_day_in(d, true), "31 Oct");
+        assert_eq!(day_month_day_in(d, true), "Sat 31 Oct");
+        assert_eq!(day_numeric_in(d, true), "Sat 31/10");
         assert_eq!(
-            stamp_month_day(Stamp::parse("2026-10-31 08:58:10").unwrap()),
+            month_day_in(Stamp::parse("2026-10-31 08:58:10").unwrap().date(), false),
             "Oct 31"
         );
         assert_eq!(
-            long(Date {
-                year: 2024,
-                month: 2,
-                day: 29
-            }),
+            long_in(
+                Date {
+                    year: 2024,
+                    month: 2,
+                    day: 29
+                },
+                false
+            ),
             "Thursday, February 29, 2024"
         );
         assert_eq!(
-            long(Date {
-                year: 2000,
-                month: 1,
-                day: 1
-            }),
+            long_in(
+                Date {
+                    year: 2000,
+                    month: 1,
+                    day: 1
+                },
+                false
+            ),
             "Saturday, January 1, 2000"
         );
     }

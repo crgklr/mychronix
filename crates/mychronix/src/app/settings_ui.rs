@@ -1,4 +1,4 @@
-//! The Settings page: units, clock, what Mychronix fetches from the internet,
+//! The Settings page: units, clock, dates, what Mychronix fetches from the internet,
 //! the Mychronix Performance Engineer (the MCP server an AI assistant on
 //! this computer can use), video sync, and what Mychronix is built from.
 //! Changes are saved to
@@ -74,6 +74,27 @@ impl App {
                             s.clock = match clock {
                                 Choice::A => Some("12".into()),
                                 Choice::B => Some("24".into()),
+                                Choice::Auto => None,
+                            }
+                        }));
+                    }
+                });
+
+                // Dates
+                let mut date = match s.date.as_deref() {
+                    Some("month") => Choice::A,
+                    Some("day") => Choice::B,
+                    _ => Choice::Auto,
+                };
+                let example = crate::dates::short(crate::dates::today());
+                section(ui, Icon::Calendar, "Dates", &format!("Dates read like {example}"), false, |ui| {
+                    let before = date;
+                    segments_in(ui, &mut date, &[(Choice::Auto, "From your region"), (Choice::A, "Month first  ·  Oct 17"), (Choice::B, "Day first  ·  17 Oct")], 3);
+                    if date != before {
+                        change = Some(Box::new(move |s| {
+                            s.date = match date {
+                                Choice::A => Some("month".into()),
+                                Choice::B => Some("day".into()),
                                 Choice::Auto => None,
                             }
                         }));

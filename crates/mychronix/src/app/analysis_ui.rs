@@ -456,7 +456,14 @@ impl App {
                     .and_then(|s| s.summary.date)
             })
             .map(crate::dates::day_numeric)
-            .or_else(|| i.date.clone());
+            // The file's own date (AiM writes it month first).
+            .or_else(|| {
+                let raw = i.date.as_deref()?;
+                Some(
+                    crate::dates::parse_saved(raw)
+                        .map_or_else(|| raw.to_string(), crate::dates::day_numeric),
+                )
+            });
         let lap = match self.analysis.lap.and_then(|k| session.laps.get(k)) {
             Some(l) => format!("Lap {}", l.number),
             None => "All laps".to_string(),
@@ -839,7 +846,11 @@ impl App {
     /// Session · when · driver · kart, the driver in bold (click to change who drove).
     fn panel_session_line(&mut self, ui: &mut Ui, session: &Session) {
         let i = &session.info;
-        let when = match (i.date.as_deref(), i.time.as_deref()) {
+        // The file's own date (AiM writes it month first), as dates are shown.
+        let date = i.date.as_deref().map(|d| {
+            crate::dates::parse_saved(d).map_or_else(|| d.to_string(), crate::dates::short)
+        });
+        let when = match (date.as_deref(), i.time.as_deref()) {
             (Some(d), Some(t)) => Some(format!("{d} at {}", crate::dates::clock_time(t))),
             (Some(d), None) => Some(d.to_string()),
             _ => None,

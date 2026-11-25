@@ -386,7 +386,7 @@ fn date_box(ui: &mut Ui, open: bool, label: &str, value: Day) -> (Rect, egui::Re
     p.text(
         pos2(rect.left() + 64.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        value.strftime("%b %-d, %Y").to_string(),
+        crate::dates::short(crate::dates::date_of(value)),
         medium(15.0),
         TEXT,
     );
@@ -544,7 +544,7 @@ fn calendar_day(
 impl SessionFilter {
     /// When: the presets, or a range picked on the From and To calendars.
     fn when_section(&mut self, ui: &mut Ui, lib: &Library, newest: Option<Day>) {
-        let us = |d: Day| d.strftime("%b %-d, %Y").to_string();
+        let shown_date = |d: Day| crate::dates::short(crate::dates::date_of(d));
         let today = naive(crate::dates::today()).unwrap_or_default();
         let first = lib
             .sessions
@@ -558,10 +558,10 @@ impl SessionFilter {
         let summary = match self.range {
             Range::All => "Every session".to_string(),
             Range::LastDay => newest
-                .map(|d| format!("Only {}", us(d)))
+                .map(|d| format!("Only {}", shown_date(d)))
                 .unwrap_or_default(),
-            _ if shown[0] == shown[1] => format!("Only {}", us(shown[0])),
-            _ => format!("{} – {}", us(shown[0]), us(shown[1])),
+            _ if shown[0] == shown[1] => format!("Only {}", shown_date(shown[0])),
+            _ => format!("{} – {}", shown_date(shown[0]), shown_date(shown[1])),
         };
         let race_days: BTreeSet<Day> = lib
             .sessions

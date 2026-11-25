@@ -1133,7 +1133,7 @@ fn track_session_row(
         let who = Some(driver.to_string()).filter(|d| !d.is_empty());
         let when = [
             who,
-            sum.date.map(crate::dates::us_short),
+            sum.date.map(crate::dates::short),
             sum.start_time.as_deref().map(crate::dates::clock_time),
         ]
         .into_iter()

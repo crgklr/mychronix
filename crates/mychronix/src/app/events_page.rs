@@ -387,12 +387,12 @@ impl App {
         let Some(mut def) = self.events_page.dialog.take() else {
             return;
         };
-        // Saved dates are ISO; show them as written in the US.
+        // Saved dates are year first; show them as dates are shown.
         for d in [&mut def.start, &mut def.end] {
             if d.contains('-')
-                && let Some(p) = crate::dates::parse_date(d)
+                && let Some(p) = crate::dates::parse_saved(d)
             {
-                *d = crate::dates::us_numeric(p);
+                *d = crate::dates::numeric(p);
             }
         }
         let s = Suggestions::gather(lib, profiles);
@@ -406,14 +406,19 @@ impl App {
             "Name this event"
         };
         let (mut save, mut cancel, mut delete) = (false, false, false);
+        let example = crate::dates::numeric(aim_xrk::summary::Date {
+            year: 2026,
+            month: 10,
+            day: 17,
+        });
         let problem = if def.name.trim().is_empty() {
-            Some("Give the event a name.")
+            Some("Give the event a name.".to_string())
         } else if def.track.trim().is_empty() {
-            Some("Choose a track.")
+            Some("Choose a track.".to_string())
         } else if crate::dates::parse_date(&def.start).is_none()
             || crate::dates::parse_date(&def.end).is_none()
         {
-            Some("Dates look like 10/17/2026.")
+            Some(format!("Dates look like {example}."))
         } else {
             None
         };
@@ -429,7 +434,7 @@ impl App {
             );
             look::body(ui, |ui| {
                 event_fields(ui, &mut def, &s.tracks, &championships);
-                if let Some(p) = problem {
+                if let Some(p) = &problem {
                     look::note(ui, p, SECONDARY);
                 }
             });
@@ -672,10 +677,10 @@ fn event_fields(ui: &mut Ui, def: &mut EventDef, tracks: &[String], championship
             );
             ui.end_row();
             look::label(ui, "Starts");
-            look::text(ui, &mut def.start, "MM/DD/YYYY", Some(200.0));
+            look::text(ui, &mut def.start, crate::dates::field_hint(), Some(200.0));
             ui.end_row();
             look::label(ui, "Ends");
-            look::text(ui, &mut def.end, "MM/DD/YYYY", Some(200.0));
+            look::text(ui, &mut def.end, crate::dates::field_hint(), Some(200.0));
             ui.end_row();
             look::label(ui, "Championship");
             suggest_field(
@@ -1303,14 +1308,22 @@ fn event_row(
     response
 }
 
-/// "Sat, Oct 10, 2026", or "Sat, Oct 17 – Sun, Oct 18, 2026".
+/// "Sat, Oct 10, 2026", or "Sat, Oct 17 – Sun, Oct 18, 2026" (day first:
+/// "Sat 17 Oct – Sun 18 Oct 2026").
 fn date_range(a: aim_xrk::summary::Date, b: aim_xrk::summary::Date) -> String {
-    let short = crate::dates::day_month_day;
+    use crate::dates::{day_month_day, with_year};
     if a == b {
-        format!("{}, {}", short(a), a.year)
+        with_year(&day_month_day(a), a.year)
     } else if a.year != b.year {
-        format!("{}, {} – {}, {}", short(a), a.year, short(b), b.year)
+        format!(
+            "{} – {}",
+            with_year(&day_month_day(a), a.year),
+            with_year(&day_month_day(b), b.year)
+        )
     } else {
-        format!("{} – {}, {}", short(a), short(b), b.year)
+        with_year(
+            &format!("{} – {}", day_month_day(a), day_month_day(b)),
+            b.year,
+        )
     }
 }

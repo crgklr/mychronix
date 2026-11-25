@@ -1582,7 +1582,7 @@ fn logger_session(
         let when = sum
             .map(|s| {
                 [
-                    s.date.map(crate::dates::us_short),
+                    s.date.map(crate::dates::short),
                     s.start_time.as_deref().map(crate::dates::clock_time),
                 ]
                 .into_iter()

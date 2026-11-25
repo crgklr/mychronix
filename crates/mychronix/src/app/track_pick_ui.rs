@@ -151,7 +151,7 @@ impl App {
             look::body(ui, |ui| {
                 pick_options(ui, &mut pick, &lib, &profiles, &list, free.as_deref());
                 if same_day.len() > 1 {
-                    let date = date.map(crate::dates::us_short).unwrap_or_default();
+                    let date = date.map(crate::dates::short).unwrap_or_default();
                     ui.add_space(8.0);
                     look::label(ui, "Change");
                     if look::option(ui, !pick.whole_day, None, "Just this session", "") {
@@ -534,10 +534,10 @@ impl OfferWords {
         let when = match (days.first(), days.last()) {
             (Some(a), Some(b)) if a != b => format!(
                 " from {} to {}",
-                crate::dates::us_short(*a),
-                crate::dates::us_short(*b)
+                crate::dates::short(*a),
+                crate::dates::short(*b)
             ),
-            (Some(a), _) => format!(" on {}", crate::dates::us_short(*a)),
+            (Some(a), _) => format!(" on {}", crate::dates::short(*a)),
             _ => String::new(),
         };
         let lead = &lib.tracks[tracks[0]];

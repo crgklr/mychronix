@@ -20,6 +20,10 @@ pub struct Settings {
     /// "12" or "24"; otherwise from the computer's region.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clock: Option<String>,
+    /// Dates "month" first (Oct 17) or "day" first (17 Oct); otherwise from
+    /// the computer's region.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
     /// Fetch each session's weather from Open-Meteo.
     pub weather: bool,
     /// Check GitHub once a day for a newer Mychronix.
@@ -46,6 +50,7 @@ impl Default for Settings {
         Self {
             units: None,
             clock: None,
+            date: None,
             weather: true,
             update_check: true,
             aim_tracks: true,
@@ -59,6 +64,7 @@ impl Default for Settings {
 
 static SETTINGS: RwLock<Option<Settings>> = RwLock::new(None);
 static CLOCK_24: AtomicBool = AtomicBool::new(false);
+static DAY_FIRST: AtomicBool = AtomicBool::new(false);
 
 /// The current settings (read from the file the first time).
 pub fn get() -> Settings {
@@ -92,6 +98,11 @@ pub fn clock_24() -> bool {
     CLOCK_24.load(Ordering::Relaxed)
 }
 
+/// Dates day first ("17 Oct") rather than month first ("Oct 17").
+pub fn day_first() -> bool {
+    DAY_FIRST.load(Ordering::Relaxed)
+}
+
 /// Puts settings that are kept outside this module into effect.
 fn apply(s: &Settings) {
     let h24 = match s.clock.as_deref() {
@@ -111,6 +122,16 @@ fn apply(s: &Settings) {
         ),
     };
     CLOCK_24.store(h24, Ordering::Relaxed);
+    let day_first = match s.date.as_deref() {
+        Some("day") => true,
+        Some("month") => false,
+        // Month first where that's how dates are written, day first elsewhere.
+        _ => !matches!(
+            crate::countries::system_country().as_deref(),
+            Some("US") | Some("PH") | Some("FM") | Some("MH") | Some("PW")
+        ),
+    };
+    DAY_FIRST.store(day_first, Ordering::Relaxed);
     crate::units::set(s.units.as_deref());
 }
 

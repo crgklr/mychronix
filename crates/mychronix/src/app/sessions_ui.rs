@@ -197,7 +197,7 @@ fn search_text(lib: &Library, i: usize, driver: &str) -> String {
         "{} {} {} {} {} {} {} {} {} {} {}",
         sum.number.unwrap_or(0),
         sum.date
-            .map(|d| format!("{d} {}", crate::dates::us_short(d)))
+            .map(|d| format!("{d} {}", crate::dates::short(d)))
             .unwrap_or_default(),
         sum.track.clone().unwrap_or_default(),
         s.track

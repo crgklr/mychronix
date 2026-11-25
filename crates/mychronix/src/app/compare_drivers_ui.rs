@@ -130,7 +130,7 @@ impl App {
             ui.label(RichText::new(format!("Best laps at {track_name},")).color(SECONDARY));
             let day_text = p
                 .day
-                .map(crate::dates::us_short)
+                .map(crate::dates::short)
                 .unwrap_or_else(|| "all race days".into());
             egui::ComboBox::from_id_salt("driver_day")
                 .width(170.0)
@@ -138,7 +138,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut p.day, None, "All race days");
                     for d in both.iter().rev() {
-                        ui.selectable_value(&mut p.day, Some(*d), crate::dates::us_short(*d));
+                        ui.selectable_value(&mut p.day, Some(*d), crate::dates::short(*d));
                     }
                 });
         });

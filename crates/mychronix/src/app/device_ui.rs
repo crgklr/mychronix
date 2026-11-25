@@ -249,7 +249,7 @@ impl App {
                         ui.label(RichText::new(status).size(13.0).color(SECONDARY));
                         let newest = k
                             .newest
-                            .map(|d| format!("  ·  newest {}", crate::dates::us_short(d)))
+                            .map(|d| format!("  ·  newest {}", crate::dates::short(d)))
                             .unwrap_or_default();
                         ui.label(
                             RichText::new(format!(
