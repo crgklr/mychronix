@@ -29,8 +29,19 @@ pub struct Setup {
     /// Tire sizes as marked on the sidewall, e.g. "10x4.60-5".
     pub front_size: String,
     pub rear_size: String,
+    /// Cold pressures, set before going out.
     pub front_psi: String,
     pub rear_psi: String,
+    /// Hot pressures, read when the kart comes in; about this session only,
+    /// like notes.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub front_hot_psi: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub rear_hot_psi: String,
+    /// Each tire's pressures, when they differ side to side; then the front
+    /// and rear ones above are empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub each_tire: Option<EachTire>,
     /// Kart with driver, lb.
     pub weight_lb: String,
     pub ballast_lb: String,
@@ -56,12 +67,31 @@ struct SetupFile {
     rear_size: String,
     front_psi: String,
     rear_psi: String,
+    front_hot_psi: String,
+    rear_hot_psi: String,
+    each_tire: Option<EachTire>,
     weight_lb: String,
     ballast_lb: String,
     jetting: String,
     notes: String,
     metric: bool,
 }
+
+/// Pressures tire by tire: left front, right front, left rear, right rear.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EachTire {
+    pub cold: [String; 4],
+    #[serde(skip_serializing_if = "all_empty")]
+    pub hot: [String; 4],
+}
+
+fn all_empty(v: &[String; 4]) -> bool {
+    v.iter().all(|x| x.trim().is_empty())
+}
+
+/// What `EachTire`'s pressures are labeled, in order.
+pub const TIRE_NAMES: [&str; 4] = ["LF", "RF", "LR", "RR"];
 
 impl From<SetupFile> for Setup {
     fn from(f: SetupFile) -> Self {
@@ -73,6 +103,9 @@ impl From<SetupFile> for Setup {
             rear_size: f.rear_size,
             front_psi: f.front_psi,
             rear_psi: f.rear_psi,
+            front_hot_psi: f.front_hot_psi,
+            rear_hot_psi: f.rear_hot_psi,
+            each_tire: f.each_tire,
             weight_lb: f.weight_lb,
             ballast_lb: f.ballast_lb,
             jetting: f.jetting,
@@ -96,6 +129,7 @@ impl From<SetupFile> for Setup {
             s.front_size = size.clone();
             s.rear_size = size;
         }
+        s.tidy();
         s
     }
 }
@@ -123,15 +157,14 @@ pub const TIRE_SIZES: [&str; 8] = [
 /// How to reach one of a setup's fields.
 type Field = fn(&Setup) -> &String;
 
-/// The fields that carry over, with their labels (notes don't).
-const FIELDS: [(&str, Field); 10] = [
+/// The fields that carry over, with their labels (notes and hot pressures
+/// don't), but for the cold pressures: those go after the tire sizes.
+const FIELDS: [(&str, Field); 8] = [
     ("Drive sprocket", |s| &s.drive_teeth),
     ("Rear sprocket", |s| &s.driven_teeth),
     ("Tires", |s| &s.tires),
     ("Front tire size", |s| &s.front_size),
     ("Rear tire size", |s| &s.rear_size),
-    ("Front pressure", |s| &s.front_psi),
-    ("Rear pressure", |s| &s.rear_psi),
     ("Weight", |s| &s.weight_lb),
     ("Ballast", |s| &s.ballast_lb),
     ("Jetting", |s| &s.jetting),
@@ -157,11 +190,113 @@ impl Setup {
         }
     }
 
-    /// The same apart from notes.
+    /// The same apart from notes and hot pressures.
     pub fn same_setup(&self, other: &Setup) -> bool {
-        FIELDS
+        let each = self.cold_uneven() || other.cold_uneven();
+        self.fields(each)
             .iter()
-            .all(|(_, f)| f(self).trim() == f(other).trim())
+            .zip(other.fields(each))
+            .all(|((_, a), (_, b))| a.trim() == b.trim())
+    }
+
+    /// Each field that carries over, labeled, as typed: the cold pressures
+    /// tire by tire with `each`, else front and rear.
+    fn fields(&self, each: bool) -> Vec<(&'static str, &str)> {
+        let cold = self.cold_each();
+        let pressures = if each {
+            vec![
+                ("LF pressure", cold[0]),
+                ("RF pressure", cold[1]),
+                ("LR pressure", cold[2]),
+                ("RR pressure", cold[3]),
+            ]
+        } else {
+            vec![("Front pressure", cold[0]), ("Rear pressure", cold[2])]
+        };
+        let field = |(label, f): &(&'static str, Field)| (*label, f(self).as_str());
+        FIELDS[..5]
+            .iter()
+            .map(field)
+            .chain(pressures)
+            .chain(FIELDS[5..].iter().map(field))
+            .collect()
+    }
+
+    /// Whether it has anything for this session only (notes, hot pressures),
+    /// which keeps a sheet of its own even when the setup didn't change.
+    pub fn has_session_only(&self) -> bool {
+        !self.notes.trim().is_empty() || self.hot_each().iter().any(|p| !p.is_empty())
+    }
+
+    /// Cold pressures tire by tire (LF, RF, LR, RR): each tire's own, else
+    /// the front one twice and the rear one twice.
+    pub fn cold_each(&self) -> [&str; 4] {
+        match &self.each_tire {
+            Some(e) => e.cold.each_ref().map(|p| p.trim()),
+            None => pair(&self.front_psi, &self.rear_psi),
+        }
+    }
+
+    /// Hot pressures tire by tire, as `cold_each`.
+    pub fn hot_each(&self) -> [&str; 4] {
+        match &self.each_tire {
+            Some(e) => e.hot.each_ref().map(|p| p.trim()),
+            None => pair(&self.front_hot_psi, &self.rear_hot_psi),
+        }
+    }
+
+    /// Whether the cold pressures differ left to right on either axle.
+    fn cold_uneven(&self) -> bool {
+        uneven(self.cold_each())
+    }
+
+    /// Whether any pressure differs left to right: such a sheet is shown
+    /// tire by tire, as front and rear would lose what it says.
+    pub fn uneven(&self) -> bool {
+        uneven(self.cold_each()) || uneven(self.hot_each())
+    }
+
+    /// Gives each tire its own pressures, starting from the front and rear ones.
+    pub fn split_tires(&mut self) {
+        if self.each_tire.is_some() {
+            return;
+        }
+        self.each_tire = Some(EachTire {
+            cold: self.cold_each().map(str::to_string),
+            hot: self.hot_each().map(str::to_string),
+        });
+        for p in [
+            &mut self.front_psi,
+            &mut self.rear_psi,
+            &mut self.front_hot_psi,
+            &mut self.rear_hot_psi,
+        ] {
+            p.clear();
+        }
+    }
+
+    /// Back to front and rear pressures, if that loses nothing: when each
+    /// tire's are the same as the other side's.
+    pub fn tidy(&mut self) {
+        if self.each_tire.is_none() || self.uneven() {
+            return;
+        }
+        let [front, _, rear, _] = self.cold_each().map(str::to_string);
+        let [front_hot, _, rear_hot, _] = self.hot_each().map(str::to_string);
+        (self.front_psi, self.rear_psi) = (front, rear);
+        (self.front_hot_psi, self.rear_hot_psi) = (front_hot, rear_hot);
+        self.each_tire = None;
+    }
+
+    /// The cold pressures as typed, without units: "10", "10 / 10.5" front
+    /// and rear, or "10/10.2/10.5/10.5" tire by tire; empty if none.
+    pub fn cold_text(&self) -> String {
+        row_text(self.cold_each(), self.uneven())
+    }
+
+    /// The hot pressures, as `cold_text`.
+    pub fn hot_text(&self) -> String {
+        row_text(self.hot_each(), self.uneven())
     }
 
     /// The units its pressures were typed in: "psi", or "bar".
@@ -174,20 +309,31 @@ impl Setup {
         if self.metric { "kg" } else { "lb" }
     }
 
-    /// What carries over to the next session (everything but notes).
+    /// What carries over to the next session (everything but notes and hot
+    /// pressures).
     pub fn carried(&self) -> Setup {
-        Setup {
+        let mut s = Setup {
             notes: String::new(),
+            front_hot_psi: String::new(),
+            rear_hot_psi: String::new(),
             ..self.clone()
+        };
+        if let Some(e) = &mut s.each_tire {
+            e.hot = Default::default();
         }
+        s.tidy();
+        s
     }
 
-    /// "Rear sprocket 80 → 81" for each field that differs from `before`.
+    /// "Rear sprocket 80 → 81" for each field that differs from `before`
+    /// (the cold pressures tire by tire if either differs side to side).
     pub fn changes_from(&self, before: &Setup) -> Vec<String> {
-        FIELDS
-            .iter()
-            .filter(|(_, f)| f(self).trim() != f(before).trim())
-            .map(|(label, f)| {
+        let each = self.cold_uneven() || before.cold_uneven();
+        self.fields(each)
+            .into_iter()
+            .zip(before.fields(each))
+            .filter(|((_, now), (_, was))| now.trim() != was.trim())
+            .map(|((label, now), (_, was))| {
                 let show = |v: &str| {
                     if v.trim().is_empty() {
                         "—".to_string()
@@ -195,12 +341,13 @@ impl Setup {
                         v.trim().to_string()
                     }
                 };
-                format!("{label} {} → {}", show(f(before)), show(f(self)))
+                format!("{label} {} → {}", show(was), show(now))
             })
             .collect()
     }
 
-    /// "Gearing 11/85  ·  Brand 10x4.50-5  ·  12 psi  ·  290 lb (20 lb ballast)"
+    /// "Gearing 11/85  ·  Brand 10x4.50-5  ·  12 psi  ·  290 lb (20 lb ballast)",
+    /// with hot pressures when there are some: "10 / 10.5 psi cold, 12 / 12.5 hot".
     pub fn summary(&self) -> String {
         let t = |s: &String| s.trim().to_string();
         let mut parts = Vec::new();
@@ -220,13 +367,19 @@ impl Setup {
             _ => {}
         }
         let (psi, lb) = (self.pressure_unit(), self.weight_unit());
-        match (t(&self.front_psi), t(&self.rear_psi)) {
-            (f, r) if !f.is_empty() && f == r => parts.push(format!("{f} {psi}")),
-            (f, r) if !f.is_empty() || !r.is_empty() => parts.push(format!(
-                "{} / {} {psi} front/rear",
-                or_dash(&f),
-                or_dash(&r)
-            )),
+        // Which pressure is which: front and rear, or each tire's (said once, at the end).
+        let (which, tires) = if self.uneven() {
+            ("LF/RF/LR/RR", " (LF/RF/LR/RR)")
+        } else {
+            ("front/rear", "")
+        };
+        let cold = self.cold_each();
+        let one = cold.iter().all(|p| *p == cold[0]);
+        match (self.cold_text(), self.hot_text()) {
+            (c, h) if h.is_empty() && !c.is_empty() && one => parts.push(format!("{c} {psi}")),
+            (c, h) if h.is_empty() && !c.is_empty() => parts.push(format!("{c} {psi} {which}")),
+            (c, h) if c.is_empty() && !h.is_empty() => parts.push(format!("{h} {psi} hot{tires}")),
+            (c, h) if !c.is_empty() => parts.push(format!("{c} {psi} cold, {h} hot{tires}")),
             _ => {}
         }
         match (t(&self.weight_lb), t(&self.ballast_lb)) {
@@ -262,6 +415,31 @@ impl Setup {
 
 fn or_dash(s: &str) -> &str {
     if s.is_empty() { "—" } else { s }
+}
+
+/// A front and a rear pressure, tire by tire.
+fn pair<'a>(front: &'a str, rear: &'a str) -> [&'a str; 4] {
+    let (f, r) = (front.trim(), rear.trim());
+    [f, f, r, r]
+}
+
+/// Whether a left tire's pressure differs from the right one's (LF, RF, LR, RR).
+fn uneven(p: [&str; 4]) -> bool {
+    p[0] != p[1] || p[2] != p[3]
+}
+
+/// Pressures as typed (LF, RF, LR, RR): all four with `each`, else front
+/// and rear, or one when they're the same; empty if none.
+fn row_text(p: [&str; 4], each: bool) -> String {
+    if p.iter().all(|x| x.is_empty()) {
+        String::new()
+    } else if each {
+        p.map(or_dash).join("/")
+    } else if p[0] == p[2] {
+        p[0].to_string()
+    } else {
+        format!("{} / {}", or_dash(p[0]), or_dash(p[2]))
+    }
 }
 
 /// The first number in `s` ("~250 lb" → 250).
@@ -748,5 +926,95 @@ mod tests {
         let back: Setup = serde_json::from_str(&serde_json::to_string(&metric).unwrap()).unwrap();
         assert_eq!((back.pressure_unit(), back.weight_unit()), ("bar", "kg"));
         assert!(back.carried().metric);
+    }
+
+    fn pressures(cold: (&str, &str), hot: (&str, &str)) -> Setup {
+        Setup {
+            front_psi: cold.0.into(),
+            rear_psi: cold.1.into(),
+            front_hot_psi: hot.0.into(),
+            rear_hot_psi: hot.1.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sheets_from_before_hot_pressures_read_and_save_as_they_were() {
+        let old = r#"{"drive_teeth":"10","driven_teeth":"80","tires":"MG Yellow","front_size":"","rear_size":"","front_psi":"10","rear_psi":"10.5","weight_lb":"250","ballast_lb":"","jetting":"","notes":""}"#;
+        let s: Setup = serde_json::from_str(old).unwrap();
+        assert_eq!(s.cold_each(), ["10", "10", "10.5", "10.5"]);
+        assert!(s.front_hot_psi.is_empty() && s.rear_hot_psi.is_empty());
+        assert!(s.each_tire.is_none() && !s.uneven());
+        assert_eq!(serde_json::to_string(&s).unwrap(), old);
+    }
+
+    #[test]
+    fn the_summary_adds_hot_pressures_only_when_there_are_some() {
+        let s = |cold, hot| pressures(cold, hot).summary();
+        assert_eq!(s(("12", "12"), ("", "")), "12 psi");
+        assert_eq!(s(("10", "10.5"), ("", "")), "10 / 10.5 psi front/rear");
+        assert_eq!(
+            s(("10", "10.5"), ("12", "12.5")),
+            "10 / 10.5 psi cold, 12 / 12.5 hot"
+        );
+        assert_eq!(s(("10", "10"), ("12", "12")), "10 psi cold, 12 hot");
+        assert_eq!(s(("", ""), ("12", "12.5")), "12 / 12.5 psi hot");
+        // Tire by tire.
+        let mut each = pressures(("10", "10.5"), ("12", "12.5"));
+        each.split_tires();
+        each.each_tire.as_mut().unwrap().hot[1] = "12.2".into();
+        assert_eq!(
+            each.summary(),
+            "10/10/10.5/10.5 psi cold, 12/12.2/12.5/12.5 hot (LF/RF/LR/RR)"
+        );
+        // Hot pressures are this session's: the next starts without them.
+        assert_eq!(each.carried().summary(), "10 / 10.5 psi front/rear");
+        assert!(each.carried().each_tire.is_none());
+    }
+
+    #[test]
+    fn each_tire_goes_back_to_front_and_rear_only_when_nothing_is_lost() {
+        let mut s = pressures(("10", "10.5"), ("12", "12.5"));
+        s.split_tires();
+        assert_eq!(s.cold_each(), ["10", "10", "10.5", "10.5"]);
+        assert!(s.front_psi.is_empty() && !s.uneven());
+        // Left and right the same: back to front and rear.
+        s.tidy();
+        assert!(s.each_tire.is_none());
+        assert_eq!(
+            (s.front_psi.as_str(), s.rear_hot_psi.as_str()),
+            ("10", "12.5")
+        );
+        // One tire different (hot or cold): it stays tire by tire.
+        s.split_tires();
+        s.each_tire.as_mut().unwrap().hot[3] = "12.8".into();
+        s.tidy();
+        assert!(s.each_tire.is_some() && s.uneven());
+        // And a sheet saved so opens so; one saved tire by tire that needn't be opens front and rear.
+        let back: Setup = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        let even = r#"{"each_tire":{"cold":["10","10","11","11"]}}"#;
+        let even: Setup = serde_json::from_str(even).unwrap();
+        assert!(even.each_tire.is_none());
+        assert_eq!(
+            (even.front_psi.as_str(), even.rear_psi.as_str()),
+            ("10", "11")
+        );
+    }
+
+    #[test]
+    fn changes_compare_cold_pressures_tire_by_tire_when_either_has_them() {
+        let before = pressures(("10", "10.5"), ("", ""));
+        let mut after = before.clone();
+        after.split_tires();
+        after.each_tire.as_mut().unwrap().cold[1] = "10.2".into();
+        assert_eq!(after.changes_from(&before), ["RF pressure 10 → 10.2"]);
+        assert!(!after.same_setup(&before));
+        // Hot pressures aren't a change to the setup, but keep a sheet of its own.
+        let hot = pressures(("10", "10.5"), ("12", ""));
+        assert!(hot.changes_from(&before).is_empty() && hot.same_setup(&before));
+        assert!(hot.has_session_only() && !before.has_session_only());
+        let rear = pressures(("10", "11"), ("", ""));
+        assert_eq!(rear.changes_from(&before), ["Rear pressure 10.5 → 11"]);
     }
 }

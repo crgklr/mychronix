@@ -412,7 +412,28 @@ fn get_session(
         .collect();
     let setup = crate::setup::resolve(lib, &crate::setup::Baselines::load())
         .get(i)
-        .map(|r| json!({ "setup": r.setup, "changed_from_previous": r.changes }));
+        .map(|r| {
+            // The sheet's pressure fields say less on their own (front_psi is the cold one, and
+            // may be in bar), so each tire's too, labeled.
+            let tires = |p: [&str; 4]| {
+                (!p.iter().all(|x| x.is_empty())).then(|| {
+                    crate::setup::TIRE_NAMES
+                        .iter()
+                        .zip(p)
+                        .map(|(k, v)| (k.to_string(), json!(v)))
+                        .collect::<serde_json::Map<_, _>>()
+                })
+            };
+            json!({
+                "setup": r.setup,
+                "tire_pressures": {
+                    "unit": r.setup.pressure_unit(),
+                    "cold": tires(r.setup.cold_each()),
+                    "hot": tires(r.setup.hot_each()),
+                },
+                "changed_from_previous": r.changes,
+            })
+        });
     let channels: Vec<&str> = session
         .channels
         .iter()

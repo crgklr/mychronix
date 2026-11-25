@@ -250,13 +250,16 @@ impl App {
             });
         });
         let open = !closed;
+        if save {
+            // Tire by tire only if it says something front and rear can't.
+            edit.setup.tidy();
+        }
         if let Some(id) = edit.kart_next {
             // Kept on the kart until its next session is downloaded.
             if revert || save {
                 let next = (save
                     && !revert
-                    && !(edit.setup.same_setup(&edit.before)
-                        && edit.setup.notes.trim().is_empty()))
+                    && !(edit.setup.same_setup(&edit.before) && !edit.setup.has_session_only()))
                 .then(|| edit.setup.clone());
                 self.edit_profiles(|p| {
                     if let Some(k) = p.karts.iter_mut().find(|k| k.id == id) {
@@ -270,7 +273,7 @@ impl App {
             return;
         }
         let result = if revert
-            || (save && edit.setup.same_setup(&edit.before) && edit.setup.notes.trim().is_empty())
+            || (save && edit.setup.same_setup(&edit.before) && !edit.setup.has_session_only())
         {
             // Nothing of its own to keep: inherit again.
             Some(Setup::remove(&edit.path).map(|_| None))
@@ -414,21 +417,16 @@ pub(super) fn setup_fields(
                 size_field(ui, &format!("{id}_rear_size"), &mut s.rear_size, "rear");
             });
             ui.end_row();
-            label(ui, "Pressure");
-            ui.horizontal(|ui| {
-                // In the units the sheet was typed in; a sheet with none yet takes Settings' units.
-                if [&s.front_psi, &s.rear_psi, &s.weight_lb, &s.ballast_lb]
-                    .iter()
-                    .all(|v| v.trim().is_empty())
-                {
-                    s.metric = !crate::units::imperial();
-                }
-                let (psi, p_hint) = (s.pressure_unit(), if s.metric { "0.7" } else { "10" });
-                small(ui, &mut s.front_psi, p_hint, "front");
-                ui.add_space(8.0);
-                small(ui, &mut s.rear_psi, p_hint, &format!("rear {psi}"));
-            });
-            ui.end_row();
+            // In the units the sheet was typed in; a sheet with none yet takes Settings' units.
+            if s.cold_each()
+                .into_iter()
+                .chain(s.hot_each())
+                .chain([s.weight_lb.trim(), s.ballast_lb.trim()])
+                .all(str::is_empty)
+            {
+                s.metric = !crate::units::imperial();
+            }
+            pressure_rows(ui, s, notes);
             label(ui, "Weight");
             ui.horizontal(|ui| {
                 let lb = s.weight_unit();
@@ -465,6 +463,111 @@ pub(super) fn setup_fields(
             );
             ui.end_row();
         });
+}
+
+/// The setup grid's pressure rows: cold, and with `hot` hot ones, front and
+/// rear or tire by tire, with the link that switches between them. Switching
+/// back to front and rear is offered only when it loses nothing.
+fn pressure_rows(ui: &mut Ui, s: &mut Setup, hot: bool) {
+    // The text inside a field starts this far in, so headings line up with it.
+    const INSET: i8 = 14;
+    let each = s.each_tire.is_some();
+    // A field's whole width, margins and all.
+    let cell_w = if each { 72.0 } else { 100.0 };
+    let names: &[&str] = if each {
+        &setup::TIRE_NAMES
+    } else {
+        &["Front", "Rear"]
+    };
+    let gap = 12.0;
+    let block_w = cell_w * names.len() as f32 + gap * (names.len() - 1) as f32;
+    let row_label = |ui: &mut Ui, t: &str| {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new(t).font(regular(15.0)).color(SECONDARY));
+        });
+    };
+    let cells = |ui: &mut Ui, values: Vec<&mut String>, hint: &str| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for value in values {
+                ui.add(
+                    egui::TextEdit::singleline(value)
+                        .font(regular(16.5))
+                        .margin(Margin::symmetric(INSET, 12))
+                        .desired_width(cell_w)
+                        .hint_text(hint),
+                );
+            }
+        });
+    };
+    ui.label(
+        RichText::new("Pressure")
+            .font(medium(16.0))
+            .color(SECONDARY),
+    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for name in names {
+            ui.allocate_ui_with_layout(
+                egui::vec2(cell_w, 18.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(cell_w);
+                    ui.add_space(f32::from(INSET));
+                    ui.label(RichText::new(*name).color(DIM));
+                },
+            );
+        }
+        ui.label(RichText::new(s.pressure_unit()).color(DIM));
+    });
+    ui.end_row();
+    let metric = s.metric;
+    let (cold, hot_values): (Vec<&mut String>, Vec<&mut String>) = match &mut s.each_tire {
+        Some(e) => (e.cold.iter_mut().collect(), e.hot.iter_mut().collect()),
+        None => (
+            vec![&mut s.front_psi, &mut s.rear_psi],
+            vec![&mut s.front_hot_psi, &mut s.rear_hot_psi],
+        ),
+    };
+    row_label(ui, "Cold");
+    cells(ui, cold, if metric { "0.7" } else { "10" });
+    ui.end_row();
+    if hot {
+        row_label(ui, "Hot");
+        cells(ui, hot_values, if metric { "0.85" } else { "12" });
+        ui.end_row();
+    }
+    let switch = match (each, s.uneven()) {
+        (false, _) => Some("Each tire ›"),
+        (true, false) => Some("‹ Front/rear"),
+        // Front and rear would lose what each tire says.
+        (true, true) => None,
+    };
+    if let Some(text) = switch {
+        ui.label("");
+        let mut clicked = false;
+        ui.allocate_ui_with_layout(
+            egui::vec2(block_w, 18.0),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                let link = ui.add(
+                    egui::Label::new(RichText::new(text).size(13.0).color(theme::ACCENT))
+                        .sense(Sense::click()),
+                );
+                if link.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                clicked = link.clicked();
+            },
+        );
+        ui.end_row();
+        if clicked && each {
+            s.tidy();
+        } else if clicked {
+            s.split_tires();
+        }
+    }
 }
 
 /// Does the recorded gearing match RPM vs speed? (ok, explanation)

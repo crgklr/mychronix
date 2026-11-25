@@ -1189,10 +1189,11 @@ impl App {
             })
             .collect();
         // A setup sheet goes on the earliest new session only, and only when there's something new.
-        let changed =
-            !dlg.setup.same_setup(&dlg.setup_before) || !dlg.setup.notes.trim().is_empty();
+        let changed = !dlg.setup.same_setup(&dlg.setup_before) || dlg.setup.has_session_only();
+        let mut setup = dlg.setup.clone();
+        setup.tidy();
         self.device.pending_setup = match (changed, target) {
-            (true, Some((path, _))) => Some((path, dlg.setup.clone())),
+            (true, Some((path, _))) => Some((path, setup)),
             _ => None,
         };
         if crate::hooks::get().fake_device.is_some() {
@@ -1253,7 +1254,7 @@ fn setup_change_notes(ui: &mut Ui, dlg: &DownloadDialog, setup_from: &str) {
         );
     }
     // Changes and notes are both saved on one session: say which.
-    if !changes.is_empty() || !dlg.setup.notes.trim().is_empty() {
+    if !changes.is_empty() || dlg.setup.has_session_only() {
         look::note(ui, setup_from, DIM);
     }
 }

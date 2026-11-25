@@ -2110,7 +2110,7 @@ fn kart_card(
             .filter(|x| !x.is_empty())
             .collect::<Vec<_>>()
             .join(" · ")),
-            ("Pressure", match (s.front_psi.trim(), s.rear_psi.trim()) { ("", "") => String::new(), (f, r) if f == r => format!("{f} {}", s.pressure_unit()), (f, r) => format!("{f} / {r} {}", s.pressure_unit()) }),
+            ("Pressure", match s.cold_text() { t if t.is_empty() => t, t if s.uneven() => format!("{t} {} LF/RF/LR/RR", s.pressure_unit()), t => format!("{t} {}", s.pressure_unit()) }),
             ("Weight", if s.weight_lb.trim().is_empty() { String::new() } else { format!("{} {} with driver", s.weight_lb.trim(), s.weight_unit()) }),
             ("Ballast", if s.ballast_lb.trim().is_empty() { String::new() } else { format!("{} {}", s.ballast_lb.trim(), s.weight_unit()) }),
             ("Jetting", s.jetting.trim().to_string()),
