@@ -280,7 +280,7 @@ for these, and sends nothing about you:
 | AiM's track database: all of it the first time (~70 MB, under a minute), then only what changed | AiM's public track server, the one RaceStudio 3 uses | Settings → Internet |
 | Weather when each session started (only the track's position and the date are sent) | [Open-Meteo](https://open-meteo.com) | Settings → Internet |
 | Whether a newer Mychronix is out | GitHub | Settings → Internet |
-| Map tiles and satellite imagery, cached once viewed | OpenStreetMap; national mapping agencies' aerial photos where they're free to use (most of Western and Central Europe, Quebec, Queensland), Esri World Imagery elsewhere | — |
+| Map tiles and satellite imagery, cached once viewed | OpenStreetMap; national mapping agencies' aerial photos where they're free to use (most of Western and Central Europe, Quebec, Queensland, Ohio), Esri World Imagery elsewhere | — |
 
 Settings (the gear at the bottom of the sidebar) are saved in
 `~/Mychronix/settings.json`. Units and the clock follow your computer's region

@@ -228,6 +228,12 @@ pub const SOURCES: &[Source] = &[
         max_zoom: 19,
         credit: "DGT",
     },
+    Source {
+        area: "US-OH",
+        url: "https://maps.ohio.gov/image/rest/services/osip_most_current_cache/MapServer/tile/{z}/{y}/{x}",
+        max_zoom: 20,
+        credit: "State of Ohio (OGRIP)",
+    },
 ];
 
 /// Below this zoom a tile spans tens of kilometers: the worldwide imagery.
@@ -385,6 +391,7 @@ mod tests {
         assert_eq!(area_at(-27.47, 153.03, 18), Some("AU-QLD")); // Brisbane
         assert_eq!(area_at(50.09, 14.42, 18), Some("CZ")); // Prague
         assert_eq!(area_at(46.50, 11.35, 18), Some("IT-BZ")); // Bolzano
+        assert_eq!(area_at(39.45, -83.83, 18), Some("US-OH")); // Wilmington, Ohio
     }
 
     #[test]
