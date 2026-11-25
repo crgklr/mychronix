@@ -478,6 +478,26 @@ pub(super) fn chip(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
     response
 }
 
+/// A chip in the accent color for adding something; gray while its picker is open.
+pub(super) fn action_chip(ui: &mut Ui, label: &str, open: bool) -> egui::Response {
+    let fg = if open { TEXT } else { ON_TEXT };
+    let galley = ui.painter().layout_no_wrap(label.into(), medium(13.0), fg);
+    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(26.0, 14.0), Sense::click());
+    let fill = match (open, response.hovered()) {
+        (true, _) => SURFACE_ACTIVE,
+        (false, true) => super::mix(theme::ACCENT, TEXT, 0.25),
+        (false, false) => theme::ACCENT,
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(255), fill);
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, fg);
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
 pub(super) fn tag(ui: &mut Ui, text: &str, fill: Color32) {
     let galley = ui
         .painter()

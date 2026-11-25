@@ -242,7 +242,7 @@ fn about_section(ui: &mut Ui) {
                 ui.spacing_mut().interact_size.y = 0.0;
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.hyperlink_to(RichText::new(name).size(13.5).color(SERIES[0]), url);
+                    ui.hyperlink_to(RichText::new(name).size(13.5).color(theme::ACCENT), url);
                     ui.label(RichText::new(what).size(13.5).color(SECONDARY));
                 });
             });

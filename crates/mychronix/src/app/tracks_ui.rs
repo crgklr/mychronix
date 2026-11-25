@@ -477,7 +477,7 @@ impl App {
                         ui.label(RichText::new(phone).color(SECONDARY));
                     }
                     if let Some(url) = info.and_then(|i| i.website.as_deref()) {
-                        ui.hyperlink_to(RichText::new(url).color(SERIES[0]), url);
+                        ui.hyperlink_to(RichText::new(url).color(theme::ACCENT), url);
                     }
                     ui.add_space(6.0);
                     let desc = t.description();

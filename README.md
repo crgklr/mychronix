@@ -385,10 +385,6 @@ Roughly in priority order:
 - [ ] Compare laps by time when there's no GPS and no gearing.
 - [ ] Read the MyChron 4's CAN devices' own readings.
 - [ ] Split divisions by corners and straights, saved per track.
-- [ ] GPS timing on older loggers: RaceStudio places GPS ~70 ms apart from the
-      other channels on an early MyChron 5 sample (see the protocol notes).
-      (The receiver's own speed and heading trailing its positions is corrected
-      per session, so GPS Speed sits about 80 ms earlier than in RaceStudio.)
 - [ ] MyChron 3 (serial cable).
 - [ ] Sign the Mac app with an Apple Developer ID.
 

@@ -238,7 +238,7 @@ fn report_toolbar(
             }
         }
         ui.add_space(10.0);
-        if chip(ui, "+ Column", adding.is_some()).clicked() {
+        if action_chip(ui, "+ Column", adding.is_some()).clicked() {
             *adding = if adding.is_some() {
                 None
             } else {
