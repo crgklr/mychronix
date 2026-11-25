@@ -142,55 +142,106 @@ impl Preset {
     /// The preset's columns that this session has channels for.
     pub fn columns(self, session: &Session) -> Vec<Column> {
         use Stat::*;
-        let wanted: &[(&str, Stat)] = match self {
-            Preset::Default => &[
-                ("RPM", Max),
-                ("RPM", Min),
-                ("GPS Speed", Max),
-                ("GPS Speed", Min),
-                ("Exhaust Temp", Max),
-                ("Exhaust Temp", Average),
-                ("AccelerometerY", Peak),
-            ],
-            Preset::Engine => &[
-                ("RPM", Max),
-                ("RPM", Min),
-                ("RPM", Average),
-                ("Exhaust Temp", Max),
-                ("Exhaust Temp", Min),
-                ("Exhaust Temp", Average),
-                ("Water Temp", Max),
-                ("Internal Batt", Min),
-            ],
-            Preset::Driving => &[
-                ("GPS Speed", Max),
-                ("GPS Speed", Min),
-                ("GPS Speed", Average),
-                ("AccelerometerY", Peak),
-                ("GPS LonAcc", Min),
-                ("GPS LonAcc", Max),
-            ],
+        // The session's temperatures go after `temps_at` of the preset's own
+        // columns: the first with `first`, any others their max, up to `most`.
+        let (wanted, temps_at, first, most): (&[(&str, Stat)], usize, &[Stat], usize) = match self {
+            Preset::Default => (
+                &[
+                    ("RPM", Max),
+                    ("RPM", Min),
+                    ("GPS Speed", Max),
+                    ("GPS Speed", Min),
+                    ("AccelerometerY", Peak),
+                ],
+                4,
+                &[Max, Average],
+                2,
+            ),
+            Preset::Engine => (
+                &[
+                    ("RPM", Max),
+                    ("RPM", Min),
+                    ("RPM", Average),
+                    ("Internal Batt", Min),
+                ],
+                3,
+                &[Max, Min, Average],
+                3,
+            ),
+            Preset::Driving => (
+                &[
+                    ("GPS Speed", Max),
+                    ("GPS Speed", Min),
+                    ("GPS Speed", Average),
+                    ("AccelerometerY", Peak),
+                    ("GPS LonAcc", Min),
+                    ("GPS LonAcc", Max),
+                ],
+                0,
+                &[],
+                0,
+            ),
             // RaceStudio's "racer performance": how each lap splits into braking,
             // throttle, cornering and coasting (from GPS and the lateral accelerometer).
-            Preset::Driver => &[
-                ("GPS LonAcc", OnThrottle),
-                ("GPS LonAcc", Braking),
-                ("GPS LatAcc", Cornering),
-                ("GPS LonAcc", Coasting),
-                ("GPS Speed", Min),
-                ("GPS LonAcc", Min),
-                ("Steering Angle", Corrections),
-                ("Steering", Corrections),
-                ("Steering Angle", Peak),
-                ("Steering", Peak),
-            ],
+            Preset::Driver => (
+                &[
+                    ("GPS LonAcc", OnThrottle),
+                    ("GPS LonAcc", Braking),
+                    ("GPS LatAcc", Cornering),
+                    ("GPS LonAcc", Coasting),
+                    ("GPS Speed", Min),
+                    ("GPS LonAcc", Min),
+                    ("Steering Angle", Corrections),
+                    ("Steering", Corrections),
+                    ("Steering Angle", Peak),
+                    ("Steering", Peak),
+                ],
+                0,
+                &[],
+                0,
+            ),
         };
-        wanted
-            .iter()
-            .filter(|(name, _)| channel(session, name).is_some())
-            .map(|(name, stat)| Column::new(name, *stat))
-            .collect()
+        let own = |list: &[(&str, Stat)]| -> Vec<Column> {
+            list.iter()
+                .filter(|(name, _)| channel(session, name).is_some())
+                .map(|(name, stat)| Column::new(name, *stat))
+                .collect()
+        };
+        let mut columns = own(&wanted[..temps_at]);
+        for (k, name) in temperatures(session).into_iter().take(most).enumerate() {
+            let stats = if k == 0 { first } else { &[Max] };
+            columns.extend(stats.iter().map(|&stat| Column::new(name, stat)));
+        }
+        columns.extend(own(&wanted[temps_at..]));
+        columns
     }
+}
+
+/// The session's temperature sensors, whatever the MyChron calls them
+/// ("Exhaust Temp", "Water Temp", or just "Temp"): exhaust first, then
+/// water, then the rest in the file's order.
+fn temperatures(session: &Session) -> Vec<&str> {
+    let mut temps: Vec<&str> = session
+        .channels
+        .iter()
+        .filter(|c| {
+            c.values.len() > 1
+                && aim_xrk::checks::sensor_of(&c.name) == Some(aim_xrk::checks::Sensor::Temperature)
+        })
+        .map(|c| c.name.as_str())
+        .collect();
+    let rank = |n: &str| {
+        let n = n.to_lowercase();
+        if n.contains("exhaust") || n.contains("egt") {
+            0
+        } else if n.contains("water") {
+            1
+        } else {
+            2
+        }
+    };
+    temps.sort_by_key(|n| rank(n));
+    temps
 }
 
 /// `session`'s channel `name`, or what plays its role under another name
@@ -480,6 +531,52 @@ mod tests {
         assert_eq!(
             Column::new("Steering Angle", Stat::Corrections).title(),
             "Steering corrections"
+        );
+    }
+
+    #[test]
+    fn presets_show_temperatures_whatever_the_mychron_calls_them() {
+        let named = |name: &str| Channel {
+            name: name.into(),
+            ..channel(&[50.0, 60.0, 70.0])
+        };
+        let session = |names: &[&str]| Session {
+            info: Default::default(),
+            channels: names.iter().map(|n| named(n)).collect(),
+            laps: vec![],
+            gps: None,
+        };
+        let shown = |s: &Session, p: Preset| -> Vec<(String, Stat)> {
+            p.columns(s)
+                .into_iter()
+                .map(|c| (c.channel, c.stat))
+                .collect()
+        };
+        use Stat::*;
+        // An exhaust temp, as before: its max and average, after the speeds.
+        assert_eq!(
+            shown(
+                &session(&["RPM", "GPS Speed", "Exhaust Temp"]),
+                Preset::Default
+            ),
+            [
+                ("RPM".into(), Max),
+                ("RPM".into(), Min),
+                ("GPS Speed".into(), Max),
+                ("GPS Speed".into(), Min),
+                ("Exhaust Temp".into(), Max),
+                ("Exhaust Temp".into(), Average),
+            ]
+        );
+        // A plain "Temp" input and a water temp: water first, both by their names.
+        assert_eq!(
+            shown(&session(&["Temp", "Water Temp"]), Preset::Engine),
+            [
+                ("Water Temp".into(), Max),
+                ("Water Temp".into(), Min),
+                ("Water Temp".into(), Average),
+                ("Temp".into(), Max),
+            ]
         );
     }
 
