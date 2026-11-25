@@ -132,9 +132,14 @@ impl App {
             );
         }
         if edit {
+            // Hot pressures from the kart's tire sensors, when it has them.
+            let mut sheet = r.setup.clone();
+            if let Some(bar) = self.session.as_deref().and_then(setup::tpms_hot) {
+                sheet.fill_hot(bar);
+            }
             self.setup_edit = Some(SetupEdit {
                 path,
-                setup: r.setup.clone(),
+                setup: sheet,
                 before: setup::before(&lib, baselines, i),
                 has_own: r.source == Source::Own,
                 title: session_title(&lib.sessions[i]),

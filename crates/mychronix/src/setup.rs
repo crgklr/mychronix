@@ -288,6 +288,31 @@ impl Setup {
         self.each_tire = None;
     }
 
+    /// Fills in the hot pressures from tire pressure sensors (`bar`, LF, RF,
+    /// LR, RR; see [`tpms_hot`]) when none were typed, in the sheet's units:
+    /// front and rear when each axle's sides read the same, else tire by tire.
+    pub fn fill_hot(&mut self, bar: [f64; 4]) {
+        if self.hot_each().iter().any(|p| !p.is_empty()) {
+            return;
+        }
+        let hot = bar.map(|b| {
+            if self.metric {
+                format!("{b:.2}")
+            } else {
+                format!("{:.1}", b * PSI_PER_BAR)
+            }
+        });
+        if hot[0] == hot[1] && hot[2] == hot[3] && self.each_tire.is_none() {
+            self.front_hot_psi = hot[0].clone();
+            self.rear_hot_psi = hot[2].clone();
+        } else {
+            self.split_tires();
+            if let Some(e) = &mut self.each_tire {
+                e.hot = hot;
+            }
+        }
+    }
+
     /// The cold pressures as typed, without units: "10", "10 / 10.5" front
     /// and rear, or "10/10.2/10.5/10.5" tire by tire; empty if none.
     pub fn cold_text(&self) -> String {
@@ -790,8 +815,111 @@ pub fn measured_rpm_per_kmh(session: &aim_xrk::Session) -> Option<f64> {
     Some(r[r.len() / 2])
 }
 
+const PSI_PER_BAR: f64 = 14.5038;
+
+/// Hot tire pressures from a session's tire pressure sensors (AiM's TPMS:
+/// "TPMS_Press_LF", "_RF", "_LR", "_RR"), in bar: each tire's median over the
+/// last racing lap, warmed up as they are when the kart comes in. None
+/// without all four, or a racing lap.
+pub fn tpms_hot(session: &aim_xrk::Session) -> Option<[f64; 4]> {
+    let racing = aim_xrk::laps::racing(session);
+    let lap = session
+        .laps
+        .iter()
+        .zip(&racing)
+        .filter(|(_, r)| **r)
+        .map(|(l, _)| *l)
+        .next_back()?;
+    let mut out = [0.0; 4];
+    for (k, tire) in TIRE_NAMES.iter().enumerate() {
+        let c = session.channel(&format!("TPMS_Press_{tire}"))?;
+        let to_bar = match c.units.trim().to_lowercase().as_str() {
+            "psi" => 1.0 / PSI_PER_BAR,
+            "kpa" => 0.01,
+            _ => 1.0,
+        };
+        let mut v: Vec<f64> = c
+            .times_ms
+            .iter()
+            .zip(&c.values)
+            .filter(|(t, v)| **t >= lap.start_ms && **t <= lap.end_ms && v.is_finite() && **v > 0.0)
+            .map(|(_, v)| v * to_bar)
+            .collect();
+        if v.is_empty() {
+            return None;
+        }
+        v.sort_by(f64::total_cmp);
+        out[k] = v[v.len() / 2];
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hot_pressures_come_from_tire_sensors_when_none_were_typed() {
+        use super::*;
+        // Four 60 s laps (out, two racing, in); pressures climbing 1.5 → 1.9 bar,
+        // the right rear a little higher.
+        let lap = |n: i32| aim_xrk::Lap {
+            number: n,
+            start_ms: (n as i64 - 1) * 60_000,
+            end_ms: n as i64 * 60_000,
+        };
+        let sensor = |tire: &str, extra: f64| aim_xrk::Channel {
+            name: format!("TPMS_Press_{tire}"),
+            group: None,
+            units: "bar".into(),
+            decimals: 2,
+            interpolate: true,
+            times_ms: (0..=240).map(|k| k * 1000).collect(),
+            values: (0..=240)
+                .map(|k| 1.5 + 0.4 * k as f64 / 240.0 + extra)
+                .collect(),
+        };
+        let session = aim_xrk::Session {
+            info: Default::default(),
+            channels: vec![
+                sensor("LF", 0.0),
+                sensor("RF", 0.0),
+                sensor("LR", 0.0),
+                sensor("RR", 0.1),
+            ],
+            laps: (1..=4).map(lap).collect(),
+            gps: None,
+        };
+        let bar = tpms_hot(&session).expect("read");
+        // The last racing lap (lap 3: 120–180 s), its middle reading.
+        assert!(
+            (bar[0] - 1.75).abs() < 0.01 && (bar[3] - 1.85).abs() < 0.01,
+            "{bar:?}"
+        );
+
+        // psi, tire by tire (the rears differ).
+        let mut sheet = Setup::default();
+        sheet.fill_hot(bar);
+        assert_eq!(sheet.hot_each(), ["25.4", "25.4", "25.4", "26.8"]);
+        // bar, front and rear when the sides match.
+        let mut sheet = Setup {
+            metric: true,
+            ..Default::default()
+        };
+        sheet.fill_hot([1.8, 1.8, 1.9, 1.9]);
+        assert_eq!(
+            (sheet.front_hot_psi.as_str(), sheet.rear_hot_psi.as_str()),
+            ("1.80", "1.90")
+        );
+        assert!(sheet.each_tire.is_none());
+        // Typed ones stay.
+        let mut sheet = Setup {
+            front_hot_psi: "12".into(),
+            ..Default::default()
+        };
+        sheet.fill_hot(bar);
+        assert_eq!(sheet.front_hot_psi, "12");
+        assert!(sheet.rear_hot_psi.is_empty());
+    }
+
     #[test]
     fn old_sheets_move_the_tire_size_out_of_the_tires_text() {
         let s: Setup =
